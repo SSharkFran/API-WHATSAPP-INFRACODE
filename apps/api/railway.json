@@ -1,0 +1,29 @@
+{
+  "$schema": "https://railway.com/railway.schema.json",
+  "build": {
+    "builder": "DOCKERFILE",
+    "dockerfilePath": "infra/docker/api.Dockerfile",
+    "watchPatterns": [
+      "apps/api/**",
+      "packages/types/**",
+      "prisma/**",
+      "scripts/**",
+      "package.json",
+      "pnpm-lock.yaml",
+      "pnpm-workspace.yaml",
+      "tsconfig.base.json",
+      "infra/docker/api.Dockerfile"
+    ]
+  },
+  "deploy": {
+    "preDeployCommand": [
+      "pnpm --filter @infracode/api prisma:push:platform && pnpm --filter @infracode/api seed:platform-owner"
+    ],
+    "startCommand": "node apps/api/dist/apps/api/src/server.js",
+    "healthcheckPath": "/health",
+    "healthcheckTimeout": 300,
+    "restartPolicyType": "ON_FAILURE",
+    "restartPolicyMaxRetries": 10,
+    "requiredMountPath": "/data"
+  }
+}

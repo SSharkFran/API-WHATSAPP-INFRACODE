@@ -1,0 +1,133 @@
+{
+  "info": {
+    "name": "InfraCode WhatsApp API",
+    "_postman_id": "6f90a452-0f60-41bb-a651-710b64722098",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:3333"
+    },
+    {
+      "key": "tenantId",
+      "value": "demo"
+    }
+  ],
+  "item": [
+    {
+      "name": "Health",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{baseUrl}}/health"
+      }
+    },
+    {
+      "name": "List Instances",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "x-tenant-id",
+            "value": "{{tenantId}}"
+          }
+        ],
+        "url": "{{baseUrl}}/instances"
+      }
+    },
+    {
+      "name": "Create Instance",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "x-tenant-id",
+            "value": "{{tenantId}}"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"name\": \"Sales BR\",\n  \"autoStart\": true\n}"
+        },
+        "url": "{{baseUrl}}/instances"
+      }
+    },
+    {
+      "name": "Bootstrap",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"tenantName\": \"InfraCode Demo\",\n  \"tenantSlug\": \"infracode-demo\",\n  \"apiKeyName\": \"Bootstrap Admin\"\n}"
+        },
+        "url": "{{baseUrl}}/bootstrap"
+      }
+    },
+    {
+      "name": "List API Keys",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "x-tenant-id",
+            "value": "{{tenantId}}"
+          },
+          {
+            "key": "x-api-key",
+            "value": "{{apiKey}}"
+          }
+        ],
+        "url": "{{baseUrl}}/api-keys"
+      }
+    },
+    {
+      "name": "Privacy Export",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "x-tenant-id",
+            "value": "{{tenantId}}"
+          },
+          {
+            "key": "x-api-key",
+            "value": "{{apiKey}}"
+          }
+        ],
+        "url": "{{baseUrl}}/privacy/contacts/5511999999999/export"
+      }
+    },
+    {
+      "name": "Send Text Message",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "x-tenant-id",
+            "value": "{{tenantId}}"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"type\": \"text\",\n  \"to\": \"5511999999999\",\n  \"text\": \"*Ola* via InfraCode\"\n}"
+        },
+        "url": "{{baseUrl}}/instances/:instanceId/messages/send"
+      }
+    }
+  ]
+}

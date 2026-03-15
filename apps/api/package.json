@@ -1,0 +1,52 @@
+{
+  "name": "@infracode/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx watch src/server.ts",
+    "lint": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "prisma:generate": "node ../../scripts/with-root-env.mjs \"prisma generate --schema prisma/platform.prisma && prisma generate --schema prisma/tenant.prisma\"",
+    "prisma:push:platform": "node ../../scripts/with-root-env.mjs \"prisma db push --schema prisma/platform.prisma --skip-generate\"",
+    "seed:platform-owner": "node ../../scripts/with-root-env.mjs \"tsx apps/api/src/scripts/seed-platform-owner.ts\""
+  },
+  "dependencies": {
+    "@fastify/cors": "^11.1.0",
+    "@fastify/helmet": "^13.0.2",
+    "@fastify/rate-limit": "^10.3.0",
+    "@fastify/sensible": "^6.0.3",
+    "@fastify/swagger": "^9.5.1",
+    "@fastify/swagger-ui": "^5.2.3",
+    "@fastify/websocket": "^11.2.0",
+    "@hapi/boom": "^10.0.1",
+    "@infracode/types": "workspace:*",
+    "@prisma/client": "^6.16.2",
+    "@whiskeysockets/baileys": "^6.7.18",
+    "better-sqlite3": "^11.10.0",
+    "bullmq": "^5.58.5",
+    "fastify": "^5.6.0",
+    "fastify-plugin": "^5.0.1",
+    "fastify-type-provider-zod": "^4.0.2",
+    "ioredis": "^5.7.0",
+    "jose": "^5.9.6",
+    "mime-types": "^3.0.1",
+    "otpauth": "^9.4.1",
+    "pino": "^9.8.0",
+    "prom-client": "^15.1.3",
+    "qrcode": "^1.5.4",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/mime-types": "^3.0.1",
+    "@types/node": "^22.13.11",
+    "@types/qrcode": "^1.5.5",
+    "prisma": "^6.16.2",
+    "supertest": "^7.1.4",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.2",
+    "vitest": "^3.2.4"
+  }
+}

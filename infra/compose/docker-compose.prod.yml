@@ -1,0 +1,186 @@
+services:
+  postgres:
+    image: postgres:16
+    restart: always
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-infracode_whatsapp}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-infracode_whatsapp}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7
+    restart: always
+    command: ["redis-server", "--appendonly", "yes"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - redis_data:/data
+
+  pgbouncer:
+    build:
+      context: ../..
+      dockerfile: infra/docker/pgbouncer.Dockerfile
+    restart: always
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "6432:6432"
+
+  api:
+    build:
+      context: ../..
+      dockerfile: infra/docker/api.Dockerfile
+    restart: always
+    env_file:
+      - ../../.env
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: 3333
+      ENABLE_AUTH: "true"
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@pgbouncer:6432/${POSTGRES_DB:-infracode_whatsapp}
+      DIRECT_DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-infracode_whatsapp}
+      PLATFORM_DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@pgbouncer:6432/${POSTGRES_DB:-infracode_whatsapp}?schema=platform
+      PLATFORM_DIRECT_DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-infracode_whatsapp}?schema=platform
+      TENANT_DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@pgbouncer:6432/${POSTGRES_DB:-infracode_whatsapp}?schema=tenant_template
+      TENANT_DIRECT_DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-infracode_whatsapp}?schema=tenant_template
+      REDIS_URL: redis://redis:6379
+      PUBLIC_API_BASE_URL: https://admin.${ROOT_DOMAIN:-infracode.local}/api
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      pgbouncer:
+        condition: service_started
+    volumes:
+      - ../../apps/api/data:/app/apps/api/data
+
+  worker:
+    build:
+      context: ../..
+      dockerfile: infra/docker/worker.Dockerfile
+    restart: always
+    env_file:
+      - ../../.env
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@pgbouncer:6432/${POSTGRES_DB:-infracode_whatsapp}
+      DIRECT_DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-infracode_whatsapp}
+      PLATFORM_DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@pgbouncer:6432/${POSTGRES_DB:-infracode_whatsapp}?schema=platform
+      PLATFORM_DIRECT_DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-infracode_whatsapp}?schema=platform
+      TENANT_DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@pgbouncer:6432/${POSTGRES_DB:-infracode_whatsapp}?schema=tenant_template
+      TENANT_DIRECT_DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-infracode_whatsapp}?schema=tenant_template
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      pgbouncer:
+        condition: service_started
+
+  panel:
+    build:
+      context: ../..
+      dockerfile: infra/docker/panel.Dockerfile
+    restart: always
+    env_file:
+      - ../../.env
+    environment:
+      NODE_ENV: production
+      API_INTERNAL_BASE_URL: http://api:3333
+      NEXT_PUBLIC_API_BASE_URL: /api
+    depends_on:
+      - api
+
+  nginx:
+    image: nginx:1.29-alpine
+    restart: always
+    depends_on:
+      - api
+      - panel
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ../nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+      - ../nginx/certs:/etc/letsencrypt:ro
+      - ../nginx/www:/var/www/certbot:ro
+      - ../nginx/maintenance.html:/usr/share/nginx/html/maintenance.html:ro
+
+  certbot:
+    image: certbot/certbot:latest
+    restart: always
+    volumes:
+      - ../nginx/certs:/etc/letsencrypt
+      - ../nginx/www:/var/www/certbot
+    entrypoint: ["/bin/sh", "-lc"]
+    command:
+      - |
+        trap exit TERM;
+        while :; do
+          sleep 12h & wait $${!};
+          certbot renew --webroot -w /var/www/certbot --quiet || true;
+        done
+
+  backup:
+    image: postgres:16
+    restart: always
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    entrypoint: ["/bin/sh", "-lc"]
+    command:
+      - |
+        mkdir -p /backups;
+        while :; do
+          ts=$$(date +%Y%m%d-%H%M%S);
+          pg_dump -h postgres -U ${POSTGRES_USER:-postgres} ${POSTGRES_DB:-infracode_whatsapp} | gzip > /backups/infracode-$${ts}.sql.gz;
+          find /backups -type f -mtime +14 -delete;
+          sleep 86400;
+        done
+    volumes:
+      - ../../backups:/backups
+
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    restart: always
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+    depends_on:
+      - api
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+
+  grafana:
+    image: grafana/grafana:12.1.1
+    restart: always
+    depends_on:
+      - prometheus
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+    ports:
+      - "3001:3000"
+    volumes:
+      - ../grafana/provisioning:/etc/grafana/provisioning:ro
+      - ../grafana/dashboards:/var/lib/grafana/dashboards:ro
+
+volumes:
+  postgres_data:
+  redis_data:

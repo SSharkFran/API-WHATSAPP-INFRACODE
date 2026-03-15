@@ -1,0 +1,16 @@
+node_modules
+.turbo
+.next
+dist
+coverage
+.env
+.env.local
+.pnpm-store
+apps/api/data
+apps/api/tmp
+apps/panel/.next
+backups
+infra/nginx/certs
+prisma/generated
+*.tsbuildinfo
+*.log

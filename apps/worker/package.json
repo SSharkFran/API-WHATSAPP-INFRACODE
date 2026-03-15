@@ -1,0 +1,24 @@
+{
+  "name": "@infracode/worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx watch src/index.ts",
+    "lint": "tsc -p tsconfig.json --noEmit",
+    "test": "echo \"No tests for @infracode/worker\""
+  },
+  "dependencies": {
+    "@prisma/client": "^6.16.2",
+    "bullmq": "^5.58.5",
+    "ioredis": "^5.7.0",
+    "pino": "^9.8.0",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.11",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.2"
+  }
+}

@@ -3,7 +3,7 @@ import type { AppConfig } from "../../config.js";
 import type { PlatformPrisma, TenantPrismaRegistry } from "../../lib/database.js";
 import { ApiError } from "../../lib/errors.js";
 import type { EmailService } from "../../lib/mail.js";
-import { sha256 } from "../../lib/crypto.js";
+import { encrypt, sha256 } from "../../lib/crypto.js";
 import { resolveTenantSchemaName } from "../../lib/tenant-schema.js";
 import type { AuthService } from "../auth/service.js";
 import type { InstanceOrchestrator } from "../instances/service.js";
@@ -15,6 +15,50 @@ interface PlatformAdminServiceDeps {
   emailService: EmailService;
   authService: AuthService;
   instanceOrchestrator: InstanceOrchestrator;
+}
+
+const defaultTenantAiProvider = {
+  provider: "GROQ",
+  baseUrl: "https://api.groq.com/openai/v1",
+  model: "llama-3.1-8b-instant",
+  isActive: false
+} as const;
+
+interface PlatformTenantAiProviderRecord {
+  provider: string;
+  baseUrl: string;
+  model: string;
+  isActive: boolean;
+  apiKeyEncrypted: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+interface PlatformTenantRecord {
+  id: string;
+  name: string;
+  slug: string;
+  schemaName: string;
+  status: string;
+  billingEmail: string | null;
+  onboardingStep: string;
+  onboardingCompletedAt: Date | null;
+  storageBytes: bigint;
+  messagesThisMonth: number;
+  instanceLimit: number;
+  messagesPerMonth: number;
+  usersLimit: number;
+  rateLimitPerMinute: number;
+  createdAt: Date;
+  updatedAt: Date;
+  plan:
+    | {
+        id: string;
+        code: string;
+        name: string;
+      }
+    | null;
+  aiProvider?: PlatformTenantAiProviderRecord | null;
 }
 
 /**
@@ -37,18 +81,71 @@ export class PlatformAdminService {
     this.instanceOrchestrator = deps.instanceOrchestrator;
   }
 
+  private mapTenantSummary(
+    tenant: PlatformTenantRecord,
+    activeInstances: number
+  ) {
+    return {
+      activeInstances,
+      aiConfigured: Boolean(tenant.aiProvider?.apiKeyEncrypted && tenant.aiProvider?.model),
+      aiModel: tenant.aiProvider?.model ?? null,
+      aiProvider: (tenant.aiProvider?.provider as "GROQ" | "OPENAI_COMPATIBLE" | null) ?? null,
+      billingEmail: tenant.billingEmail,
+      createdAt: tenant.createdAt.toISOString(),
+      id: tenant.id,
+      instanceLimit: tenant.instanceLimit,
+      messagesPerMonth: tenant.messagesPerMonth,
+      messagesThisMonth: tenant.messagesThisMonth,
+      name: tenant.name,
+      onboardingCompletedAt: tenant.onboardingCompletedAt?.toISOString() ?? null,
+      onboardingStep: tenant.onboardingStep,
+      plan: tenant.plan
+        ? {
+            id: tenant.plan.id,
+            code: tenant.plan.code,
+            name: tenant.plan.name
+          }
+        : null,
+      rateLimitPerMinute: tenant.rateLimitPerMinute,
+      schemaName: tenant.schemaName,
+      slug: tenant.slug,
+      status: tenant.status,
+      storageBytes: Number(tenant.storageBytes),
+      updatedAt: tenant.updatedAt.toISOString(),
+      usersLimit: tenant.usersLimit
+    };
+  }
+
+  private mapTenantAiProvider(
+    tenantId: string,
+    aiProvider?: PlatformTenantAiProviderRecord | null
+  ) {
+    return {
+      tenantId,
+      provider: (aiProvider?.provider as "GROQ" | "OPENAI_COMPATIBLE" | undefined) ?? defaultTenantAiProvider.provider,
+      baseUrl: aiProvider?.baseUrl ?? defaultTenantAiProvider.baseUrl,
+      model: aiProvider?.model ?? defaultTenantAiProvider.model,
+      isActive: aiProvider?.isActive ?? defaultTenantAiProvider.isActive,
+      isConfigured: Boolean(aiProvider?.apiKeyEncrypted && aiProvider?.model),
+      hasApiKey: Boolean(aiProvider?.apiKeyEncrypted),
+      createdAt: aiProvider?.createdAt.toISOString() ?? null,
+      updatedAt: aiProvider?.updatedAt.toISOString() ?? null
+    };
+  }
+
   /**
    * Lista tenants com agregacao operacional minima para o painel super admin.
    */
   public async listTenants() {
-    const tenants = await this.platformPrisma.tenant.findMany({
+    const tenants = (await this.platformPrisma.tenant.findMany({
       include: {
+        aiProvider: true,
         plan: true
       },
       orderBy: {
         createdAt: "desc"
       }
-    });
+    } as never)) as unknown as PlatformTenantRecord[];
 
     return Promise.all(
       tenants.map(async (tenant) => {
@@ -61,32 +158,7 @@ export class PlatformAdminService {
           }
         });
 
-        return {
-          activeInstances,
-          billingEmail: tenant.billingEmail,
-          createdAt: tenant.createdAt.toISOString(),
-          id: tenant.id,
-          instanceLimit: tenant.instanceLimit,
-          messagesPerMonth: tenant.messagesPerMonth,
-          messagesThisMonth: tenant.messagesThisMonth,
-          name: tenant.name,
-          onboardingCompletedAt: tenant.onboardingCompletedAt?.toISOString() ?? null,
-          onboardingStep: tenant.onboardingStep,
-          plan: tenant.plan
-            ? {
-                id: tenant.plan.id,
-                code: tenant.plan.code,
-                name: tenant.plan.name
-              }
-            : null,
-          rateLimitPerMinute: tenant.rateLimitPerMinute,
-          schemaName: tenant.schemaName,
-          slug: tenant.slug,
-          status: tenant.status,
-          storageBytes: Number(tenant.storageBytes),
-          updatedAt: tenant.updatedAt.toISOString(),
-          usersLimit: tenant.usersLimit
-        };
+        return this.mapTenantSummary(tenant, activeInstances);
       })
     );
   }
@@ -186,7 +258,7 @@ export class PlatformAdminService {
     const invitationToken = randomBytes(32).toString("base64url");
     const invitationExpiresAt = new Date(Date.now() + this.config.INVITATION_TTL_HOURS * 60 * 60 * 1000);
 
-    const tenant = await this.platformPrisma.tenant.create({
+    const tenant = (await this.platformPrisma.tenant.create({
       data: {
         billingEmail: input.billingEmail,
         instanceLimit: plan.instanceLimit,
@@ -215,9 +287,10 @@ export class PlatformAdminService {
         }
       },
       include: {
+        aiProvider: true,
         plan: true
       }
-    });
+    } as never)) as unknown as PlatformTenantRecord;
 
     await this.tenantPrismaRegistry.ensureSchema(this.platformPrisma, tenant.id);
     await this.emailService.sendTemplate({
@@ -233,32 +306,7 @@ export class PlatformAdminService {
     return {
       firstAccessToken: invitationToken,
       firstAccessUrl: `https://${tenant.slug}.${this.config.ROOT_DOMAIN}/primeiro-acesso?token=${invitationToken}`,
-      tenant: {
-        activeInstances: 0,
-        billingEmail: tenant.billingEmail,
-        createdAt: tenant.createdAt.toISOString(),
-        id: tenant.id,
-        instanceLimit: tenant.instanceLimit,
-        messagesPerMonth: tenant.messagesPerMonth,
-        messagesThisMonth: tenant.messagesThisMonth,
-        name: tenant.name,
-        onboardingCompletedAt: tenant.onboardingCompletedAt?.toISOString() ?? null,
-        onboardingStep: tenant.onboardingStep,
-        plan: tenant.plan
-          ? {
-              id: tenant.plan.id,
-              code: tenant.plan.code,
-              name: tenant.plan.name
-            }
-          : null,
-        rateLimitPerMinute: tenant.rateLimitPerMinute,
-        schemaName: tenant.schemaName,
-        slug: tenant.slug,
-        status: tenant.status,
-        storageBytes: Number(tenant.storageBytes),
-        updatedAt: tenant.updatedAt.toISOString(),
-        usersLimit: tenant.usersLimit
-      }
+      tenant: this.mapTenantSummary(tenant, 0)
     };
   }
 
@@ -278,11 +326,15 @@ export class PlatformAdminService {
       usersLimit: number;
     }>
   ) {
-    const tenant = await this.platformPrisma.tenant.findUnique({
+    const tenant = (await this.platformPrisma.tenant.findUnique({
       where: {
         id: tenantId
+      },
+      include: {
+        aiProvider: true,
+        plan: true
       }
-    });
+    } as never)) as unknown as PlatformTenantRecord | null;
 
     if (!tenant) {
       throw new ApiError(404, "TENANT_NOT_FOUND", "Tenant nao encontrado");
@@ -337,7 +389,7 @@ export class PlatformAdminService {
               }
             : {};
 
-    const updated = await this.platformPrisma.tenant.update({
+    const updated = (await this.platformPrisma.tenant.update({
       where: {
         id: tenantId
       },
@@ -352,36 +404,101 @@ export class PlatformAdminService {
         ...limitPatch
       },
       include: {
+        aiProvider: true,
         plan: true
+      }
+    } as never)) as unknown as PlatformTenantRecord;
+
+    const prisma = await this.tenantPrismaRegistry.getClient(updated.id);
+    const activeInstances = await prisma.instance.count({
+      where: {
+        status: {
+          in: ["CONNECTED", "INITIALIZING", "QR_PENDING"]
+        }
       }
     });
 
-    return {
-      activeInstances: 0,
-      billingEmail: updated.billingEmail,
-      createdAt: updated.createdAt.toISOString(),
-      id: updated.id,
-      instanceLimit: updated.instanceLimit,
-      messagesPerMonth: updated.messagesPerMonth,
-      messagesThisMonth: updated.messagesThisMonth,
-      name: updated.name,
-      onboardingCompletedAt: updated.onboardingCompletedAt?.toISOString() ?? null,
-      onboardingStep: updated.onboardingStep,
-      plan: updated.plan
-        ? {
-            id: updated.plan.id,
-            code: updated.plan.code,
-            name: updated.plan.name
-          }
-        : null,
-      rateLimitPerMinute: updated.rateLimitPerMinute,
-      schemaName: updated.schemaName,
-      slug: updated.slug,
-      status: updated.status,
-      storageBytes: Number(updated.storageBytes),
-      updatedAt: updated.updatedAt.toISOString(),
-      usersLimit: updated.usersLimit
-    };
+    return this.mapTenantSummary(updated, activeInstances);
+  }
+
+  /**
+   * Retorna a configuracao gerenciada pela InfraCode para IA do tenant.
+   */
+  public async getTenantAiConfig(tenantId: string) {
+    const tenant = (await this.platformPrisma.tenant.findUnique({
+      where: {
+        id: tenantId
+      },
+      include: {
+        aiProvider: true
+      }
+    } as never)) as unknown as (PlatformTenantRecord & { aiProvider?: PlatformTenantAiProviderRecord | null }) | null;
+
+    if (!tenant) {
+      throw new ApiError(404, "TENANT_NOT_FOUND", "Tenant nao encontrado");
+    }
+
+    return this.mapTenantAiProvider(tenant.id, tenant.aiProvider);
+  }
+
+  /**
+   * Persiste o provedor e a chave de IA usados pelo chatbot do tenant.
+   */
+  public async upsertTenantAiConfig(
+    tenantId: string,
+    input: {
+      provider: "GROQ" | "OPENAI_COMPATIBLE";
+      baseUrl: string;
+      model: string;
+      apiKey?: string;
+      isActive: boolean;
+    }
+  ) {
+    const tenant = (await this.platformPrisma.tenant.findUnique({
+      where: {
+        id: tenantId
+      },
+      include: {
+        aiProvider: true
+      }
+    } as never)) as unknown as (PlatformTenantRecord & { aiProvider?: PlatformTenantAiProviderRecord | null }) | null;
+
+    if (!tenant) {
+      throw new ApiError(404, "TENANT_NOT_FOUND", "Tenant nao encontrado");
+    }
+
+    const currentApiKeyEncrypted = tenant.aiProvider?.apiKeyEncrypted ?? null;
+    const nextApiKeyEncrypted =
+      input.apiKey && input.apiKey.trim()
+        ? encrypt(input.apiKey.trim(), this.config.API_ENCRYPTION_KEY)
+        : currentApiKeyEncrypted;
+
+    if (!nextApiKeyEncrypted) {
+      throw new ApiError(400, "AI_API_KEY_REQUIRED", "Informe a API key da IA para o tenant");
+    }
+
+    const aiProvider = (await (this.platformPrisma as any).tenantAiProvider.upsert({
+      where: {
+        tenantId
+      },
+      create: {
+        tenantId,
+        provider: input.provider,
+        baseUrl: input.baseUrl.trim(),
+        model: input.model.trim(),
+        apiKeyEncrypted: nextApiKeyEncrypted,
+        isActive: input.isActive
+      },
+      update: {
+        provider: input.provider,
+        baseUrl: input.baseUrl.trim(),
+        model: input.model.trim(),
+        apiKeyEncrypted: nextApiKeyEncrypted,
+        isActive: input.isActive
+      }
+    })) as PlatformTenantAiProviderRecord;
+
+    return this.mapTenantAiProvider(tenantId, aiProvider);
   }
 
   /**

@@ -248,7 +248,7 @@ export interface ApiErrorShape {
 export type ChatbotTriggerType = "EXACT" | "CONTAINS" | "REGEX" | "FIRST_CONTACT";
 
 export type ChatbotAiMode = "RULES_ONLY" | "RULES_THEN_AI" | "AI_ONLY";
-export type ChatbotAiProvider = "OPENAI_COMPATIBLE";
+export type ChatbotAiProvider = "GROQ" | "OPENAI_COMPATIBLE";
 
 export interface ChatbotRule {
   id: string;
@@ -262,13 +262,26 @@ export interface ChatbotRule {
 export interface ChatbotAiConfig {
   isEnabled: boolean;
   mode: ChatbotAiMode;
-  provider: ChatbotAiProvider;
-  baseUrl: string;
+  provider: ChatbotAiProvider | null;
   model: string;
   systemPrompt: string;
   temperature: number;
   maxContextMessages: number;
+  isManagedByAdmin: boolean;
+  isProviderConfigured: boolean;
+  isProviderActive: boolean;
+}
+
+export interface TenantAiProviderConfig {
+  tenantId: string;
+  provider: ChatbotAiProvider;
+  baseUrl: string;
+  model: string;
+  isActive: boolean;
+  isConfigured: boolean;
   hasApiKey: boolean;
+  createdAt: string | null;
+  updatedAt: string | null;
 }
 
 export interface ChatbotConfig {

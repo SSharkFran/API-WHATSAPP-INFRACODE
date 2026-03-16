@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { chatbotAiProviderSchema } from "../chatbot/schemas.js";
 
 export const tenantCreateBodySchema = z.object({
   name: z.string().min(3).max(120),
@@ -23,6 +24,26 @@ export const tenantUpdateBodySchema = z.object({
 
 export const tenantParamsSchema = z.object({
   id: z.string().min(1)
+});
+
+export const tenantAiConfigBodySchema = z.object({
+  provider: chatbotAiProviderSchema.default("GROQ"),
+  baseUrl: z.string().url().default("https://api.groq.com/openai/v1"),
+  model: z.string().min(1).max(120),
+  apiKey: z.string().min(10).max(500).optional(),
+  isActive: z.boolean().default(true)
+});
+
+export const tenantAiConfigResponseSchema = z.object({
+  tenantId: z.string(),
+  provider: chatbotAiProviderSchema,
+  baseUrl: z.string().url(),
+  model: z.string(),
+  isActive: z.boolean(),
+  isConfigured: z.boolean(),
+  hasApiKey: z.boolean(),
+  createdAt: z.string().nullable(),
+  updatedAt: z.string().nullable()
 });
 
 export const planBodySchema = z.object({
@@ -65,6 +86,9 @@ export const tenantSummarySchema = z.object({
   messagesPerMonth: z.number().int(),
   usersLimit: z.number().int(),
   rateLimitPerMinute: z.number().int(),
+  aiConfigured: z.boolean(),
+  aiProvider: chatbotAiProviderSchema.nullable(),
+  aiModel: z.string().nullable(),
   plan: z
     .object({
       id: z.string(),

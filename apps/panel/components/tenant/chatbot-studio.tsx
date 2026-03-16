@@ -25,13 +25,14 @@ interface ChatbotFormState {
   ai: {
     isEnabled: boolean;
     mode: ChatbotAiMode;
-    baseUrl: string;
+    provider: "GROQ" | "OPENAI_COMPATIBLE" | null;
     model: string;
     systemPrompt: string;
     temperature: number;
     maxContextMessages: number;
-    apiKey: string;
-    hasApiKey: boolean;
+    isManagedByAdmin: boolean;
+    isProviderConfigured: boolean;
+    isProviderActive: boolean;
   };
 }
 
@@ -74,14 +75,15 @@ const buildDefaultFormState = (): ChatbotFormState => ({
   ai: {
     isEnabled: false,
     mode: "RULES_THEN_AI",
-    baseUrl: "https://api.openai.com/v1",
+    provider: null,
     model: "",
     systemPrompt:
       "Voce e um assistente virtual comercial no WhatsApp. Responda sempre em portugues do Brasil, com clareza, objetividade e tom profissional.",
     temperature: 0.4,
     maxContextMessages: 12,
-    apiKey: "",
-    hasApiKey: false
+    isManagedByAdmin: true,
+    isProviderConfigured: false,
+    isProviderActive: false
   }
 });
 
@@ -100,13 +102,14 @@ const mapConfigToFormState = (config: ChatbotConfig): ChatbotFormState => ({
   ai: {
     isEnabled: config.ai.isEnabled,
     mode: config.ai.mode,
-    baseUrl: config.ai.baseUrl,
+    provider: config.ai.provider,
     model: config.ai.model,
     systemPrompt: config.ai.systemPrompt,
     temperature: config.ai.temperature,
     maxContextMessages: config.ai.maxContextMessages,
-    apiKey: "",
-    hasApiKey: config.ai.hasApiKey
+    isManagedByAdmin: config.ai.isManagedByAdmin,
+    isProviderConfigured: config.ai.isProviderConfigured,
+    isProviderActive: config.ai.isProviderActive
   }
 });
 
@@ -234,13 +237,9 @@ export const ChatbotStudio = ({ initialInstances }: ChatbotStudioProps) => {
           ai: {
             isEnabled: formState.ai.isEnabled,
             mode: formState.ai.mode,
-            provider: "OPENAI_COMPATIBLE",
-            baseUrl: formState.ai.baseUrl.trim(),
-            model: formState.ai.model.trim(),
             systemPrompt: formState.ai.systemPrompt.trim(),
             temperature: formState.ai.temperature,
-            maxContextMessages: formState.ai.maxContextMessages,
-            apiKey: formState.ai.apiKey.trim() || undefined
+            maxContextMessages: formState.ai.maxContextMessages
           }
         }
       });
@@ -373,10 +372,31 @@ export const ChatbotStudio = ({ initialInstances }: ChatbotStudioProps) => {
 
             <div className="space-y-4 rounded-[24px] border border-slate-200 bg-slate-50/70 p-4">
               <div>
-                <p className="text-lg font-semibold text-slate-950">Modo IA</p>
+                <p className="text-lg font-semibold text-slate-950">Modo IA gerenciado pela InfraCode</p>
                 <p className="text-sm text-slate-600">
-                  Use um provedor compativel com OpenAI para respostas naturais. Pode operar em conjunto com regras ou sozinho.
+                  O tenant escolhe como a IA participa do atendimento. Provedor, modelo e chave ficam no painel do super admin.
                 </p>
+              </div>
+
+              <div className="grid gap-3 lg:grid-cols-3">
+                <div className="rounded-[20px] border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
+                  <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Provedor</p>
+                  <p className="mt-2 font-semibold text-slate-950">{formState.ai.provider ?? "Nao configurado"}</p>
+                </div>
+                <div className="rounded-[20px] border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
+                  <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Modelo</p>
+                  <p className="mt-2 font-semibold text-slate-950">{formState.ai.model || "Definido pela InfraCode"}</p>
+                </div>
+                <div className="rounded-[20px] border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
+                  <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Status</p>
+                  <p className="mt-2 font-semibold text-slate-950">
+                    {formState.ai.isProviderConfigured
+                      ? formState.ai.isProviderActive
+                        ? "Ativo"
+                        : "Configurado, mas inativo"
+                      : "Aguardando configuracao do admin"}
+                  </p>
+                </div>
               </div>
 
               <label className="flex items-center gap-3 rounded-[20px] border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
@@ -395,6 +415,12 @@ export const ChatbotStudio = ({ initialInstances }: ChatbotStudioProps) => {
                 />
                 Responder com IA quando aplicavel
               </label>
+
+              {!formState.ai.isProviderConfigured ? (
+                <div className="rounded-[20px] border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+                  A InfraCode ainda nao vinculou um provedor de IA para este tenant. Voce ja pode deixar o modo pronto e salvar.
+                </div>
+              ) : null}
 
               <div className="grid gap-4 lg:grid-cols-2">
                 <label className="space-y-2 text-sm">
@@ -417,58 +443,10 @@ export const ChatbotStudio = ({ initialInstances }: ChatbotStudioProps) => {
                     <option value="AI_ONLY">Somente IA</option>
                   </select>
                 </label>
-                <label className="space-y-2 text-sm">
-                  <span className="text-slate-600">Modelo</span>
-                  <Input
-                    onChange={(event) =>
-                      setFormState((current) => ({
-                        ...current,
-                        ai: {
-                          ...current.ai,
-                          model: event.target.value
-                        }
-                      }))
-                    }
-                    placeholder="gpt-4.1-mini, llama3.1, gemma..."
-                    value={formState.ai.model}
-                  />
-                </label>
-              </div>
-
-              <div className="grid gap-4 lg:grid-cols-2">
-                <label className="space-y-2 text-sm">
-                  <span className="text-slate-600">Base URL</span>
-                  <Input
-                    onChange={(event) =>
-                      setFormState((current) => ({
-                        ...current,
-                        ai: {
-                          ...current.ai,
-                          baseUrl: event.target.value
-                        }
-                      }))
-                    }
-                    placeholder="https://api.openai.com/v1"
-                    value={formState.ai.baseUrl}
-                  />
-                </label>
-                <label className="space-y-2 text-sm">
-                  <span className="text-slate-600">API key {formState.ai.hasApiKey ? "(ja cadastrada)" : ""}</span>
-                  <Input
-                    onChange={(event) =>
-                      setFormState((current) => ({
-                        ...current,
-                        ai: {
-                          ...current.ai,
-                          apiKey: event.target.value
-                        }
-                      }))
-                    }
-                    placeholder={formState.ai.hasApiKey ? "Preencha so se quiser trocar a chave" : "sk-..."}
-                    type="password"
-                    value={formState.ai.apiKey}
-                  />
-                </label>
+                <div className="rounded-[20px] border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
+                  <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Gestao</p>
+                  <p className="mt-2">As credenciais desta IA ficam bloqueadas no control plane da InfraCode.</p>
+                </div>
               </div>
 
               <div className="grid gap-4 lg:grid-cols-2">
@@ -729,7 +707,10 @@ export const ChatbotStudio = ({ initialInstances }: ChatbotStudioProps) => {
                   Chatbot: {formState.isEnabled ? "habilitado e pronto para responder" : "desabilitado"}
                 </div>
                 <div className="list-row-light rounded-[22px] p-4">
-                  IA: {formState.ai.isEnabled ? `${formState.ai.mode} / ${formState.ai.model || "modelo nao definido"}` : "desabilitada"}
+                  IA:{" "}
+                  {formState.ai.isEnabled
+                    ? `${formState.ai.mode} / ${formState.ai.provider ?? "aguardando admin"} / ${formState.ai.model || "modelo nao definido"}`
+                    : "desabilitada"}
                 </div>
               </div>
             </CardContent>

@@ -2,7 +2,7 @@ import { z } from "zod";
 
 export const chatbotTriggerTypeSchema = z.enum(["EXACT", "CONTAINS", "REGEX", "FIRST_CONTACT"]);
 export const chatbotAiModeSchema = z.enum(["RULES_ONLY", "RULES_THEN_AI", "AI_ONLY"]);
-export const chatbotAiProviderSchema = z.enum(["OPENAI_COMPATIBLE"]);
+export const chatbotAiProviderSchema = z.enum(["GROQ", "OPENAI_COMPATIBLE"]);
 
 export const chatbotRuleSchema = z.object({
   id: z.string().min(1),
@@ -16,25 +16,22 @@ export const chatbotRuleSchema = z.object({
 export const chatbotAiConfigSchema = z.object({
   isEnabled: z.boolean().default(false),
   mode: chatbotAiModeSchema.default("RULES_THEN_AI"),
-  provider: chatbotAiProviderSchema.default("OPENAI_COMPATIBLE"),
-  baseUrl: z.string().url().default("https://api.openai.com/v1"),
+  provider: chatbotAiProviderSchema.nullable().default(null),
   model: z.string().max(120).default(""),
   systemPrompt: z.string().max(4_000).default(""),
   temperature: z.number().min(0).max(2).default(0.4),
   maxContextMessages: z.number().int().min(1).max(30).default(12),
-  hasApiKey: z.boolean().default(false)
+  isManagedByAdmin: z.boolean().default(true),
+  isProviderConfigured: z.boolean().default(false),
+  isProviderActive: z.boolean().default(false)
 });
 
 export const upsertChatbotAiBodySchema = z.object({
   isEnabled: z.boolean().default(false),
   mode: chatbotAiModeSchema.default("RULES_THEN_AI"),
-  provider: chatbotAiProviderSchema.default("OPENAI_COMPATIBLE"),
-  baseUrl: z.string().url().default("https://api.openai.com/v1"),
-  model: z.string().max(120).default(""),
   systemPrompt: z.string().max(4_000).default(""),
   temperature: z.number().min(0).max(2).default(0.4),
-  maxContextMessages: z.number().int().min(1).max(30).default(12),
-  apiKey: z.string().min(10).max(500).optional()
+  maxContextMessages: z.number().int().min(1).max(30).default(12)
 });
 
 export const chatbotConfigSchema = z.object({

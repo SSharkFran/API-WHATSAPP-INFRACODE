@@ -41,13 +41,30 @@ export interface AdminTenantSummary {
   messagesThisMonth: number;
   messagesPerMonth: number;
   activeInstances: number;
+  instanceLimit: number;
   usersLimit: number;
+  rateLimitPerMinute: number;
   billingEmail: string | null;
+  aiConfigured: boolean;
+  aiProvider: "GROQ" | "OPENAI_COMPATIBLE" | null;
+  aiModel: string | null;
   plan: {
     id: string;
     code: string;
     name: string;
   } | null;
+}
+
+export interface AdminTenantAiConfig {
+  tenantId: string;
+  provider: "GROQ" | "OPENAI_COMPATIBLE";
+  baseUrl: string;
+  model: string;
+  isActive: boolean;
+  isConfigured: boolean;
+  hasApiKey: boolean;
+  createdAt: string | null;
+  updatedAt: string | null;
 }
 
 export interface BillingSummary {
@@ -184,8 +201,13 @@ const mockAdminTenants: AdminTenantSummary[] = [
     messagesThisMonth: 18240,
     messagesPerMonth: 50000,
     activeInstances: 2,
+    instanceLimit: 5,
     usersLimit: 8,
+    rateLimitPerMinute: 60,
     billingEmail: "billing@acme.test",
+    aiConfigured: true,
+    aiProvider: "GROQ",
+    aiModel: "llama-3.1-8b-instant",
     plan: {
       id: "plan-scale",
       code: "SCALE_50K",
@@ -200,8 +222,13 @@ const mockAdminTenants: AdminTenantSummary[] = [
     messagesThisMonth: 3100,
     messagesPerMonth: 10000,
     activeInstances: 0,
+    instanceLimit: 1,
     usersLimit: 4,
+    rateLimitPerMinute: 20,
     billingEmail: "billing@globex.test",
+    aiConfigured: false,
+    aiProvider: null,
+    aiModel: null,
     plan: {
       id: "plan-starter",
       code: "STARTER_10K",

@@ -35,6 +35,7 @@ model Tenant {
   invitations           Invitation[]
   apiKeys               ApiKey[]
   impersonations        ImpersonationSession[]
+  aiProvider            TenantAiProvider?
 }
 
 model BillingPlan {
@@ -178,6 +179,19 @@ model ImpersonationSession {
   tenant           Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@index([platformUserId, tenantId])
+}
+
+model TenantAiProvider {
+  id              String   @id @default(cuid())
+  tenantId        String   @unique
+  provider        String   @default("GROQ")
+  baseUrl         String
+  model           String
+  apiKeyEncrypted String
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 }
 
 model PlatformSetting {

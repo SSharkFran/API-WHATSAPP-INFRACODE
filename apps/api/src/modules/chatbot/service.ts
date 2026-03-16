@@ -1,9 +1,9 @@
-import type { ChatbotAiConfig, ChatbotConfig, ChatbotRule, ChatbotSimulationResult } from "@infracode/types";
+import type { ChatbotAiProvider, ChatbotConfig, ChatbotRule, ChatbotSimulationResult } from "@infracode/types";
 import { z } from "zod";
 import type { Prisma } from "../../../../../prisma/generated/tenant-client/index.js";
 import type { AppConfig } from "../../config.js";
 import type { PlatformPrisma, TenantPrismaRegistry } from "../../lib/database.js";
-import { decrypt, encrypt } from "../../lib/crypto.js";
+import { decrypt } from "../../lib/crypto.js";
 import { ApiError } from "../../lib/errors.js";
 import { normalizePhoneNumber } from "../../lib/phone.js";
 import { chatbotAiConfigSchema, chatbotRuleSchema, upsertChatbotAiBodySchema } from "./schemas.js";
@@ -22,17 +22,27 @@ interface ChatbotRuntimeInput {
   remoteJid?: string | null;
 }
 
+interface ManagedAiProviderRuntime {
+  provider: ChatbotAiProvider | null;
+  baseUrl: string;
+  model: string;
+  isActive: boolean;
+  isConfigured: boolean;
+  apiKeyEncrypted: string | null;
+}
+
 const chatbotRulesArraySchema = z.array(chatbotRuleSchema);
-const chatbotAiSettingsSchema = chatbotAiConfigSchema.omit({
-  hasApiKey: true
+const chatbotAiSettingsSchema = chatbotAiConfigSchema.pick({
+  isEnabled: true,
+  mode: true,
+  systemPrompt: true,
+  temperature: true,
+  maxContextMessages: true
 });
 const chatbotAiUpsertSchema = upsertChatbotAiBodySchema;
 const defaultAiSettings = {
   isEnabled: false,
   mode: "RULES_THEN_AI",
-  provider: "OPENAI_COMPATIBLE",
-  baseUrl: "https://api.openai.com/v1",
-  model: "",
   systemPrompt:
     "Voce e um assistente virtual comercial no WhatsApp. Responda sempre em portugues do Brasil, com clareza, objetividade e tom profissional.",
   temperature: 0.4,
@@ -108,7 +118,7 @@ const renderReplyTemplate = (
 };
 
 /**
- * Gerencia o chatbot basico por instancia, com regras textuais e simulacao.
+ * Gerencia o chatbot basico por instancia, com regras textuais e IA gerenciada pela InfraCode.
  */
 export class ChatbotService {
   private readonly config: AppConfig;
@@ -137,18 +147,9 @@ export class ChatbotService {
       ai?: z.infer<typeof chatbotAiUpsertSchema>;
     }
   ): Promise<ChatbotConfig> {
-    const { prisma } = await this.getContext(tenantId, instanceId);
+    const { prisma, managedAiProvider } = await this.getContext(tenantId, instanceId);
     const rules = chatbotRulesArraySchema.parse(input.rules);
     const aiInput = chatbotAiUpsertSchema.parse(input.ai ?? defaultAiSettings);
-    const current = (await prisma.chatbotConfig.findUnique({
-      where: {
-        instanceId
-      }
-    })) as ({ aiApiKeyEncrypted?: string | null } & Record<string, unknown>) | null;
-    const encryptedApiKey =
-      aiInput.apiKey && aiInput.apiKey.trim()
-        ? encrypt(aiInput.apiKey.trim(), this.config.API_ENCRYPTION_KEY)
-        : current?.aiApiKeyEncrypted ?? null;
 
     const record = await prisma.chatbotConfig.upsert({
       where: {
@@ -161,7 +162,7 @@ export class ChatbotService {
         fallbackMessage: input.fallbackMessage?.trim() || null,
         rules,
         aiSettings: this.buildPersistedAiSettings(aiInput),
-        aiApiKeyEncrypted: encryptedApiKey
+        aiApiKeyEncrypted: null
       } as Prisma.ChatbotConfigUncheckedCreateInput,
       update: {
         isEnabled: input.isEnabled,
@@ -169,11 +170,11 @@ export class ChatbotService {
         fallbackMessage: input.fallbackMessage?.trim() || null,
         rules,
         aiSettings: this.buildPersistedAiSettings(aiInput),
-        aiApiKeyEncrypted: encryptedApiKey
+        aiApiKeyEncrypted: null
       } as Prisma.ChatbotConfigUncheckedUpdateInput
     });
 
-    return this.mapConfig(record);
+    return this.mapConfig(record, managedAiProvider);
   }
 
   public async simulate(
@@ -181,8 +182,8 @@ export class ChatbotService {
     instanceId: string,
     input: ChatbotRuntimeInput
   ): Promise<ChatbotSimulationResult> {
-    const { config, prisma } = await this.getContext(tenantId, instanceId);
-    return this.evaluateConfig(prisma, config, input);
+    const { config, managedAiProvider, prisma } = await this.getContext(tenantId, instanceId);
+    return this.evaluateConfig(prisma, config, managedAiProvider, input);
   }
 
   public async evaluateInbound(
@@ -190,19 +191,20 @@ export class ChatbotService {
     instanceId: string,
     input: ChatbotRuntimeInput
   ): Promise<ChatbotSimulationResult | null> {
-    const { config, prisma } = await this.getContext(tenantId, instanceId);
+    const { config, managedAiProvider, prisma } = await this.getContext(tenantId, instanceId);
 
     if (!config.isEnabled) {
       return null;
     }
 
-    const result = await this.evaluateConfig(prisma, config, input);
+    const result = await this.evaluateConfig(prisma, config, managedAiProvider, input);
     return result.action === "NO_MATCH" ? null : result;
   }
 
   private async getContext(tenantId: string, instanceId: string): Promise<{
     prisma: Awaited<ReturnType<TenantPrismaRegistry["getClient"]>>;
     config: ChatbotConfig;
+    managedAiProvider: ManagedAiProviderRuntime;
   }> {
     await this.tenantPrismaRegistry.ensureSchema(this.platformPrisma, tenantId);
     const prisma = await this.tenantPrismaRegistry.getClient(tenantId);
@@ -216,16 +218,20 @@ export class ChatbotService {
       throw new ApiError(404, "INSTANCE_NOT_FOUND", "Instancia nao encontrada");
     }
 
-    const record = await prisma.chatbotConfig.findUnique({
-      where: {
-        instanceId
-      }
-    });
+    const [record, managedAiProvider] = await Promise.all([
+      prisma.chatbotConfig.findUnique({
+        where: {
+          instanceId
+        }
+      }),
+      this.getManagedAiProvider(tenantId)
+    ]);
 
     return {
       prisma,
+      managedAiProvider,
       config: record
-        ? this.mapConfig(record)
+        ? this.mapConfig(record, managedAiProvider)
         : {
             id: `chatbot-${instanceId}`,
             instanceId,
@@ -233,19 +239,53 @@ export class ChatbotService {
             welcomeMessage: null,
             fallbackMessage: null,
             rules: [],
-            ai: {
-              ...defaultAiSettings,
-              hasApiKey: false
-            },
+            ai: this.buildRuntimeAiConfig(defaultAiSettings, managedAiProvider),
             createdAt: new Date(0).toISOString(),
             updatedAt: new Date(0).toISOString()
           }
     };
   }
 
+  private async getManagedAiProvider(tenantId: string): Promise<ManagedAiProviderRuntime> {
+    const record = (await (this.platformPrisma as any).tenantAiProvider.findUnique({
+      where: {
+        tenantId
+      }
+    })) as
+      | {
+          provider: ChatbotAiProvider;
+          baseUrl: string;
+          model: string;
+          isActive: boolean;
+          apiKeyEncrypted: string;
+        }
+      | null;
+
+    if (!record) {
+      return {
+        provider: null,
+        baseUrl: "",
+        model: "",
+        isActive: false,
+        isConfigured: false,
+        apiKeyEncrypted: null
+      };
+    }
+
+    return {
+      provider: record.provider as ChatbotAiProvider,
+      baseUrl: record.baseUrl,
+      model: record.model,
+      isActive: record.isActive,
+      isConfigured: Boolean(record.apiKeyEncrypted && record.model.trim()),
+      apiKeyEncrypted: record.apiKeyEncrypted
+    };
+  }
+
   private async evaluateConfig(
     prisma: Awaited<ReturnType<TenantPrismaRegistry["getClient"]>>,
     config: ChatbotConfig,
+    managedAiProvider: ManagedAiProviderRuntime,
     input: ChatbotRuntimeInput
   ): Promise<ChatbotSimulationResult> {
     const normalizedInput = normalizeText(input.text ?? "");
@@ -274,7 +314,7 @@ export class ChatbotService {
       }
     }
 
-    const aiResult = await this.evaluateWithAi(prisma, config, input);
+    const aiResult = await this.evaluateWithAi(prisma, config, managedAiProvider, input);
 
     if (aiResult) {
       return aiResult;
@@ -297,18 +337,20 @@ export class ChatbotService {
     };
   }
 
-  private mapConfig(record: {
-    id: string;
-    instanceId: string;
-    isEnabled: boolean;
-    welcomeMessage: string | null;
-    fallbackMessage: string | null;
-    rules: unknown;
-    aiSettings?: unknown;
-    aiApiKeyEncrypted?: string | null;
-    createdAt: Date;
-    updatedAt: Date;
-  }): ChatbotConfig {
+  private mapConfig(
+    record: {
+      id: string;
+      instanceId: string;
+      isEnabled: boolean;
+      welcomeMessage: string | null;
+      fallbackMessage: string | null;
+      rules: unknown;
+      aiSettings?: unknown;
+      createdAt: Date;
+      updatedAt: Date;
+    },
+    managedAiProvider: ManagedAiProviderRuntime
+  ): ChatbotConfig {
     const aiSettings = chatbotAiSettingsSchema.parse({
       ...defaultAiSettings,
       ...(record.aiSettings && typeof record.aiSettings === "object" ? record.aiSettings : {})
@@ -321,12 +363,23 @@ export class ChatbotService {
       welcomeMessage: record.welcomeMessage,
       fallbackMessage: record.fallbackMessage,
       rules: chatbotRulesArraySchema.parse(record.rules),
-      ai: {
-        ...aiSettings,
-        hasApiKey: Boolean(record.aiApiKeyEncrypted)
-      },
+      ai: this.buildRuntimeAiConfig(aiSettings, managedAiProvider),
       createdAt: record.createdAt.toISOString(),
       updatedAt: record.updatedAt.toISOString()
+    };
+  }
+
+  private buildRuntimeAiConfig(
+    aiSettings: z.infer<typeof chatbotAiSettingsSchema>,
+    managedAiProvider: ManagedAiProviderRuntime
+  ): ChatbotConfig["ai"] {
+    return {
+      ...aiSettings,
+      provider: managedAiProvider.provider,
+      model: managedAiProvider.model,
+      isManagedByAdmin: true,
+      isProviderConfigured: managedAiProvider.isConfigured,
+      isProviderActive: managedAiProvider.isActive
     };
   }
 
@@ -342,46 +395,37 @@ export class ChatbotService {
   private async evaluateWithAi(
     prisma: Awaited<ReturnType<TenantPrismaRegistry["getClient"]>>,
     config: ChatbotConfig,
+    managedAiProvider: ManagedAiProviderRuntime,
     input: ChatbotRuntimeInput
   ): Promise<ChatbotSimulationResult | null> {
     if (config.ai.mode === "RULES_ONLY") {
       return null;
     }
 
-    if (!config.ai.isEnabled) {
+    if (!config.ai.isEnabled || !input.text?.trim()) {
       return null;
     }
 
-    if (!input.text?.trim()) {
-      return null;
-    }
-
-    const record = (await prisma.chatbotConfig.findUnique({
-      where: {
-        instanceId: config.instanceId
-      }
-    })) as ({
-      aiApiKeyEncrypted?: string | null;
-      aiSettings?: unknown;
-    } & Record<string, unknown>) | null;
-
-    if (!record?.aiApiKeyEncrypted || !record.aiSettings) {
-      return null;
-    }
-
-    const aiSettings = chatbotAiSettingsSchema.parse({
-      ...defaultAiSettings,
-      ...(typeof record.aiSettings === "object" && record.aiSettings ? record.aiSettings : {})
-    });
-
-    if (!aiSettings.isEnabled || !aiSettings.model.trim()) {
+    if (
+      !managedAiProvider.isConfigured ||
+      !managedAiProvider.isActive ||
+      !managedAiProvider.provider ||
+      !managedAiProvider.model.trim() ||
+      !managedAiProvider.apiKeyEncrypted
+    ) {
       return null;
     }
 
     try {
-      const apiKey = decrypt(record.aiApiKeyEncrypted, this.config.API_ENCRYPTION_KEY);
-      const messages = await this.buildAiMessages(prisma, config.instanceId, input, aiSettings.systemPrompt, aiSettings.maxContextMessages);
-      const responseText = await this.requestOpenAiCompatibleCompletion(aiSettings, apiKey, messages);
+      const apiKey = decrypt(managedAiProvider.apiKeyEncrypted, this.config.API_ENCRYPTION_KEY);
+      const messages = await this.buildAiMessages(
+        prisma,
+        config.instanceId,
+        input,
+        config.ai.systemPrompt,
+        config.ai.maxContextMessages
+      );
+      const responseText = await this.requestOpenAiCompatibleCompletion(managedAiProvider, apiKey, messages, config.ai.temperature);
 
       if (!responseText) {
         return null;
@@ -390,7 +434,7 @@ export class ChatbotService {
       return {
         action: "AI",
         matchedRuleId: null,
-        matchedRuleName: `${aiSettings.provider}:${aiSettings.model}`,
+        matchedRuleName: `${managedAiProvider.provider}:${managedAiProvider.model}`,
         responseText
       };
     } catch {
@@ -455,11 +499,12 @@ export class ChatbotService {
   }
 
   private async requestOpenAiCompatibleCompletion(
-    aiSettings: Omit<ChatbotAiConfig, "hasApiKey">,
+    managedAiProvider: ManagedAiProviderRuntime,
     apiKey: string,
-    messages: Array<{ role: "system" | "user" | "assistant"; content: string }>
+    messages: Array<{ role: "system" | "user" | "assistant"; content: string }>,
+    temperature: number
   ): Promise<string | null> {
-    const baseUrl = aiSettings.baseUrl.endsWith("/") ? aiSettings.baseUrl : `${aiSettings.baseUrl}/`;
+    const baseUrl = managedAiProvider.baseUrl.endsWith("/") ? managedAiProvider.baseUrl : `${managedAiProvider.baseUrl}/`;
     const response = await fetch(new URL("chat/completions", baseUrl).toString(), {
       method: "POST",
       headers: {
@@ -467,9 +512,9 @@ export class ChatbotService {
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
-        model: aiSettings.model,
+        model: managedAiProvider.model,
         messages,
-        temperature: aiSettings.temperature
+        temperature
       })
     });
 

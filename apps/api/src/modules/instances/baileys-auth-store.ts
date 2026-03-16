@@ -1,12 +1,8 @@
 import Database from "better-sqlite3";
-import {
-  BufferJSON,
-  initAuthCreds,
-  proto,
-  type AuthenticationState,
-  type SignalDataSet,
-  type SignalDataTypeMap
-} from "@whiskeysockets/baileys";
+import baileys from "@whiskeysockets/baileys";
+import type { AuthenticationState, SignalDataSet, SignalDataTypeMap } from "@whiskeysockets/baileys";
+
+const { BufferJSON, initAuthCreds, proto } = baileys;
 
 export interface SqliteAuthState {
   state: AuthenticationState;

@@ -834,7 +834,6 @@ export class InstanceOrchestrator {
 
       console.log("[leads] responseText:", chatbotResult?.responseText?.slice(0, 500));
       console.log("[leads] temResumo:", chatbotResult?.responseText?.includes("[RESUMO_LEAD]"));
-      console.log("[leads] groupJid config:", (this.config as { LEADS_GROUP_JID?: string }).LEADS_GROUP_JID ?? "NAO CONFIGURADO");
       console.log("[leads] groupJid banco:", chatbotConfig?.leadsGroupJid ?? "NAO CONFIGURADO");
 
       if (!chatbotResult?.responseText) {
@@ -845,18 +844,22 @@ export class InstanceOrchestrator {
       const resumoMatch = chatbotResult.responseText.match(resumoRegex);
       const resumoLead = resumoMatch?.[1]?.trim() ?? null;
       const clientResponseText = chatbotResult.responseText.replace(resumoRegex, "").trim();
+      const automationMetadata = {
+        action: chatbotResult.action,
+        matchedRuleId: chatbotResult.matchedRuleId ?? null,
+        matchedRuleName: chatbotResult.matchedRuleName ?? null
+      };
 
-      if (resumoLead) {
-        const groupJid = chatbotConfig?.leadsGroupJid ?? null;
+      const groupJid = chatbotConfig?.leadsGroupJid;
 
-        if (groupJid) {
-          const leadsGroupNumber = normalizePhoneNumber(groupJid.split("@")[0] ?? "");
+      if (groupJid && resumoLead) {
+        const leadsGroupNumber = groupJid.split("@")[0] ?? "";
 
           await this.sendAutomatedTextMessage(tenantId, instance.id, leadsGroupNumber, groupJid, `🔔 Novo lead agendado:\n\n${resumoLead}`, {
             action: "lead_summary",
             kind: "chatbot"
           });
-        } else {
+      } else if (resumoLead) {
           this.emitLog(buildWorkerKey(tenantId, instance.id), {
             context: {
               instanceId: instance.id
@@ -867,30 +870,23 @@ export class InstanceOrchestrator {
             timestamp: new Date().toISOString()
           });
         }
-      }
-
       if (!clientResponseText.trim()) {
         return;
       }
 
-      const responseParts = clientResponseText
-        .split("|||")
-        .map((part) => part.trim())
-        .filter((part) => part.length > 0);
+      if (clientResponseText.includes("|||")) {
+        const responseParts = clientResponseText
+          .split("|||")
+          .map((part) => part.trim())
+          .filter(Boolean);
 
-      for (let index = 0; index < responseParts.length; index += 1) {
-        const responsePart = responseParts[index];
-
-        await this.sendAutomatedTextMessage(tenantId, instance.id, remoteNumber, event.remoteJid, responsePart, {
-          action: chatbotResult.action,
-          matchedRuleId: chatbotResult.matchedRuleId ?? null,
-          matchedRuleName: chatbotResult.matchedRuleName ?? null
-        });
-
-        if (index < responseParts.length - 1) {
-          const delayMs = 1_000 + Math.floor(Math.random() * 501);
-          await new Promise((resolve) => setTimeout(resolve, delayMs));
+        for (const responsePart of responseParts) {
+          await new Promise((resolve) => setTimeout(resolve, Math.floor(Math.random() * 500) + 1000));
+          await this.sendAutomatedTextMessage(tenantId, instance.id, remoteNumber, event.remoteJid, responsePart, automationMetadata);
         }
+      } else {
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+        await this.sendAutomatedTextMessage(tenantId, instance.id, remoteNumber, event.remoteJid, clientResponseText, automationMetadata);
       }
     } catch (error) {
       this.emitLog(buildWorkerKey(tenantId, instance.id), {

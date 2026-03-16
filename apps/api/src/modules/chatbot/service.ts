@@ -470,7 +470,8 @@ export class ChatbotService {
       `Nome do contato: ${input.contactName?.trim() || "cliente"}.`,
       `Numero: ${normalizePhoneNumber(input.phoneNumber)}.`,
       "Se nao souber algo factual da empresa, admita a limitacao e ofereca transferir para humano.",
-      "Evite respostas longas. Responda em 1 a 4 frases."
+      "Evite respostas longas. Responda em 1 a 4 frases.",
+      "ATENCAO CRITICA: Quando confirmar um agendamento, inclua OBRIGATORIAMENTE ao final da resposta o bloco [RESUMO_LEAD] preenchido com os dados coletados. Sem este bloco o agendamento nao sera registrado."
     ].join("\n");
 
     const messages: Array<{ role: "user" | "assistant"; content: string }> = [];

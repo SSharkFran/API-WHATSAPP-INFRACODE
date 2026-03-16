@@ -247,6 +247,9 @@ export interface ApiErrorShape {
 
 export type ChatbotTriggerType = "EXACT" | "CONTAINS" | "REGEX" | "FIRST_CONTACT";
 
+export type ChatbotAiMode = "RULES_ONLY" | "RULES_THEN_AI" | "AI_ONLY";
+export type ChatbotAiProvider = "OPENAI_COMPATIBLE";
+
 export interface ChatbotRule {
   id: string;
   name: string;
@@ -256,6 +259,18 @@ export interface ChatbotRule {
   isActive: boolean;
 }
 
+export interface ChatbotAiConfig {
+  isEnabled: boolean;
+  mode: ChatbotAiMode;
+  provider: ChatbotAiProvider;
+  baseUrl: string;
+  model: string;
+  systemPrompt: string;
+  temperature: number;
+  maxContextMessages: number;
+  hasApiKey: boolean;
+}
+
 export interface ChatbotConfig {
   id: string;
   instanceId: string;
@@ -263,12 +278,13 @@ export interface ChatbotConfig {
   welcomeMessage?: string | null;
   fallbackMessage?: string | null;
   rules: ChatbotRule[];
+  ai: ChatbotAiConfig;
   createdAt: string;
   updatedAt: string;
 }
 
 export interface ChatbotSimulationResult {
-  action: "MATCHED" | "WELCOME" | "FALLBACK" | "NO_MATCH";
+  action: "MATCHED" | "WELCOME" | "FALLBACK" | "AI" | "NO_MATCH";
   matchedRuleId?: string | null;
   matchedRuleName?: string | null;
   responseText?: string | null;

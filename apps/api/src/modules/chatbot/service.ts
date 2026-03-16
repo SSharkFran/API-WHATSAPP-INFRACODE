@@ -1,11 +1,15 @@
-import type { ChatbotConfig, ChatbotRule, ChatbotSimulationResult } from "@infracode/types";
+import type { ChatbotAiConfig, ChatbotConfig, ChatbotRule, ChatbotSimulationResult } from "@infracode/types";
 import { z } from "zod";
+import type { Prisma } from "../../../../../prisma/generated/tenant-client/index.js";
+import type { AppConfig } from "../../config.js";
 import type { PlatformPrisma, TenantPrismaRegistry } from "../../lib/database.js";
+import { decrypt, encrypt } from "../../lib/crypto.js";
 import { ApiError } from "../../lib/errors.js";
 import { normalizePhoneNumber } from "../../lib/phone.js";
-import { chatbotRuleSchema } from "./schemas.js";
+import { chatbotAiConfigSchema, chatbotRuleSchema, upsertChatbotAiBodySchema } from "./schemas.js";
 
 interface ChatbotServiceDeps {
+  config: AppConfig;
   platformPrisma: PlatformPrisma;
   tenantPrismaRegistry: TenantPrismaRegistry;
 }
@@ -15,9 +19,25 @@ interface ChatbotRuntimeInput {
   isFirstContact: boolean;
   contactName?: string | null;
   phoneNumber: string;
+  remoteJid?: string | null;
 }
 
 const chatbotRulesArraySchema = z.array(chatbotRuleSchema);
+const chatbotAiSettingsSchema = chatbotAiConfigSchema.omit({
+  hasApiKey: true
+});
+const chatbotAiUpsertSchema = upsertChatbotAiBodySchema;
+const defaultAiSettings = {
+  isEnabled: false,
+  mode: "RULES_THEN_AI",
+  provider: "OPENAI_COMPATIBLE",
+  baseUrl: "https://api.openai.com/v1",
+  model: "",
+  systemPrompt:
+    "Voce e um assistente virtual comercial no WhatsApp. Responda sempre em portugues do Brasil, com clareza, objetividade e tom profissional.",
+  temperature: 0.4,
+  maxContextMessages: 12
+} as const;
 
 const formatDate = (date: Date): string =>
   new Intl.DateTimeFormat("pt-BR", {
@@ -91,10 +111,12 @@ const renderReplyTemplate = (
  * Gerencia o chatbot basico por instancia, com regras textuais e simulacao.
  */
 export class ChatbotService {
+  private readonly config: AppConfig;
   private readonly platformPrisma: PlatformPrisma;
   private readonly tenantPrismaRegistry: TenantPrismaRegistry;
 
   public constructor(deps: ChatbotServiceDeps) {
+    this.config = deps.config;
     this.platformPrisma = deps.platformPrisma;
     this.tenantPrismaRegistry = deps.tenantPrismaRegistry;
   }
@@ -112,10 +134,21 @@ export class ChatbotService {
       welcomeMessage?: string | null;
       fallbackMessage?: string | null;
       rules: ChatbotRule[];
+      ai?: z.infer<typeof chatbotAiUpsertSchema>;
     }
   ): Promise<ChatbotConfig> {
     const { prisma } = await this.getContext(tenantId, instanceId);
     const rules = chatbotRulesArraySchema.parse(input.rules);
+    const aiInput = chatbotAiUpsertSchema.parse(input.ai ?? defaultAiSettings);
+    const current = (await prisma.chatbotConfig.findUnique({
+      where: {
+        instanceId
+      }
+    })) as ({ aiApiKeyEncrypted?: string | null } & Record<string, unknown>) | null;
+    const encryptedApiKey =
+      aiInput.apiKey && aiInput.apiKey.trim()
+        ? encrypt(aiInput.apiKey.trim(), this.config.API_ENCRYPTION_KEY)
+        : current?.aiApiKeyEncrypted ?? null;
 
     const record = await prisma.chatbotConfig.upsert({
       where: {
@@ -126,14 +159,18 @@ export class ChatbotService {
         isEnabled: input.isEnabled,
         welcomeMessage: input.welcomeMessage?.trim() || null,
         fallbackMessage: input.fallbackMessage?.trim() || null,
-        rules
-      },
+        rules,
+        aiSettings: this.buildPersistedAiSettings(aiInput),
+        aiApiKeyEncrypted: encryptedApiKey
+      } as Prisma.ChatbotConfigUncheckedCreateInput,
       update: {
         isEnabled: input.isEnabled,
         welcomeMessage: input.welcomeMessage?.trim() || null,
         fallbackMessage: input.fallbackMessage?.trim() || null,
-        rules
-      }
+        rules,
+        aiSettings: this.buildPersistedAiSettings(aiInput),
+        aiApiKeyEncrypted: encryptedApiKey
+      } as Prisma.ChatbotConfigUncheckedUpdateInput
     });
 
     return this.mapConfig(record);
@@ -144,8 +181,8 @@ export class ChatbotService {
     instanceId: string,
     input: ChatbotRuntimeInput
   ): Promise<ChatbotSimulationResult> {
-    const { config } = await this.getContext(tenantId, instanceId);
-    return this.evaluateConfig(config, input);
+    const { config, prisma } = await this.getContext(tenantId, instanceId);
+    return this.evaluateConfig(prisma, config, input);
   }
 
   public async evaluateInbound(
@@ -153,13 +190,13 @@ export class ChatbotService {
     instanceId: string,
     input: ChatbotRuntimeInput
   ): Promise<ChatbotSimulationResult | null> {
-    const { config } = await this.getContext(tenantId, instanceId);
+    const { config, prisma } = await this.getContext(tenantId, instanceId);
 
     if (!config.isEnabled) {
       return null;
     }
 
-    const result = this.evaluateConfig(config, input);
+    const result = await this.evaluateConfig(prisma, config, input);
     return result.action === "NO_MATCH" ? null : result;
   }
 
@@ -196,13 +233,21 @@ export class ChatbotService {
             welcomeMessage: null,
             fallbackMessage: null,
             rules: [],
+            ai: {
+              ...defaultAiSettings,
+              hasApiKey: false
+            },
             createdAt: new Date(0).toISOString(),
             updatedAt: new Date(0).toISOString()
           }
     };
   }
 
-  private evaluateConfig(config: ChatbotConfig, input: ChatbotRuntimeInput): ChatbotSimulationResult {
+  private async evaluateConfig(
+    prisma: Awaited<ReturnType<TenantPrismaRegistry["getClient"]>>,
+    config: ChatbotConfig,
+    input: ChatbotRuntimeInput
+  ): Promise<ChatbotSimulationResult> {
     const normalizedInput = normalizeText(input.text ?? "");
 
     if (input.isFirstContact && config.welcomeMessage?.trim()) {
@@ -214,17 +259,25 @@ export class ChatbotService {
       };
     }
 
-    for (const rule of config.rules) {
-      if (!matchesRule(rule, normalizedInput, input.isFirstContact)) {
-        continue;
-      }
+    if (config.ai.mode !== "AI_ONLY") {
+      for (const rule of config.rules) {
+        if (!matchesRule(rule, normalizedInput, input.isFirstContact)) {
+          continue;
+        }
 
-      return {
-        action: "MATCHED",
-        matchedRuleId: rule.id,
-        matchedRuleName: rule.name,
-        responseText: renderReplyTemplate(rule.responseText, input)
-      };
+        return {
+          action: "MATCHED",
+          matchedRuleId: rule.id,
+          matchedRuleName: rule.name,
+          responseText: renderReplyTemplate(rule.responseText, input)
+        };
+      }
+    }
+
+    const aiResult = await this.evaluateWithAi(prisma, config, input);
+
+    if (aiResult) {
+      return aiResult;
     }
 
     if (normalizedInput && config.fallbackMessage?.trim()) {
@@ -251,9 +304,16 @@ export class ChatbotService {
     welcomeMessage: string | null;
     fallbackMessage: string | null;
     rules: unknown;
+    aiSettings?: unknown;
+    aiApiKeyEncrypted?: string | null;
     createdAt: Date;
     updatedAt: Date;
   }): ChatbotConfig {
+    const aiSettings = chatbotAiSettingsSchema.parse({
+      ...defaultAiSettings,
+      ...(record.aiSettings && typeof record.aiSettings === "object" ? record.aiSettings : {})
+    });
+
     return {
       id: record.id,
       instanceId: record.instanceId,
@@ -261,8 +321,183 @@ export class ChatbotService {
       welcomeMessage: record.welcomeMessage,
       fallbackMessage: record.fallbackMessage,
       rules: chatbotRulesArraySchema.parse(record.rules),
+      ai: {
+        ...aiSettings,
+        hasApiKey: Boolean(record.aiApiKeyEncrypted)
+      },
       createdAt: record.createdAt.toISOString(),
       updatedAt: record.updatedAt.toISOString()
     };
+  }
+
+  private buildPersistedAiSettings(input: z.infer<typeof chatbotAiUpsertSchema>): Prisma.InputJsonValue {
+    const parsed = chatbotAiSettingsSchema.parse({
+      ...defaultAiSettings,
+      ...input
+    });
+
+    return parsed as unknown as Prisma.InputJsonValue;
+  }
+
+  private async evaluateWithAi(
+    prisma: Awaited<ReturnType<TenantPrismaRegistry["getClient"]>>,
+    config: ChatbotConfig,
+    input: ChatbotRuntimeInput
+  ): Promise<ChatbotSimulationResult | null> {
+    if (config.ai.mode === "RULES_ONLY") {
+      return null;
+    }
+
+    if (!config.ai.isEnabled) {
+      return null;
+    }
+
+    if (!input.text?.trim()) {
+      return null;
+    }
+
+    const record = (await prisma.chatbotConfig.findUnique({
+      where: {
+        instanceId: config.instanceId
+      }
+    })) as ({
+      aiApiKeyEncrypted?: string | null;
+      aiSettings?: unknown;
+    } & Record<string, unknown>) | null;
+
+    if (!record?.aiApiKeyEncrypted || !record.aiSettings) {
+      return null;
+    }
+
+    const aiSettings = chatbotAiSettingsSchema.parse({
+      ...defaultAiSettings,
+      ...(typeof record.aiSettings === "object" && record.aiSettings ? record.aiSettings : {})
+    });
+
+    if (!aiSettings.isEnabled || !aiSettings.model.trim()) {
+      return null;
+    }
+
+    try {
+      const apiKey = decrypt(record.aiApiKeyEncrypted, this.config.API_ENCRYPTION_KEY);
+      const messages = await this.buildAiMessages(prisma, config.instanceId, input, aiSettings.systemPrompt, aiSettings.maxContextMessages);
+      const responseText = await this.requestOpenAiCompatibleCompletion(aiSettings, apiKey, messages);
+
+      if (!responseText) {
+        return null;
+      }
+
+      return {
+        action: "AI",
+        matchedRuleId: null,
+        matchedRuleName: `${aiSettings.provider}:${aiSettings.model}`,
+        responseText
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  private async buildAiMessages(
+    prisma: Awaited<ReturnType<TenantPrismaRegistry["getClient"]>>,
+    instanceId: string,
+    input: ChatbotRuntimeInput,
+    systemPrompt: string,
+    maxContextMessages: number
+  ): Promise<Array<{ role: "system" | "user" | "assistant"; content: string }>> {
+    const messages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [
+      {
+        role: "system",
+        content: [
+          systemPrompt.trim() || defaultAiSettings.systemPrompt,
+          `Data atual: ${formatDate(new Date())} ${formatTime(new Date())}.`,
+          `Nome do contato: ${input.contactName?.trim() || "cliente"}.`,
+          `Numero: ${normalizePhoneNumber(input.phoneNumber)}.`,
+          "Se nao souber algo factual da empresa, admita a limitacao e ofereca transferir para humano.",
+          "Evite respostas longas. Responda em 1 a 4 frases."
+        ].join("\n")
+      }
+    ];
+
+    if (input.remoteJid) {
+      const history = await prisma.message.findMany({
+        where: {
+          instanceId,
+          remoteJid: input.remoteJid
+        },
+        orderBy: {
+          createdAt: "desc"
+        },
+        take: maxContextMessages
+      });
+
+      for (const item of [...history].reverse()) {
+        const payload = item.payload as Record<string, unknown>;
+        const text = typeof payload.text === "string" ? payload.text.trim() : "";
+
+        if (!text) {
+          continue;
+        }
+
+        messages.push({
+          role: item.direction === "INBOUND" ? "user" : "assistant",
+          content: text
+        });
+      }
+    } else if (input.text?.trim()) {
+      messages.push({
+        role: "user",
+        content: input.text.trim()
+      });
+    }
+
+    return messages;
+  }
+
+  private async requestOpenAiCompatibleCompletion(
+    aiSettings: Omit<ChatbotAiConfig, "hasApiKey">,
+    apiKey: string,
+    messages: Array<{ role: "system" | "user" | "assistant"; content: string }>
+  ): Promise<string | null> {
+    const baseUrl = aiSettings.baseUrl.endsWith("/") ? aiSettings.baseUrl : `${aiSettings.baseUrl}/`;
+    const response = await fetch(new URL("chat/completions", baseUrl).toString(), {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        model: aiSettings.model,
+        messages,
+        temperature: aiSettings.temperature
+      })
+    });
+
+    if (!response.ok) {
+      throw new Error(`IA indisponivel: ${response.status}`);
+    }
+
+    const json = (await response.json()) as {
+      choices?: Array<{
+        message?: {
+          content?: string | Array<{ type?: string; text?: string }>;
+        };
+      }>;
+    };
+
+    const content = json.choices?.[0]?.message?.content;
+
+    if (typeof content === "string") {
+      return content.trim() || null;
+    }
+
+    if (Array.isArray(content)) {
+      return content
+        .map((item) => (typeof item.text === "string" ? item.text : ""))
+        .join("\n")
+        .trim();
+    }
+
+    return null;
   }
 }

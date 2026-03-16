@@ -59,6 +59,7 @@ export const buildApp = async () => {
     emailService
   });
   const chatbotService = new ChatbotService({
+    config,
     platformPrisma,
     tenantPrismaRegistry
   });

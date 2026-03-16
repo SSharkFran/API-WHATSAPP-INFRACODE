@@ -145,15 +145,17 @@ model MessageTemplate {
 }
 
 model ChatbotConfig {
-  id             String   @id @default(cuid())
-  instanceId     String   @unique
-  isEnabled      Boolean  @default(false)
-  welcomeMessage String?
+  id              String   @id @default(cuid())
+  instanceId      String   @unique
+  isEnabled       Boolean  @default(false)
+  welcomeMessage  String?
   fallbackMessage String?
-  rules          Json
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
-  instance       Instance @relation(fields: [instanceId], references: [id], onDelete: Cascade)
+  rules           Json
+  aiSettings      Json?
+  aiApiKeyEncrypted String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  instance        Instance @relation(fields: [instanceId], references: [id], onDelete: Cascade)
 }
 
 model AuditLog {

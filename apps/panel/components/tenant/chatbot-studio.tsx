@@ -3,6 +3,7 @@
 import { startTransition, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import type {
+  ChatbotAiMode,
   ChatbotConfig,
   ChatbotRule,
   ChatbotSimulationResult,
@@ -21,6 +22,17 @@ interface ChatbotFormState {
   welcomeMessage: string;
   fallbackMessage: string;
   rules: ChatbotRule[];
+  ai: {
+    isEnabled: boolean;
+    mode: ChatbotAiMode;
+    baseUrl: string;
+    model: string;
+    systemPrompt: string;
+    temperature: number;
+    maxContextMessages: number;
+    apiKey: string;
+    hasApiKey: boolean;
+  };
 }
 
 interface SimulationFormState {
@@ -58,7 +70,19 @@ const buildDefaultFormState = (): ChatbotFormState => ({
   isEnabled: false,
   welcomeMessage: "",
   fallbackMessage: "",
-  rules: []
+  rules: [],
+  ai: {
+    isEnabled: false,
+    mode: "RULES_THEN_AI",
+    baseUrl: "https://api.openai.com/v1",
+    model: "",
+    systemPrompt:
+      "Voce e um assistente virtual comercial no WhatsApp. Responda sempre em portugues do Brasil, com clareza, objetividade e tom profissional.",
+    temperature: 0.4,
+    maxContextMessages: 12,
+    apiKey: "",
+    hasApiKey: false
+  }
 });
 
 const buildSimulationFormState = (): SimulationFormState => ({
@@ -72,7 +96,18 @@ const mapConfigToFormState = (config: ChatbotConfig): ChatbotFormState => ({
   isEnabled: config.isEnabled,
   welcomeMessage: config.welcomeMessage ?? "",
   fallbackMessage: config.fallbackMessage ?? "",
-  rules: config.rules
+  rules: config.rules,
+  ai: {
+    isEnabled: config.ai.isEnabled,
+    mode: config.ai.mode,
+    baseUrl: config.ai.baseUrl,
+    model: config.ai.model,
+    systemPrompt: config.ai.systemPrompt,
+    temperature: config.ai.temperature,
+    maxContextMessages: config.ai.maxContextMessages,
+    apiKey: "",
+    hasApiKey: config.ai.hasApiKey
+  }
 });
 
 const formatDateTime = (value?: string | null): string =>
@@ -195,7 +230,18 @@ export const ChatbotStudio = ({ initialInstances }: ChatbotStudioProps) => {
             ...rule,
             matchValue: rule.triggerType === "FIRST_CONTACT" ? null : rule.matchValue?.trim() || null,
             responseText: rule.responseText.trim()
-          }))
+          })),
+          ai: {
+            isEnabled: formState.ai.isEnabled,
+            mode: formState.ai.mode,
+            provider: "OPENAI_COMPATIBLE",
+            baseUrl: formState.ai.baseUrl.trim(),
+            model: formState.ai.model.trim(),
+            systemPrompt: formState.ai.systemPrompt.trim(),
+            temperature: formState.ai.temperature,
+            maxContextMessages: formState.ai.maxContextMessages,
+            apiKey: formState.ai.apiKey.trim() || undefined
+          }
         }
       });
 
@@ -324,6 +370,160 @@ export const ChatbotStudio = ({ initialInstances }: ChatbotStudioProps) => {
                 value={formState.fallbackMessage}
               />
             </label>
+
+            <div className="space-y-4 rounded-[24px] border border-slate-200 bg-slate-50/70 p-4">
+              <div>
+                <p className="text-lg font-semibold text-slate-950">Modo IA</p>
+                <p className="text-sm text-slate-600">
+                  Use um provedor compativel com OpenAI para respostas naturais. Pode operar em conjunto com regras ou sozinho.
+                </p>
+              </div>
+
+              <label className="flex items-center gap-3 rounded-[20px] border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
+                <input
+                  checked={formState.ai.isEnabled}
+                  onChange={(event) =>
+                    setFormState((current) => ({
+                      ...current,
+                      ai: {
+                        ...current.ai,
+                        isEnabled: event.target.checked
+                      }
+                    }))
+                  }
+                  type="checkbox"
+                />
+                Responder com IA quando aplicavel
+              </label>
+
+              <div className="grid gap-4 lg:grid-cols-2">
+                <label className="space-y-2 text-sm">
+                  <span className="text-slate-600">Modo</span>
+                  <select
+                    className={selectClassName}
+                    onChange={(event) =>
+                      setFormState((current) => ({
+                        ...current,
+                        ai: {
+                          ...current.ai,
+                          mode: event.target.value as ChatbotAiMode
+                        }
+                      }))
+                    }
+                    value={formState.ai.mode}
+                  >
+                    <option value="RULES_ONLY">Somente regras</option>
+                    <option value="RULES_THEN_AI">Regras e depois IA</option>
+                    <option value="AI_ONLY">Somente IA</option>
+                  </select>
+                </label>
+                <label className="space-y-2 text-sm">
+                  <span className="text-slate-600">Modelo</span>
+                  <Input
+                    onChange={(event) =>
+                      setFormState((current) => ({
+                        ...current,
+                        ai: {
+                          ...current.ai,
+                          model: event.target.value
+                        }
+                      }))
+                    }
+                    placeholder="gpt-4.1-mini, llama3.1, gemma..."
+                    value={formState.ai.model}
+                  />
+                </label>
+              </div>
+
+              <div className="grid gap-4 lg:grid-cols-2">
+                <label className="space-y-2 text-sm">
+                  <span className="text-slate-600">Base URL</span>
+                  <Input
+                    onChange={(event) =>
+                      setFormState((current) => ({
+                        ...current,
+                        ai: {
+                          ...current.ai,
+                          baseUrl: event.target.value
+                        }
+                      }))
+                    }
+                    placeholder="https://api.openai.com/v1"
+                    value={formState.ai.baseUrl}
+                  />
+                </label>
+                <label className="space-y-2 text-sm">
+                  <span className="text-slate-600">API key {formState.ai.hasApiKey ? "(ja cadastrada)" : ""}</span>
+                  <Input
+                    onChange={(event) =>
+                      setFormState((current) => ({
+                        ...current,
+                        ai: {
+                          ...current.ai,
+                          apiKey: event.target.value
+                        }
+                      }))
+                    }
+                    placeholder={formState.ai.hasApiKey ? "Preencha so se quiser trocar a chave" : "sk-..."}
+                    type="password"
+                    value={formState.ai.apiKey}
+                  />
+                </label>
+              </div>
+
+              <div className="grid gap-4 lg:grid-cols-2">
+                <label className="space-y-2 text-sm">
+                  <span className="text-slate-600">Temperatura</span>
+                  <Input
+                    onChange={(event) =>
+                      setFormState((current) => ({
+                        ...current,
+                        ai: {
+                          ...current.ai,
+                          temperature: Number(event.target.value || 0)
+                        }
+                      }))
+                    }
+                    type="number"
+                    value={formState.ai.temperature}
+                  />
+                </label>
+                <label className="space-y-2 text-sm">
+                  <span className="text-slate-600">Contexto maximo</span>
+                  <Input
+                    onChange={(event) =>
+                      setFormState((current) => ({
+                        ...current,
+                        ai: {
+                          ...current.ai,
+                          maxContextMessages: Number(event.target.value || 1)
+                        }
+                      }))
+                    }
+                    type="number"
+                    value={formState.ai.maxContextMessages}
+                  />
+                </label>
+              </div>
+
+              <label className="space-y-2 text-sm">
+                <span className="text-slate-600">Prompt do sistema</span>
+                <textarea
+                  className="min-h-[140px] w-full rounded-[24px] border border-slate-200/80 bg-white/92 px-4 py-3 text-sm text-slate-950 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
+                  onChange={(event) =>
+                    setFormState((current) => ({
+                      ...current,
+                      ai: {
+                        ...current.ai,
+                        systemPrompt: event.target.value
+                      }
+                    }))
+                  }
+                  placeholder="Voce e um assistente comercial..."
+                  value={formState.ai.systemPrompt}
+                />
+              </label>
+            </div>
 
             <div className="space-y-4">
               <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
@@ -527,6 +727,9 @@ export const ChatbotStudio = ({ initialInstances }: ChatbotStudioProps) => {
                 <div className="list-row-light rounded-[22px] p-4">Regras cadastradas: {formState.rules.length}</div>
                 <div className="list-row-light rounded-[22px] p-4">
                   Chatbot: {formState.isEnabled ? "habilitado e pronto para responder" : "desabilitado"}
+                </div>
+                <div className="list-row-light rounded-[22px] p-4">
+                  IA: {formState.ai.isEnabled ? `${formState.ai.mode} / ${formState.ai.model || "modelo nao definido"}` : "desabilitada"}
                 </div>
               </div>
             </CardContent>

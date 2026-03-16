@@ -109,52 +109,53 @@ export const LoginForm = () => {
   };
 
   return (
-    <div className="space-y-6">
-      <div className="grid gap-5">
-        <label className="block text-[13px] font-medium tracking-wide text-slate-400">
-          Email
+    <div className="space-y-8">
+      <div className="grid gap-6">
+        <label className="group block space-y-2">
+          <span className="label-minimal transition-colors group-hover:text-white/40">Email</span>
           <Input
-            className="mt-2 h-[52px] rounded-[10px] border-white/5 bg-slate-950/20 px-4 text-slate-50 placeholder:text-slate-600 focus:border-sky-500/50 transition-all"
+            className="input-minimal px-0 text-[13px] placeholder:text-[#2e3d58] border-t-0 border-x-0 border-b-[0.5px] hover:border-b-white/20 focus:border-b-white/40 transition-all"
             onChange={(event) => setEmail(event.target.value)}
-            placeholder="owner@infracode.local"
+            placeholder="email@address.com"
             value={email}
           />
         </label>
-        <label className="block text-[13px] font-medium tracking-wide text-slate-400">
-          Senha
+        <label className="group block space-y-2">
+          <span className="label-minimal transition-colors group-hover:text-white/40">Senha</span>
           <Input
-            className="mt-2 h-[52px] rounded-[10px] border-white/5 bg-slate-950/20 px-4 text-slate-50 placeholder:text-slate-600 focus:border-sky-500/50 transition-all"
+            className="input-minimal px-0 text-[13px] placeholder:text-[#2e3d58] border-t-0 border-x-0 border-b-[0.5px] hover:border-b-white/20 focus:border-b-white/40 transition-all"
             onChange={(event) => setPassword(event.target.value)}
-            placeholder="********"
+            placeholder="••••••••"
             type="password"
             value={password}
           />
         </label>
-        <label className="block text-[13px] font-medium tracking-wide text-slate-400">
-          Slug do tenant
+        <label className="group block space-y-2">
+          <span className="label-minimal transition-colors group-hover:text-white/40">Slug do tenant</span>
           <Input
-            className="mt-2 h-[52px] rounded-[10px] border-white/5 bg-slate-950/20 px-4 text-slate-50 placeholder:text-slate-600 focus:border-sky-500/50 transition-all"
+            className="input-minimal px-0 text-[13px] placeholder:text-[#2e3d58] border-t-0 border-x-0 border-b-[0.5px] hover:border-b-white/20 focus:border-b-white/40 transition-all"
             onChange={(event) => setTenantSlug(event.target.value)}
-            placeholder="demo"
+            placeholder="slug-exemplo"
             value={tenantSlug}
           />
         </label>
-        <div className="grid gap-5 sm:grid-cols-2">
-          <label className="block text-[13px] font-medium tracking-wide text-slate-400">
-            TOTP
+        
+        <div className="grid grid-cols-1 gap-6 xs:grid-cols-2">
+          <label className="group block space-y-2">
+            <span className="label-minimal transition-colors group-hover:text-white/40">TOTP</span>
             <Input
-              className="mt-2 h-[52px] rounded-[10px] border-white/5 bg-slate-950/20 px-4 text-slate-50 placeholder:text-slate-600 focus:border-sky-500/50 transition-all"
+              className="input-minimal px-0 text-[13px] placeholder:text-[#2e3d58] border-t-0 border-x-0 border-b-[0.5px] hover:border-b-white/20 focus:border-b-white/40 transition-all"
               onChange={(event) => setTotpCode(event.target.value)}
-              placeholder="123456"
+              placeholder="000000"
               value={totpCode}
             />
           </label>
-          <label className="block text-[13px] font-medium tracking-wide text-slate-400">
-            Backup code
+          <label className="group block space-y-2">
+            <span className="label-minimal transition-colors group-hover:text-white/40">Backup</span>
             <Input
-              className="mt-2 h-[52px] rounded-[10px] border-white/5 bg-slate-950/20 px-4 text-slate-50 placeholder:text-slate-600 focus:border-sky-500/50 transition-all"
+              className="input-minimal px-0 text-[13px] placeholder:text-[#2e3d58] border-t-0 border-x-0 border-b-[0.5px] hover:border-b-white/20 focus:border-b-white/40 transition-all"
               onChange={(event) => setBackupCode(event.target.value)}
-              placeholder="backup-code"
+              placeholder="code-123"
               value={backupCode}
             />
           </label>
@@ -162,34 +163,34 @@ export const LoginForm = () => {
       </div>
 
       {error ? (
-        <div className="flex items-center gap-3 rounded-[10px] border border-rose-500/10 bg-rose-500/5 px-4 py-3 text-[13px] text-rose-300 animate-in fade-in slide-in-from-top-1">
-          <span className="h-1.5 w-1.5 rounded-full bg-rose-500 shadow-[0_0_10px_rgba(244,63,94,0.5)]" />
+        <div className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-rose-500/80">
+          <span>×</span>
           {error}
         </div>
       ) : null}
 
-      <div className="grid gap-4">
+      <div className="grid gap-3">
         <Button
-          className="h-[52px] w-full rounded-[10px] bg-sky-500 text-[15px] font-bold text-slate-950 hover:bg-sky-400 transition-all shadow-[0_10px_20px_rgba(14,165,233,0.15)] hover:shadow-[0_10px_25px_rgba(14,165,233,0.25)]"
+          className="btn-primary-minimal h-12 text-[13px] tracking-tight transition-opacity hover:opacity-90"
           disabled={pendingMode !== null}
           onClick={() => void submit("admin")}
         >
-          {pendingMode === "admin" ? "Entrando..." : "Painel Super Admin"}
+          {pendingMode === "admin" ? "Aguarde..." : "Acessar Super Admin"}
         </Button>
         <Button
-          className="h-[52px] w-full rounded-[10px] border border-white/10 bg-white/5 text-[15px] font-bold text-slate-100 hover:bg-white/10 transition-all"
+          className="btn-secondary-minimal h-12 text-[13px] tracking-tight transition-colors hover:text-white/60 hover:border-white/20"
           disabled={pendingMode !== null}
           onClick={() => void submit("tenant")}
           variant="secondary"
         >
-          {pendingMode === "tenant" ? "Entrando..." : "Painel do Cliente"}
+          {pendingMode === "tenant" ? "Aguarde..." : "Painel do Cliente"}
         </Button>
       </div>
 
-      <div className="flex flex-col gap-4 pt-2 text-[12px] text-slate-500 leading-relaxed">
-        <p>Em localhost ou 127.0.0.1, informe o slug do tenant manualmente. Em subdomínio ele é resolvido automaticamente.</p>
-        <Link className="text-sky-400/80 hover:text-sky-300 transition-colors w-fit underline underline-offset-4" href="/redefinir-senha">
-          Esqueceu sua senha?
+      <div className="space-y-4 pt-4 text-[10px] uppercase tracking-[0.1em] text-[#2e3d58]">
+        <p className="leading-loose">Identificação automática via DNS ativa em produção.</p>
+        <Link className="block text-white/20 hover:text-white/60 transition-colors" href="/redefinir-senha">
+          Solicitar nova senha
         </Link>
       </div>
     </div>

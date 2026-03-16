@@ -8,6 +8,10 @@ const config: Config = {
   ],
   theme: {
     extend: {
+      screens: {
+        xs: "520px",
+        ms: "820px"
+      },
       colors: {
         surface: "var(--surface)",
         ink: "var(--ink)",

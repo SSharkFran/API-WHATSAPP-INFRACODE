@@ -1,19 +1,23 @@
-@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Sora:wght@700&family=Inter:wght@300;400;500&display=swap');
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 :root {
-  --surface: #f8fafc;
-  --ink: #0f172a;
-  --accent: #38bdf8;
-  --sand: #e2e8f0;
-  --brand-blue: #2563eb;
-  --brand-blue-deep: #0f172a;
-  --brand-slate: #0f172a;
-  --brand-mist: #dbeafe;
-  --font-display: 'Plus Jakarta Sans', sans-serif;
+  --surface: #080c18;
+  --ink: #ffffff;
+  --accent: #1a3a6b;
+  --sand: #2e3d58;
+  
+  --fluid-title: clamp(28px, 3.5vw, 54px);
+  --fluid-desc: clamp(13px, 1.1vw, 15px);
+  --fluid-p-side: clamp(24px, 5vw, 80px);
+  --fluid-p-vert: clamp(48px, 7vw, 96px);
+  --fluid-gap: clamp(32px, 5vw, 80px);
+  
+  --font-display: 'Sora', sans-serif;
+  --font-body: 'Inter', sans-serif;
 }
 
 html,
@@ -47,11 +51,10 @@ a {
 }
 
 .theme-auth {
-  background:
-    radial-gradient(circle at top left, rgba(56, 189, 248, 0.08), transparent 35%),
-    radial-gradient(circle at bottom right, rgba(59, 130, 246, 0.06), transparent 35%),
-    linear-gradient(180deg, #0a0f1e 0%, #0d1627 100%);
-  font-family: var(--font-display);
+  background: #080c18;
+  font-family: var(--font-body);
+  color: white;
+  -webkit-font-smoothing: antialiased;
 }
 
 .theme-super {
@@ -336,32 +339,88 @@ a {
     color: rgb(148 163 184);
   }
 }
-
-.form-glow {
-  box-shadow: 0 0 80px rgba(56, 189, 248, 0.15);
+.minimalist-border {
+  border: 0.5px solid rgba(255, 255, 255, 0.06);
 }
 
-.feature-card-hover:hover {
-  border-color: rgba(56, 189, 248, 0.3);
-  transform: translateY(-4px);
-  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.2);
-}
-
-.text-hero {
-  font-size: 64px;
+.text-fluid-title {
+  font-family: var(--font-display);
+  font-size: var(--fluid-title);
   line-height: 1.1;
   font-weight: 700;
   letter-spacing: -0.02em;
 }
 
-.text-subtitle {
-  font-size: 18px;
-  opacity: 0.7;
+.text-fluid-desc {
+  font-size: var(--fluid-desc);
+  font-weight: 300;
   line-height: 1.6;
 }
 
-@media (max-width: 640px) {
-  .text-hero {
-    font-size: 40px;
-  }
+.text-faded {
+  color: #2e3d58;
+  transition: color 0.2s ease;
+}
+
+.text-faded:hover {
+  color: rgba(255, 255, 255, 0.4);
+}
+
+.btn-primary-minimal {
+  background: #1a3a6b;
+  color: #c4d9ff;
+  border: none;
+  font-weight: 500;
+}
+
+.btn-secondary-minimal {
+  background: transparent;
+  border: 0.5px solid rgba(255, 255, 255, 0.06);
+  color: #2e3d58;
+  font-weight: 500;
+}
+
+.card-minimal {
+  background: transparent;
+  border: 0.5px solid rgba(255, 255, 255, 0.06);
+  border-radius: 0;
+  transition: border-color 0.2s ease;
+}
+
+.card-minimal:hover {
+  border-color: rgba(77, 142, 247, 0.2);
+}
+
+.input-minimal {
+  background: transparent;
+  border: 0.5px solid rgba(255, 255, 255, 0.06) !important;
+  border-radius: 0 !important;
+  font-weight: 400;
+  height: 52px;
+}
+
+.label-minimal {
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #2e3d58;
+}
+
+.badge-dot {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #2e3d58;
+}
+
+.badge-dot::before {
+  content: "";
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: #2e3d58;
 }

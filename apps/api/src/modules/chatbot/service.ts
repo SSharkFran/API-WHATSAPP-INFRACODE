@@ -418,14 +418,19 @@ export class ChatbotService {
 
     try {
       const apiKey = decrypt(managedAiProvider.apiKeyEncrypted, this.config.API_ENCRYPTION_KEY);
-      const messages = await this.buildAiMessages(
+      const conversation = await this.buildAiConversation(
         prisma,
         config.instanceId,
         input,
         config.ai.systemPrompt,
         config.ai.maxContextMessages
       );
-      const responseText = await this.requestOpenAiCompatibleCompletion(managedAiProvider, apiKey, messages, config.ai.temperature);
+      const responseText = await this.requestOpenAiCompatibleCompletion(
+        managedAiProvider,
+        apiKey,
+        conversation,
+        config.ai.temperature
+      );
 
       if (!responseText) {
         return null;
@@ -442,26 +447,26 @@ export class ChatbotService {
     }
   }
 
-  private async buildAiMessages(
+  private async buildAiConversation(
     prisma: Awaited<ReturnType<TenantPrismaRegistry["getClient"]>>,
     instanceId: string,
     input: ChatbotRuntimeInput,
     systemPrompt: string,
     maxContextMessages: number
-  ): Promise<Array<{ role: "system" | "user" | "assistant"; content: string }>> {
-    const messages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [
-      {
-        role: "system",
-        content: [
-          systemPrompt.trim() || defaultAiSettings.systemPrompt,
-          `Data atual: ${formatDate(new Date())} ${formatTime(new Date())}.`,
-          `Nome do contato: ${input.contactName?.trim() || "cliente"}.`,
-          `Numero: ${normalizePhoneNumber(input.phoneNumber)}.`,
-          "Se nao souber algo factual da empresa, admita a limitacao e ofereca transferir para humano.",
-          "Evite respostas longas. Responda em 1 a 4 frases."
-        ].join("\n")
-      }
-    ];
+  ): Promise<{
+    system: string;
+    messages: Array<{ role: "user" | "assistant"; content: string }>;
+  }> {
+    const system = [
+      systemPrompt.trim() || defaultAiSettings.systemPrompt,
+      `Data atual: ${formatDate(new Date())} ${formatTime(new Date())}.`,
+      `Nome do contato: ${input.contactName?.trim() || "cliente"}.`,
+      `Numero: ${normalizePhoneNumber(input.phoneNumber)}.`,
+      "Se nao souber algo factual da empresa, admita a limitacao e ofereca transferir para humano.",
+      "Evite respostas longas. Responda em 1 a 4 frases."
+    ].join("\n");
+
+    const messages: Array<{ role: "user" | "assistant"; content: string }> = [];
 
     if (input.remoteJid) {
       const history = await prisma.message.findMany({
@@ -488,20 +493,36 @@ export class ChatbotService {
           content: text
         });
       }
-    } else if (input.text?.trim()) {
+    }
+
+    const currentInput = input.text?.trim();
+    const lastMessage = messages.at(-1);
+
+    if (
+      currentInput &&
+      (!lastMessage ||
+        lastMessage.role !== "user" ||
+        normalizeText(lastMessage.content) !== normalizeText(currentInput))
+    ) {
       messages.push({
         role: "user",
-        content: input.text.trim()
+        content: currentInput
       });
     }
 
-    return messages;
+    return {
+      system,
+      messages
+    };
   }
 
   private async requestOpenAiCompatibleCompletion(
     managedAiProvider: ManagedAiProviderRuntime,
     apiKey: string,
-    messages: Array<{ role: "system" | "user" | "assistant"; content: string }>,
+    conversation: {
+      system: string;
+      messages: Array<{ role: "user" | "assistant"; content: string }>;
+    },
     temperature: number
   ): Promise<string | null> {
     const baseUrl = managedAiProvider.baseUrl.endsWith("/") ? managedAiProvider.baseUrl : `${managedAiProvider.baseUrl}/`;
@@ -513,8 +534,10 @@ export class ChatbotService {
       },
       body: JSON.stringify({
         model: managedAiProvider.model,
-        messages,
-        temperature
+        system: conversation.system,
+        messages: conversation.messages,
+        temperature,
+        max_tokens: 300
       })
     });
 

@@ -770,7 +770,8 @@ export class InstanceOrchestrator {
         text: inputText,
         isFirstContact,
         contactName: contact.displayName,
-        phoneNumber: remoteNumber
+        phoneNumber: remoteNumber,
+        remoteJid: event.remoteJid
       });
 
       if (!chatbotResult?.responseText) {

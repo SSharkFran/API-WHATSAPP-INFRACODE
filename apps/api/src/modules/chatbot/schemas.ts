@@ -18,7 +18,7 @@ export const chatbotAiConfigSchema = z.object({
   mode: chatbotAiModeSchema.default("RULES_THEN_AI"),
   provider: chatbotAiProviderSchema.nullable().default(null),
   model: z.string().max(120).default(""),
-  systemPrompt: z.string().max(4_000).default(""),
+  systemPrompt: z.string().max(8_000).default(""),
   temperature: z.number().min(0).max(2).default(0.4),
   maxContextMessages: z.number().int().min(1).max(30).default(12),
   isManagedByAdmin: z.boolean().default(true),
@@ -29,7 +29,7 @@ export const chatbotAiConfigSchema = z.object({
 export const upsertChatbotAiBodySchema = z.object({
   isEnabled: z.boolean().default(false),
   mode: chatbotAiModeSchema.default("RULES_THEN_AI"),
-  systemPrompt: z.string().max(4_000).default(""),
+  systemPrompt: z.string().max(8_000).default(""),
   temperature: z.number().min(0).max(2).default(0.4),
   maxContextMessages: z.number().int().min(1).max(30).default(12)
 });

@@ -349,6 +349,12 @@ export const TenantOnboardingWorkbench = ({
                       </div>
                     ) : null}
 
+                    {health?.lastError ? (
+                      <div className="rounded-[22px] border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+                        Ultimo erro do worker: {health.lastError}
+                      </div>
+                    ) : null}
+
                     <div className="flex flex-wrap gap-3">
                       <Button className="rounded-2xl" onClick={() => setShowQrFor(selectedInstance.id)} variant="secondary">
                         Abrir QR

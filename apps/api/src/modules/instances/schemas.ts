@@ -36,6 +36,7 @@ export const instanceSummarySchema = z.object({
   avatarUrl: z.string().nullable().optional(),
   status: instanceStatusSchema,
   lastActivityAt: z.string().nullable().optional(),
+  lastError: z.string().nullable().optional(),
   connectedAt: z.string().nullable().optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
@@ -50,6 +51,7 @@ export const instanceHealthSchema = z.object({
   databaseConnected: z.boolean(),
   qrExpiresIn: z.number().int().nonnegative().optional(),
   lastActivityAt: z.string().nullable().optional(),
+  lastError: z.string().nullable().optional(),
   reconnectAttempts: z.number().int().nonnegative(),
   uptimeSeconds: z.number().int().nonnegative(),
   queueDepth: z.number().int().nonnegative()

@@ -28,10 +28,11 @@ const formatUptime = (seconds: number): string => {
 
 const callApi = async (path: string, init?: RequestInit) => {
   const panelConfig = getClientPanelConfig();
+  const hasBody = init?.body !== undefined;
   const response = await fetch(`${panelConfig.apiBaseUrl}${path}`, {
     ...init,
     headers: {
-      "content-type": "application/json",
+      ...(hasBody ? { "content-type": "application/json" } : {}),
       ...(panelConfig.tenantAccessToken ? { authorization: `Bearer ${panelConfig.tenantAccessToken}` } : {}),
       ...(panelConfig.tenantApiKey ? { "x-api-key": panelConfig.tenantApiKey } : {}),
       ...(init?.headers ?? {})
@@ -39,7 +40,12 @@ const callApi = async (path: string, init?: RequestInit) => {
   });
 
   if (!response.ok) {
-    throw new Error(`HTTP ${response.status}`);
+    try {
+      const payload = (await response.json()) as { message?: string };
+      throw new Error(payload.message ?? `HTTP ${response.status}`);
+    } catch {
+      throw new Error(`HTTP ${response.status}`);
+    }
   }
 };
 
@@ -114,6 +120,7 @@ export const InstanceGrid = ({ instances }: InstanceGridProps) => {
 
               <div className="grid gap-3 text-sm text-slate-600">
                 <div className="list-row-light rounded-[20px] px-4 py-3">Ultima atividade: {instance.lastActivityAt ? new Date(instance.lastActivityAt).toLocaleString("pt-BR") : "sem trafego"}</div>
+                {instance.lastError ? <div className="rounded-[20px] border border-rose-200 bg-rose-50 px-4 py-3 text-rose-700">Ultimo erro: {instance.lastError}</div> : null}
                 <div className="grid gap-3 sm:grid-cols-2">
                   <div className="list-row-light rounded-[20px] px-4 py-3">Recebidas: {instance.usage.messagesReceived}</div>
                   <div className="list-row-light rounded-[20px] px-4 py-3">Erros: {instance.usage.errors}</div>

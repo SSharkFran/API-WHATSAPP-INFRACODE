@@ -47,6 +47,7 @@ export interface InstanceHealthReport {
   databaseConnected: boolean;
   qrExpiresIn?: number;
   lastActivityAt?: string | null;
+  lastError?: string | null;
   reconnectAttempts: number;
   uptimeSeconds: number;
   queueDepth: number;
@@ -60,6 +61,7 @@ export interface InstanceSummary {
   avatarUrl?: string | null;
   status: InstanceStatus;
   lastActivityAt?: string | null;
+  lastError?: string | null;
   connectedAt?: string | null;
   createdAt: string;
   updatedAt: string;

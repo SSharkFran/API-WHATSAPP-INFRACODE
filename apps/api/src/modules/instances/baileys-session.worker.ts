@@ -64,6 +64,28 @@ let closeAuthStore: (() => void) | null = null;
 let reconnectAttempts = 0;
 let stopping = false;
 
+const scheduleReconnect = async (message: string): Promise<void> => {
+  if (stopping) {
+    return;
+  }
+
+  if (reconnectAttempts >= 5) {
+    emitStatus("DISCONNECTED", message);
+    return;
+  }
+
+  const backoffMs = resolveReconnectDelay(reconnectAttempts);
+  reconnectAttempts += 1;
+  emitStatus("DISCONNECTED", message);
+  log("warn", "Tentando reiniciar o worker da instancia", {
+    attempt: reconnectAttempts,
+    backoffMs,
+    message
+  });
+  await delay(backoffMs);
+  await startSocket();
+};
+
 const log = (level: "info" | "warn" | "error", message: string, context?: Record<string, unknown>): void => {
   parentPort?.postMessage({
     type: "log",
@@ -323,102 +345,97 @@ const handleConnectionClose = async (error?: Error): Promise<void> => {
     return;
   }
 
-  if (reconnectAttempts >= 5) {
-    emitStatus("DISCONNECTED", error?.message ?? "Limite de reconexao excedido");
-    return;
-  }
-
-  const backoffMs = resolveReconnectDelay(reconnectAttempts);
-  reconnectAttempts += 1;
-  emitStatus("DISCONNECTED", error?.message);
-  log("warn", "Reconectando instancia", {
-    attempt: reconnectAttempts,
-    backoffMs
-  });
-  await delay(backoffMs);
-  await startSocket();
+  await scheduleReconnect(error?.message ?? "Limite de reconexao excedido");
 };
 
 const startSocket = async (): Promise<void> => {
-  stopping = false;
-  emitStatus("INITIALIZING");
-  await disconnectSocket();
-  closeAuthStore?.();
+  try {
+    stopping = false;
+    emitStatus("INITIALIZING");
+    await disconnectSocket();
+    closeAuthStore?.();
 
-  const authState = await useSqliteAuthState(init.sessionDbPath);
-  saveCreds = authState.saveCreds;
-  closeAuthStore = authState.close;
+    const authState = await useSqliteAuthState(init.sessionDbPath);
+    saveCreds = authState.saveCreds;
+    closeAuthStore = authState.close;
 
-  if (init.proxyUrl) {
-    log("warn", "Proxy configurado para a instancia, mas o adaptador HTTP/SOCKS5 nao foi habilitado neste build", {
-      proxyUrl: init.proxyUrl
+    if (init.proxyUrl) {
+      log("warn", "Proxy configurado para a instancia, mas o adaptador HTTP/SOCKS5 nao foi habilitado neste build", {
+        proxyUrl: init.proxyUrl
+      });
+    }
+
+    const versionData = await fetchLatestBaileysVersion().catch(() => ({
+      version: undefined
+    }));
+
+    const nextSocket = makeWASocket({
+      auth: authState.state,
+      browser: ["InfraCode", "Chrome", "1.0.0"],
+      printQRInTerminal: false,
+      syncFullHistory: false,
+      ...(versionData.version ? { version: versionData.version } : {})
     });
-  }
+    socket = nextSocket;
 
-  const versionData = await fetchLatestBaileysVersion().catch(() => ({
-    version: undefined
-  }));
+    nextSocket.ev.on("creds.update", async () => {
+      await saveCreds?.();
+    });
 
-  const nextSocket = makeWASocket({
-    auth: authState.state,
-    browser: ["InfraCode", "Chrome", "1.0.0"],
-    printQRInTerminal: false,
-    syncFullHistory: false,
-    version: versionData.version
-  });
-  socket = nextSocket;
-
-  nextSocket.ev.on("creds.update", async () => {
-    await saveCreds?.();
-  });
-
-  nextSocket.ev.on("connection.update", async (update: unknown) => {
-    const event = update as ConnectionUpdateEvent;
-    if (event.qr) {
-      const qrCodeBase64 = await QRCode.toDataURL(event.qr);
-      emitStatus("QR_PENDING");
-      parentPort?.postMessage({
-        type: "qr",
-        qrCodeBase64,
-        expiresInSeconds: 60
-      });
-    }
-
-    if (event.connection === "open") {
-      reconnectAttempts = 0;
-      emitStatus("CONNECTED");
-      log("info", "Instancia conectada com sucesso");
-      parentPort?.postMessage({
-        type: "profile",
-        phoneNumber: socket?.user?.id?.split(":")[0]?.split("@")[0] ?? null,
-        avatarUrl: null
-      });
-    }
-
-    if (event.connection === "close") {
-      await handleConnectionClose(event.lastDisconnect?.error as Error | undefined);
-    }
-  });
-
-  nextSocket.ev.on("messages.upsert", async (payload: unknown) => {
-    const { messages } = payload as UpsertMessageEvent;
-    for (const message of messages) {
-      if (message.key.fromMe || !message.key.remoteJid || !message.message) {
-        continue;
+    nextSocket.ev.on("connection.update", async (update: unknown) => {
+      const event = update as ConnectionUpdateEvent;
+      if (event.qr) {
+        const qrCodeBase64 = await QRCode.toDataURL(event.qr);
+        emitStatus("QR_PENDING");
+        parentPort?.postMessage({
+          type: "qr",
+          qrCodeBase64,
+          expiresInSeconds: 60
+        });
       }
 
-      parentPort?.postMessage({
-        type: "inbound-message",
-        remoteJid: message.key.remoteJid,
-        externalMessageId: message.key.id,
-        payload: {
-          ...serializeIncomingPayload(message.message as Record<string, unknown>),
-          pushName: message.pushName ?? null
-        },
-        messageType: detectMessageType(message.message as Record<string, unknown>)
-      });
-    }
-  });
+      if (event.connection === "open") {
+        reconnectAttempts = 0;
+        emitStatus("CONNECTED");
+        log("info", "Instancia conectada com sucesso");
+        parentPort?.postMessage({
+          type: "profile",
+          phoneNumber: socket?.user?.id?.split(":")[0]?.split("@")[0] ?? null,
+          avatarUrl: null
+        });
+      }
+
+      if (event.connection === "close") {
+        await handleConnectionClose(event.lastDisconnect?.error as Error | undefined);
+      }
+    });
+
+    nextSocket.ev.on("messages.upsert", async (payload: unknown) => {
+      const { messages } = payload as UpsertMessageEvent;
+      for (const message of messages) {
+        if (message.key.fromMe || !message.key.remoteJid || !message.message) {
+          continue;
+        }
+
+        parentPort?.postMessage({
+          type: "inbound-message",
+          remoteJid: message.key.remoteJid,
+          externalMessageId: message.key.id,
+          payload: {
+            ...serializeIncomingPayload(message.message as Record<string, unknown>),
+            pushName: message.pushName ?? null
+          },
+          messageType: detectMessageType(message.message as Record<string, unknown>)
+        });
+      }
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Falha inesperada ao iniciar o worker";
+    log("error", "Falha ao iniciar o socket da instancia", {
+      error: message
+    });
+    await scheduleReconnect(message);
+  }
 };
 
 const handleSendMessage = async (command: RpcCommand): Promise<void> => {

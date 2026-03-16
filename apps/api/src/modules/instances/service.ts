@@ -338,6 +338,7 @@ export class InstanceOrchestrator {
       databaseConnected,
       qrExpiresIn: qr?.expiresInSeconds,
       lastActivityAt: instance.lastActivityAt?.toISOString() ?? null,
+      lastError: instance.lastError ?? null,
       reconnectAttempts: instance.reconnectAttempts,
       uptimeSeconds: instance.usage?.uptimeSeconds ?? 0,
       queueDepth
@@ -926,6 +927,7 @@ export class InstanceOrchestrator {
       avatarUrl: instance.avatarUrl,
       status: instance.status as InstanceSummary["status"],
       lastActivityAt: instance.lastActivityAt?.toISOString() ?? null,
+      lastError: instance.lastError ?? null,
       connectedAt: instance.connectedAt?.toISOString() ?? null,
       createdAt: instance.createdAt.toISOString(),
       updatedAt: instance.updatedAt.toISOString(),

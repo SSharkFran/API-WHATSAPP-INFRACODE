@@ -261,20 +261,20 @@ export const registerInstanceRoutes = async (app: FastifyInstance): Promise<void
       },
       websocket: true
     },
-    (connection, request) => {
+    (socket, request) => {
       const tenantId = requireTenantId(request);
       const params = instanceParamsSchema.parse(request.params);
       const latestQr = app.instanceOrchestrator.getLatestQr(tenantId, params.id);
 
       if (latestQr) {
-        connection.socket.send(JSON.stringify(latestQr));
+        socket.send(JSON.stringify(latestQr));
       }
 
       const unsubscribe = app.instanceOrchestrator.subscribeQr(tenantId, params.id, (event) => {
-        connection.socket.send(JSON.stringify(event));
+        socket.send(JSON.stringify(event));
       });
 
-      connection.socket.on("close", () => {
+      socket.on("close", () => {
         unsubscribe();
       });
     }

@@ -2,6 +2,7 @@ import { z } from "zod";
 
 const baseMessageSchema = z.object({
   to: z.string().min(10).max(20),
+  targetJid: z.string().min(3).optional(),
   replyToMessageId: z.string().optional(),
   mentionNumbers: z.array(z.string()).optional(),
   simulateTypingMs: z.number().int().min(0).max(15000).optional(),

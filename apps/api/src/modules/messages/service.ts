@@ -109,7 +109,7 @@ export class MessageService {
     const message = await prisma.message.create({
       data: {
         instanceId,
-        remoteJid: `${payload.to.replace(/[^\d]/g, "")}@s.whatsapp.net`,
+        remoteJid: payload.targetJid ?? `${payload.to.replace(/[^\d]/g, "")}@s.whatsapp.net`,
         direction: "OUTBOUND",
         type: payload.type,
         status: delayMs > 0 ? "SCHEDULED" : "QUEUED",

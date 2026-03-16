@@ -80,6 +80,7 @@ export interface WebhookConfig {
 
 export interface BaseSendMessagePayload {
   to: string;
+  targetJid?: string;
   replyToMessageId?: string;
   mentionNumbers?: string[];
   simulateTypingMs?: number;

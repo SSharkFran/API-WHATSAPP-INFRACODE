@@ -777,7 +777,7 @@ export class InstanceOrchestrator {
         return;
       }
 
-      await this.sendAutomatedTextMessage(tenantId, instance.id, remoteNumber, chatbotResult.responseText, {
+      await this.sendAutomatedTextMessage(tenantId, instance.id, remoteNumber, event.remoteJid, chatbotResult.responseText, {
         action: chatbotResult.action,
         matchedRuleId: chatbotResult.matchedRuleId ?? null,
         matchedRuleName: chatbotResult.matchedRuleName ?? null
@@ -799,6 +799,7 @@ export class InstanceOrchestrator {
     tenantId: string,
     instanceId: string,
     remoteNumber: string,
+    targetJid: string,
     text: string,
     metadata: Record<string, unknown>
   ): Promise<void> {
@@ -817,6 +818,7 @@ export class InstanceOrchestrator {
     const payload: SendMessagePayload = {
       type: "text",
       to: remoteNumber,
+      targetJid,
       text
     };
     const rpcResult = await this.sendMessage(tenantId, instanceId, payload);
@@ -824,7 +826,7 @@ export class InstanceOrchestrator {
     const created = await prisma.message.create({
       data: {
         instanceId,
-        remoteJid: `${remoteNumber}@s.whatsapp.net`,
+        remoteJid: (rpcResult.remoteJid as string | undefined) ?? targetJid,
         externalMessageId: (rpcResult.externalMessageId as string | undefined) ?? null,
         direction: "OUTBOUND",
         type: "text",

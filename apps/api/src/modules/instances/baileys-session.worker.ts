@@ -447,7 +447,7 @@ const handleSendMessage = async (command: RpcCommand): Promise<void> => {
     }
 
     const payload = command.payload;
-    const jid = payload.type === "reaction" && payload.targetJid ? payload.targetJid : toJid(payload.to);
+    const jid = payload.targetJid ?? toJid(payload.to);
     const mentionJids = payload.mentionNumbers?.map((number) => toJid(number)) ?? [];
 
     if (payload.simulateTypingMs && payload.simulateTypingMs > 0) {

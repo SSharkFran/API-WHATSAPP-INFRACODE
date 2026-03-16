@@ -1,3 +1,5 @@
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -11,6 +13,7 @@
   --brand-blue-deep: #0f172a;
   --brand-slate: #0f172a;
   --brand-mist: #dbeafe;
+  --font-display: 'Plus Jakarta Sans', sans-serif;
 }
 
 html,
@@ -45,10 +48,10 @@ a {
 
 .theme-auth {
   background:
-    radial-gradient(circle at top left, rgba(56, 189, 248, 0.14), transparent 28%),
-    radial-gradient(circle at top right, rgba(59, 130, 246, 0.18), transparent 30%),
-    radial-gradient(circle at bottom, rgba(14, 116, 144, 0.16), transparent 35%),
-    linear-gradient(180deg, #020817 0%, #081224 48%, #0b1324 100%);
+    radial-gradient(circle at top left, rgba(56, 189, 248, 0.08), transparent 35%),
+    radial-gradient(circle at bottom right, rgba(59, 130, 246, 0.06), transparent 35%),
+    linear-gradient(180deg, #0a0f1e 0%, #0d1627 100%);
+  font-family: var(--font-display);
 }
 
 .theme-super {
@@ -331,5 +334,34 @@ a {
 
   .brand-chip__subtitle {
     color: rgb(148 163 184);
+  }
+}
+
+.form-glow {
+  box-shadow: 0 0 80px rgba(56, 189, 248, 0.15);
+}
+
+.feature-card-hover:hover {
+  border-color: rgba(56, 189, 248, 0.3);
+  transform: translateY(-4px);
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.2);
+}
+
+.text-hero {
+  font-size: 64px;
+  line-height: 1.1;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.text-subtitle {
+  font-size: 18px;
+  opacity: 0.7;
+  line-height: 1.6;
+}
+
+@media (max-width: 640px) {
+  .text-hero {
+    font-size: 40px;
   }
 }

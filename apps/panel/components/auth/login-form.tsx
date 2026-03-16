@@ -109,50 +109,50 @@ export const LoginForm = () => {
   };
 
   return (
-    <div className="space-y-5">
-      <div className="grid gap-4">
-        <label className="block text-sm font-medium text-slate-200">
+    <div className="space-y-6">
+      <div className="grid gap-5">
+        <label className="block text-[13px] font-medium tracking-wide text-slate-400">
           Email
           <Input
-            className="mt-2 h-12 rounded-2xl border-white/10 bg-slate-950/55 px-4 text-slate-50 placeholder:text-slate-500 focus:border-sky-400"
+            className="mt-2 h-[52px] rounded-[10px] border-white/5 bg-slate-950/20 px-4 text-slate-50 placeholder:text-slate-600 focus:border-sky-500/50 transition-all"
             onChange={(event) => setEmail(event.target.value)}
             placeholder="owner@infracode.local"
             value={email}
           />
         </label>
-        <label className="block text-sm font-medium text-slate-200">
+        <label className="block text-[13px] font-medium tracking-wide text-slate-400">
           Senha
           <Input
-            className="mt-2 h-12 rounded-2xl border-white/10 bg-slate-950/55 px-4 text-slate-50 placeholder:text-slate-500 focus:border-sky-400"
+            className="mt-2 h-[52px] rounded-[10px] border-white/5 bg-slate-950/20 px-4 text-slate-50 placeholder:text-slate-600 focus:border-sky-500/50 transition-all"
             onChange={(event) => setPassword(event.target.value)}
             placeholder="********"
             type="password"
             value={password}
           />
         </label>
-        <label className="block text-sm font-medium text-slate-200">
+        <label className="block text-[13px] font-medium tracking-wide text-slate-400">
           Slug do tenant
           <Input
-            className="mt-2 h-12 rounded-2xl border-white/10 bg-slate-950/55 px-4 text-slate-50 placeholder:text-slate-500 focus:border-sky-400"
+            className="mt-2 h-[52px] rounded-[10px] border-white/5 bg-slate-950/20 px-4 text-slate-50 placeholder:text-slate-600 focus:border-sky-500/50 transition-all"
             onChange={(event) => setTenantSlug(event.target.value)}
             placeholder="demo"
             value={tenantSlug}
           />
         </label>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <label className="block text-sm font-medium text-slate-200">
+        <div className="grid gap-5 sm:grid-cols-2">
+          <label className="block text-[13px] font-medium tracking-wide text-slate-400">
             TOTP
             <Input
-              className="mt-2 h-12 rounded-2xl border-white/10 bg-slate-950/55 px-4 text-slate-50 placeholder:text-slate-500 focus:border-sky-400"
+              className="mt-2 h-[52px] rounded-[10px] border-white/5 bg-slate-950/20 px-4 text-slate-50 placeholder:text-slate-600 focus:border-sky-500/50 transition-all"
               onChange={(event) => setTotpCode(event.target.value)}
               placeholder="123456"
               value={totpCode}
             />
           </label>
-          <label className="block text-sm font-medium text-slate-200">
+          <label className="block text-[13px] font-medium tracking-wide text-slate-400">
             Backup code
             <Input
-              className="mt-2 h-12 rounded-2xl border-white/10 bg-slate-950/55 px-4 text-slate-50 placeholder:text-slate-500 focus:border-sky-400"
+              className="mt-2 h-[52px] rounded-[10px] border-white/5 bg-slate-950/20 px-4 text-slate-50 placeholder:text-slate-600 focus:border-sky-500/50 transition-all"
               onChange={(event) => setBackupCode(event.target.value)}
               placeholder="backup-code"
               value={backupCode}
@@ -162,19 +162,22 @@ export const LoginForm = () => {
       </div>
 
       {error ? (
-        <p className="rounded-2xl border border-rose-400/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-100">{error}</p>
+        <div className="flex items-center gap-3 rounded-[10px] border border-rose-500/10 bg-rose-500/5 px-4 py-3 text-[13px] text-rose-300 animate-in fade-in slide-in-from-top-1">
+          <span className="h-1.5 w-1.5 rounded-full bg-rose-500 shadow-[0_0_10px_rgba(244,63,94,0.5)]" />
+          {error}
+        </div>
       ) : null}
 
-      <div className="grid gap-3 sm:grid-cols-2">
+      <div className="grid gap-4">
         <Button
-          className="h-12 w-full rounded-2xl bg-sky-500 text-base font-semibold text-slate-950 hover:bg-sky-400"
+          className="h-[52px] w-full rounded-[10px] bg-sky-500 text-[15px] font-bold text-slate-950 hover:bg-sky-400 transition-all shadow-[0_10px_20px_rgba(14,165,233,0.15)] hover:shadow-[0_10px_25px_rgba(14,165,233,0.25)]"
           disabled={pendingMode !== null}
           onClick={() => void submit("admin")}
         >
           {pendingMode === "admin" ? "Entrando..." : "Painel Super Admin"}
         </Button>
         <Button
-          className="h-12 w-full rounded-2xl border border-white/12 bg-white/6 text-base font-semibold text-slate-50 hover:bg-white/12"
+          className="h-[52px] w-full rounded-[10px] border border-white/10 bg-white/5 text-[15px] font-bold text-slate-100 hover:bg-white/10 transition-all"
           disabled={pendingMode !== null}
           onClick={() => void submit("tenant")}
           variant="secondary"
@@ -183,10 +186,10 @@ export const LoginForm = () => {
         </Button>
       </div>
 
-      <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-slate-400">
-        <span>Em localhost ou 127.0.0.1, informe o slug do tenant manualmente. Em subdominio ele e resolvido automaticamente.</span>
-        <Link className="text-sky-300 underline underline-offset-4 transition hover:text-sky-200" href="/redefinir-senha">
-          Redefinir senha
+      <div className="flex flex-col gap-4 pt-2 text-[12px] text-slate-500 leading-relaxed">
+        <p>Em localhost ou 127.0.0.1, informe o slug do tenant manualmente. Em subdomínio ele é resolvido automaticamente.</p>
+        <Link className="text-sky-400/80 hover:text-sky-300 transition-colors w-fit underline underline-offset-4" href="/redefinir-senha">
+          Esqueceu sua senha?
         </Link>
       </div>
     </div>

@@ -94,6 +94,10 @@ const aiProviderDefaults: Record<ChatbotAiProvider, { baseUrl: string; model: st
     baseUrl: "https://api.groq.com/openai/v1",
     model: "llama-3.1-8b-instant"
   },
+  ANTHROPIC: {
+    baseUrl: "https://api.anthropic.com",
+    model: "claude-sonnet-4-20250514"
+  },
   OPENAI_COMPATIBLE: {
     baseUrl: "https://api.openai.com/v1",
     model: "gpt-4.1-mini"
@@ -651,6 +655,7 @@ export const TenantManager = ({ initialPlans, initialTenants }: TenantManagerPro
               }}
               value={aiForm.provider}
             >
+              <option value="ANTHROPIC">Anthropic</option>
               <option value="GROQ">Groq</option>
               <option value="OPENAI_COMPATIBLE">OpenAI compativel</option>
             </select>

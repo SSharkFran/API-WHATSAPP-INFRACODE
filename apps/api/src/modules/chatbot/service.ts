@@ -402,7 +402,7 @@ export class ChatbotService {
       return null;
     }
 
-    if (!config.ai.isEnabled || !input.text?.trim()) {
+    if (!input.text?.trim()) {
       return null;
     }
 
@@ -539,7 +539,8 @@ export class ChatbotService {
     const provider = managedAiProvider.provider as string | null;
     const baseUrl = managedAiProvider.baseUrl.endsWith("/") ? managedAiProvider.baseUrl : `${managedAiProvider.baseUrl}/`;
     const isAnthropic = provider === "ANTHROPIC";
-    const response = await fetch(new URL(isAnthropic ? "v1/messages" : "chat/completions", baseUrl).toString(), {
+    const url = isAnthropic ? "https://api.anthropic.com/v1/messages" : new URL("chat/completions", baseUrl).toString();
+    const response = await fetch(url, {
       method: "POST",
       headers: isAnthropic
         ? {

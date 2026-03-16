@@ -25,7 +25,7 @@ interface ChatbotFormState {
   ai: {
     isEnabled: boolean;
     mode: ChatbotAiMode;
-    provider: "GROQ" | "OPENAI_COMPATIBLE" | null;
+    provider: "GROQ" | "OPENAI_COMPATIBLE" | "ANTHROPIC" | null;
     model: string;
     systemPrompt: string;
     temperature: number;

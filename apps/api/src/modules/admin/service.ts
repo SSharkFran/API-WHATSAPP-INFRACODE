@@ -89,7 +89,7 @@ export class PlatformAdminService {
       activeInstances,
       aiConfigured: Boolean(tenant.aiProvider?.apiKeyEncrypted && tenant.aiProvider?.model),
       aiModel: tenant.aiProvider?.model ?? null,
-      aiProvider: (tenant.aiProvider?.provider as "GROQ" | "OPENAI_COMPATIBLE" | null) ?? null,
+      aiProvider: (tenant.aiProvider?.provider as "GROQ" | "OPENAI_COMPATIBLE" | "ANTHROPIC" | null) ?? null,
       billingEmail: tenant.billingEmail,
       createdAt: tenant.createdAt.toISOString(),
       id: tenant.id,
@@ -122,7 +122,7 @@ export class PlatformAdminService {
   ) {
     return {
       tenantId,
-      provider: (aiProvider?.provider as "GROQ" | "OPENAI_COMPATIBLE" | undefined) ?? defaultTenantAiProvider.provider,
+      provider: (aiProvider?.provider as "GROQ" | "OPENAI_COMPATIBLE" | "ANTHROPIC" | undefined) ?? defaultTenantAiProvider.provider,
       baseUrl: aiProvider?.baseUrl ?? defaultTenantAiProvider.baseUrl,
       model: aiProvider?.model ?? defaultTenantAiProvider.model,
       isActive: aiProvider?.isActive ?? defaultTenantAiProvider.isActive,
@@ -447,7 +447,7 @@ export class PlatformAdminService {
   public async upsertTenantAiConfig(
     tenantId: string,
     input: {
-      provider: "GROQ" | "OPENAI_COMPATIBLE";
+      provider: "GROQ" | "OPENAI_COMPATIBLE" | "ANTHROPIC";
       baseUrl: string;
       model: string;
       apiKey?: string;

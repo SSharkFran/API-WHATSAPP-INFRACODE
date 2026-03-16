@@ -46,7 +46,7 @@ export interface AdminTenantSummary {
   rateLimitPerMinute: number;
   billingEmail: string | null;
   aiConfigured: boolean;
-  aiProvider: "GROQ" | "OPENAI_COMPATIBLE" | null;
+  aiProvider: "GROQ" | "OPENAI_COMPATIBLE" | "ANTHROPIC" | null;
   aiModel: string | null;
   plan: {
     id: string;
@@ -57,7 +57,7 @@ export interface AdminTenantSummary {
 
 export interface AdminTenantAiConfig {
   tenantId: string;
-  provider: "GROQ" | "OPENAI_COMPATIBLE";
+  provider: "GROQ" | "OPENAI_COMPATIBLE" | "ANTHROPIC";
   baseUrl: string;
   model: string;
   isActive: boolean;

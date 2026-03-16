@@ -2,7 +2,7 @@ import { z } from "zod";
 
 export const chatbotTriggerTypeSchema = z.enum(["EXACT", "CONTAINS", "REGEX", "FIRST_CONTACT"]);
 export const chatbotAiModeSchema = z.enum(["RULES_ONLY", "RULES_THEN_AI", "AI_ONLY"]);
-export const chatbotAiProviderSchema = z.enum(["GROQ", "OPENAI_COMPATIBLE"]);
+export const chatbotAiProviderSchema = z.enum(["GROQ", "OPENAI_COMPATIBLE", "ANTHROPIC"]);
 
 export const chatbotRuleSchema = z.object({
   id: z.string().min(1),

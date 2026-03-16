@@ -539,6 +539,13 @@ export class ChatbotService {
     const provider = managedAiProvider.provider as string | null;
     const baseUrl = managedAiProvider.baseUrl.endsWith("/") ? managedAiProvider.baseUrl : `${managedAiProvider.baseUrl}/`;
     const isAnthropic = provider === "ANTHROPIC";
+    const messagesWithSystem = [
+      {
+        role: "system" as const,
+        content: conversation.system
+      },
+      ...conversation.messages
+    ];
     const url = isAnthropic ? "https://api.anthropic.com/v1/messages" : new URL("chat/completions", baseUrl).toString();
     const response = await fetch(url, {
       method: "POST",
@@ -563,8 +570,7 @@ export class ChatbotService {
             }
           : {
               model: managedAiProvider.model,
-              system: conversation.system,
-              messages: conversation.messages,
+              messages: messagesWithSystem,
               temperature,
               max_tokens: 300
             }

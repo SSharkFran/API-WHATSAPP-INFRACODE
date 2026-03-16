@@ -8,6 +8,12 @@ Este projeto pode rodar no Railway com cinco recursos:
 - PostgreSQL gerenciado
 - Redis gerenciado
 
+Importante:
+
+- `Postgres` e `Redis` devem ser criados como recursos gerenciados do proprio Railway
+- nao conecte `Postgres` nem `Redis` ao repositório GitHub deste projeto
+- apenas `api`, `panel` e `worker` devem usar o repositório com `Config File Path`
+
 Se voce quiser usar exatamente os exemplos deste guia, nomeie os servicos assim no projeto Railway:
 
 - `api`

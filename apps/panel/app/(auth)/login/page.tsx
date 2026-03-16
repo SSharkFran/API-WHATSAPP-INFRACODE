@@ -5,90 +5,65 @@ import { LoginForm } from "../../../components/auth/login-form";
 
 export default function LoginPage() {
   return (
-    <main className="theme-auth relative min-h-screen">
-      <div className="mx-auto w-full px-[var(--fluid-p-side)] py-[var(--fluid-p-vert)]">
-        <header className="mb-[var(--fluid-gap)] flex items-center justify-between">
-          <InfraCodeMark className="opacity-80 grayscale" subtitle="WhatsApp API Cloud" tone="super" />
-          <div className="hidden text-[10px] uppercase tracking-[0.2em] text-[#2e3d58] md:block">
-            Multi-tenant / InfraCode
+    <main className="theme-auth relative min-h-screen flex flex-col items-center justify-center">
+      <div className="status-bar" />
+      
+      <div className="mx-auto w-full max-w-[1440px] px-[var(--fluid-p-side)]">
+        <header className="fixed top-0 left-0 right-0 z-40 flex items-center justify-between px-[var(--fluid-p-side)] py-6 border-bottom-[1px] border-white/5 backdrop-blur-md">
+          <div className="flex items-center gap-3">
+             <div className="bg-[#1e3a8a] rounded-md px-2.5 py-1.5 text-[11px] font-bold text-white tracking-widest">
+               ADM
+             </div>
+             <div className="text-[13px] font-medium text-white/90">
+               InfraCode <span className="mx-2 text-white/10">·</span> WhatsApp API
+             </div>
+          </div>
+          <div className="hidden border border-white/5 rounded px-3 py-1 text-[10px] text-white/20 uppercase tracking-widest md:block">
+            v2.4.1 · Cloud
           </div>
         </header>
 
-        <div className="grid grid-cols-1 gap-[var(--fluid-gap)] ms:grid-cols-2 lg:items-center">
-          <section className="space-y-[var(--fluid-gap)]">
-            <div className="space-y-6">
-              <div className="badge-dot">
-                Plataforma SaaS / Operação Real
-              </div>
-              <h1 className="text-fluid-title text-white">
-                Venda acesso em minutos. Isolamento forte, onboarding simples e operação centralizada.
+        <div className="grid grid-cols-1 gap-[var(--fluid-gap)] ms:grid-cols-2 items-center pt-24 pb-12">
+          <section className="space-y-12 ms:pr-12 separator-vertical">
+            <div className="space-y-8">
+              <h1 className="text-fluid-title">
+                Venda acesso <br /> em minutos. <br /> 
+                <span className="text-[#2563eb]">Operação centralizada.</span>
               </h1>
-              <p className="max-w-xl text-fluid-desc text-[#2e3d58] hover:text-white/60 transition-colors">
-                Painel super admin, tenant panel, billing interno, QR Code por instância, webhook e observabilidade em uma única plataforma.
+              
+              <div className="separator-line" />
+
+              <p className="max-w-md text-fluid-desc">
+                Painel super admin, isolamento físico em PostgreSQL e onboarding automatizado na mesma camada operacional.
               </p>
             </div>
 
-            <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
+            <div className="grid grid-cols-1 gap-3">
               {[
-                ["Schema por tenant", "Isolamento físico em PostgreSQL com cache LRU de Prisma."],
-                ["Provisionamento", "Criação de cliente, convite inicial e limites sem intervenção manual."],
-                ["Rastreabilidade", "Logs, billing, rate limit e saúde global na mesma camada operacional."]
-              ].map(([title, text]) => (
-                <Card className="card-minimal flex flex-col justify-between p-8" key={title}>
-                  <h3 className="text-[15px] font-bold text-white tracking-tight">{title}</h3>
-                  <p className="mt-4 text-[13px] font-light leading-relaxed text-[#2e3d58]">{text}</p>
-                </Card>
+                ["01", "Schema por tenant", "Isolamento físico em PostgreSQL com cache LRU de Prisma."],
+                ["02", "Provisionamento", "Criação de cliente, convite inicial e limites sem intervenção manual."],
+                ["03", "Rastreabilidade", "Logs, billing, rate limit e saúde global em tempo real."]
+              ].map(([num, title, text]) => (
+                <div className="card-vercel" key={title}>
+                  <div className="text-[#2563eb] text-[11px] font-bold mb-4">{num}</div>
+                  <h3 className="text-[14px] font-semibold text-white/85 mb-2">{title}</h3>
+                  <p className="text-[12px] text-white/25 leading-relaxed">{text}</p>
+                </div>
               ))}
-            </div>
-
-            <div className="grid grid-cols-1 gap-6 xs:grid-cols-2">
-              <div className="minimalist-border p-8">
-                <p className="label-minimal">Stack operacional</p>
-                <div className="mt-6 grid grid-cols-1 gap-2 sm:grid-cols-2">
-                  {["Fastify + Baileys", "PostgreSQL", "Redis + BullMQ", "Next.js"].map((item) => (
-                    <div className="text-[12px] font-light text-[#2e3d58]" key={item}>
-                      {item}
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              <div className="minimalist-border p-8">
-                <p className="label-minimal">Fluxo comercial</p>
-                <div className="mt-6 space-y-3">
-                  {[
-                    "Criação de tenant e convite imediato.",
-                    "Configuração de senha e QR Code.",
-                    "Operação isolada com controle central."
-                  ].map((item) => (
-                    <div className="flex gap-3 text-[12px] font-light text-[#2e3d58]" key={item}>
-                      <span>—</span>
-                      <span>{item}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
             </div>
           </section>
 
-          <section className="flex justify-center lg:justify-end">
-            <div className="w-full max-w-[480px]">
-              <div className="mb-6 space-y-2">
-                <div className="badge-dot">Acesso seguro</div>
-                <h2 className="text-[28px] font-bold tracking-tight text-white">Entrar</h2>
+          <section className="flex justify-center ms:pl-12">
+            <div className="w-full max-w-[400px]">
+              <div className="mb-10 space-y-2">
+                <div className="flex items-center gap-2 text-[10px] uppercase tracking-[0.12em] text-white/30">
+                  <span className="w-1 h-1 rounded-full bg-white/20" />
+                  Acesso Restrito
+                </div>
+                <h2 className="text-[28px] font-bold tracking-tight text-white/90">Entrar</h2>
               </div>
 
-              <div className="minimalist-border p-8 md:p-12">
-                <LoginForm />
-              </div>
-
-              <p className="mt-8 text-[12px] font-light text-[#2e3d58]">
-                Link enviado pela InfraCode? Use o fluxo de{" "}
-                <Link className="text-white/40 hover:text-white transition-colors underline underline-offset-4" href="/primeiro-acesso">
-                  primeiro acesso
-                </Link>
-                .
-              </p>
+              <LoginForm />
             </div>
           </section>
         </div>

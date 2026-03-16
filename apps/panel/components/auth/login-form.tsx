@@ -110,52 +110,52 @@ export const LoginForm = () => {
 
   return (
     <div className="space-y-8">
-      <div className="grid gap-6">
-        <label className="group block space-y-2">
-          <span className="label-minimal transition-colors group-hover:text-white/40">Email</span>
+      <div className="space-y-8">
+        <label className="group block space-y-1">
+          <span className="label-mini-caps">Email</span>
           <Input
-            className="input-minimal px-0 text-[13px] placeholder:text-[#2e3d58] border-t-0 border-x-0 border-b-[0.5px] hover:border-b-white/20 focus:border-b-white/40 transition-all"
+            className="input-underline"
             onChange={(event) => setEmail(event.target.value)}
-            placeholder="email@address.com"
+            placeholder="Endereço de e-mail registrado"
             value={email}
           />
         </label>
-        <label className="group block space-y-2">
-          <span className="label-minimal transition-colors group-hover:text-white/40">Senha</span>
+        <label className="group block space-y-1">
+          <span className="label-mini-caps">Senha</span>
           <Input
-            className="input-minimal px-0 text-[13px] placeholder:text-[#2e3d58] border-t-0 border-x-0 border-b-[0.5px] hover:border-b-white/20 focus:border-b-white/40 transition-all"
+            className="input-underline"
             onChange={(event) => setPassword(event.target.value)}
-            placeholder="••••••••"
+            placeholder="Sua chave de acesso"
             type="password"
             value={password}
           />
         </label>
-        <label className="group block space-y-2">
-          <span className="label-minimal transition-colors group-hover:text-white/40">Slug do tenant</span>
+        <label className="group block space-y-1">
+          <span className="label-mini-caps">Slug do tenant</span>
           <Input
-            className="input-minimal px-0 text-[13px] placeholder:text-[#2e3d58] border-t-0 border-x-0 border-b-[0.5px] hover:border-b-white/20 focus:border-b-white/40 transition-all"
+            className="input-underline"
             onChange={(event) => setTenantSlug(event.target.value)}
-            placeholder="slug-exemplo"
+            placeholder="Ex: demo (opcional em subdomínio)"
             value={tenantSlug}
           />
         </label>
         
-        <div className="grid grid-cols-1 gap-6 xs:grid-cols-2">
-          <label className="group block space-y-2">
-            <span className="label-minimal transition-colors group-hover:text-white/40">TOTP</span>
+        <div className="grid grid-cols-1 gap-8 xs:grid-cols-2">
+          <label className="group block space-y-1">
+            <span className="label-mini-caps">TOTP (2FA)</span>
             <Input
-              className="input-minimal px-0 text-[13px] placeholder:text-[#2e3d58] border-t-0 border-x-0 border-b-[0.5px] hover:border-b-white/20 focus:border-b-white/40 transition-all"
+              className="input-underline"
               onChange={(event) => setTotpCode(event.target.value)}
-              placeholder="000000"
+              placeholder="000 000"
               value={totpCode}
             />
           </label>
-          <label className="group block space-y-2">
-            <span className="label-minimal transition-colors group-hover:text-white/40">Backup</span>
+          <label className="group block space-y-1">
+            <span className="label-mini-caps">Backup</span>
             <Input
-              className="input-minimal px-0 text-[13px] placeholder:text-[#2e3d58] border-t-0 border-x-0 border-b-[0.5px] hover:border-b-white/20 focus:border-b-white/40 transition-all"
+              className="input-underline"
               onChange={(event) => setBackupCode(event.target.value)}
-              placeholder="code-123"
+              placeholder="Code"
               value={backupCode}
             />
           </label>
@@ -163,35 +163,37 @@ export const LoginForm = () => {
       </div>
 
       {error ? (
-        <div className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-rose-500/80">
-          <span>×</span>
+        <div className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-rose-500/60 font-medium">
+          <span className="w-1 h-1 rounded-full bg-rose-500" />
           {error}
         </div>
       ) : null}
 
-      <div className="grid gap-3">
+      <div className="flex flex-col items-center">
         <Button
-          className="btn-primary-minimal h-12 text-[13px] tracking-tight transition-opacity hover:opacity-90"
+          className="btn-blue-flat"
           disabled={pendingMode !== null}
           onClick={() => void submit("admin")}
         >
-          {pendingMode === "admin" ? "Aguarde..." : "Acessar Super Admin"}
+          {pendingMode === "admin" ? "Autenticando..." : "Acessar Super Admin"}
         </Button>
-        <Button
-          className="btn-secondary-minimal h-12 text-[13px] tracking-tight transition-colors hover:text-white/60 hover:border-white/20"
+        
+        <button
+          className="btn-ghost-small hover:text-white/40 transition-colors"
           disabled={pendingMode !== null}
           onClick={() => void submit("tenant")}
-          variant="secondary"
         >
-          {pendingMode === "tenant" ? "Aguarde..." : "Painel do Cliente"}
-        </Button>
+          {pendingMode === "tenant" ? "Aguarde..." : "Acessar Painel do Cliente"}
+        </button>
       </div>
 
-      <div className="space-y-4 pt-4 text-[10px] uppercase tracking-[0.1em] text-[#2e3d58]">
-        <p className="leading-loose">Identificação automática via DNS ativa em produção.</p>
-        <Link className="block text-white/20 hover:text-white/60 transition-colors" href="/redefinir-senha">
-          Solicitar nova senha
+      <div className="pt-8 flex flex-col items-center gap-6">
+        <Link className="text-[10px] uppercase tracking-[0.1em] text-white/20 hover:text-white/40 transition-colors" href="/redefinir-senha">
+          Esqueceu seu acesso?
         </Link>
+        <div className="text-[10px] text-white/10 font-medium tracking-widest">
+           v2.4.1 · InfraCode
+        </div>
       </div>
     </div>
   );

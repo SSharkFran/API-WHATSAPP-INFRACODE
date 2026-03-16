@@ -442,7 +442,8 @@ export class ChatbotService {
         matchedRuleName: `${managedAiProvider.provider}:${managedAiProvider.model}`,
         responseText
       };
-    } catch {
+    } catch (err) {
+      console.error("[chatbot:ai] erro:", err);
       return null;
     }
   }
@@ -580,13 +581,12 @@ export class ChatbotService {
           text?: string;
         }>;
       };
-      const content = json.content;
+      const firstTextBlock = Array.isArray(json.content)
+        ? json.content.find((item) => item.type === "text" && typeof item.text === "string")
+        : null;
 
-      if (Array.isArray(content)) {
-        return content
-          .map((item) => (item.type === "text" && typeof item.text === "string" ? item.text : ""))
-          .join("\n")
-          .trim();
+      if (firstTextBlock?.text) {
+        return firstTextBlock.text.trim() || null;
       }
 
       return null;

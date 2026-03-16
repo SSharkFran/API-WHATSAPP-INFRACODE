@@ -118,7 +118,24 @@ const authenticateJwt = async (
   app: Parameters<FastifyPluginAsync>[0],
   token: string
 ): Promise<AuthContext> => {
-  const payload = await verifyAccessToken(app.config, token);
+  let payload;
+
+  try {
+    payload = await verifyAccessToken(app.config, token);
+  } catch (error) {
+    const code = error instanceof Error ? (error as { code?: string }).code : undefined;
+
+    if (code === "ERR_JWT_EXPIRED") {
+      throw new ApiError(401, "SESSION_EXPIRED", "Sua sessao expirou. Faca login novamente.");
+    }
+
+    if (code === "ERR_JWS_INVALID" || code === "ERR_JWT_INVALID") {
+      throw new ApiError(401, "SESSION_INVALID", "Sessao invalida");
+    }
+
+    throw error;
+  }
+
   const user = await app.platformPrisma.user.findUnique({
     where: {
       id: payload.actorId

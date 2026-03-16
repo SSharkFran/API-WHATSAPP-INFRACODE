@@ -137,7 +137,10 @@ export const buildApp = async () => {
   await app.register(sensible);
   await app.register(cors, {
     origin: true,
-    credentials: true
+    credentials: true,
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Authorization", "Content-Type", "X-Api-Key"],
+    exposedHeaders: ["X-RateLimit-Limit", "X-RateLimit-Remaining", "X-RateLimit-Reset"]
   });
   await app.register(helmet, {
     global: true,

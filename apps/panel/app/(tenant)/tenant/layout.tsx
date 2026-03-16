@@ -1,6 +1,8 @@
 import { InfraCodeMark } from "../../../components/branding/infracode-mark";
 import { PanelNav } from "../../../components/navigation/panel-nav";
 
+export const dynamic = "force-dynamic";
+
 const navigation = [
   { href: "/tenant", label: "Dashboard", meta: "Visao geral de consumo, fila e capacidade." },
   { href: "/tenant/instances", label: "Instancias", meta: "Fleet, QR Code, uptime, risco e acoes operacionais." },

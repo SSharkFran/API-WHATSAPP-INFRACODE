@@ -1,6 +1,8 @@
 import { InfraCodeMark } from "../../components/branding/infracode-mark";
 import { PanelNav } from "../../components/navigation/panel-nav";
 
+export const dynamic = "force-dynamic";
+
 const navigation = [
   { href: "/dashboard", label: "Dashboard", meta: "Visao operacional do modo legado." },
   { href: "/instances", label: "Instancias", meta: "Grid legado de operacao multi-instancia." }

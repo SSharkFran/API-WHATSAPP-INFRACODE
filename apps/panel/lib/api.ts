@@ -1,5 +1,6 @@
 import "server-only";
 import type { InstanceSummary } from "@infracode/types";
+import { redirect } from "next/navigation";
 import { getServerPanelSession } from "./server-session";
 
 const publicApiBaseUrl = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3333").replace(/\/$/, "");
@@ -83,11 +84,17 @@ const buildHeaders = (mode: "admin" | "tenant"): HeadersInit => {
   return {};
 };
 
+const allowMockFallback = process.env.NODE_ENV !== "production";
+
 const request = async <TResponse>(path: string, mode: "admin" | "tenant"): Promise<TResponse> => {
   const response = await fetch(`${internalApiBaseUrl}${path}`, {
     cache: "no-store",
     headers: buildHeaders(mode)
   });
+
+  if (response.status === 401) {
+    redirect("/login");
+  }
 
   if (!response.ok) {
     throw new Error(`HTTP ${response.status}`);
@@ -269,7 +276,11 @@ export const getTenantInstances = async (): Promise<InstanceSummary[]> => {
   try {
     return await request<InstanceSummary[]>("/instances", "tenant");
   } catch {
-    return mockInstances;
+    if (allowMockFallback) {
+      return mockInstances;
+    }
+
+    throw new Error("Falha ao carregar as instancias do tenant.");
   }
 };
 
@@ -285,7 +296,11 @@ export const getTenantDashboard = async (): Promise<TenantDashboardSnapshot> => 
   try {
     return await request<TenantDashboardSnapshot>("/tenant/dashboard", "tenant");
   } catch {
-    return mockTenantDashboard;
+    if (allowMockFallback) {
+      return mockTenantDashboard;
+    }
+
+    throw new Error("Falha ao carregar o dashboard do tenant.");
   }
 };
 
@@ -296,7 +311,11 @@ export const getTenantOnboarding = async (): Promise<OnboardingSnapshot> => {
   try {
     return await request<OnboardingSnapshot>("/tenant/onboarding", "tenant");
   } catch {
-    return mockOnboarding;
+    if (allowMockFallback) {
+      return mockOnboarding;
+    }
+
+    throw new Error("Falha ao carregar o onboarding do tenant.");
   }
 };
 
@@ -307,7 +326,11 @@ export const getAdminTenants = async (): Promise<AdminTenantSummary[]> => {
   try {
     return await request<AdminTenantSummary[]>("/admin/tenants", "admin");
   } catch {
-    return mockAdminTenants;
+    if (allowMockFallback) {
+      return mockAdminTenants;
+    }
+
+    throw new Error("Falha ao carregar os tenants.");
   }
 };
 
@@ -318,7 +341,11 @@ export const getAdminBilling = async (): Promise<BillingSummary[]> => {
   try {
     return await request<BillingSummary[]>("/admin/billing", "admin");
   } catch {
-    return mockBilling;
+    if (allowMockFallback) {
+      return mockBilling;
+    }
+
+    throw new Error("Falha ao carregar o billing.");
   }
 };
 
@@ -329,7 +356,11 @@ export const getAdminPlans = async (): Promise<AdminPlanSummary[]> => {
   try {
     return await request<AdminPlanSummary[]>("/admin/plans", "admin");
   } catch {
-    return mockPlans;
+    if (allowMockFallback) {
+      return mockPlans;
+    }
+
+    throw new Error("Falha ao carregar os planos.");
   }
 };
 

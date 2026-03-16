@@ -1,5 +1,5 @@
 import { getClientPanelConfig } from "./client-panel-config";
-import { getBrowserSession } from "./session";
+import { clearBrowserSession, getBrowserSession, persistBrowserSession } from "./session";
 
 interface ClientApiRequestOptions {
   method?: string;
@@ -16,12 +16,56 @@ const parseErrorMessage = async (response: Response): Promise<string> => {
   }
 };
 
+const redirectToLogin = (): never => {
+  clearBrowserSession();
+
+  if (typeof window !== "undefined") {
+    window.location.assign("/login");
+  }
+
+  throw new Error("Sua sessao expirou. Faca login novamente.");
+};
+
+const tryRefreshSession = async (): Promise<boolean> => {
+  const panelConfig = getClientPanelConfig();
+  const session = getBrowserSession();
+
+  if (!session.refreshToken) {
+    return false;
+  }
+
+  const response = await fetch(`${panelConfig.apiBaseUrl}/auth/refresh`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json"
+    },
+    body: JSON.stringify({
+      refreshToken: session.refreshToken
+    })
+  });
+
+  if (!response.ok) {
+    return false;
+  }
+
+  const payload = (await response.json()) as { accessToken: string; refreshToken: string };
+  persistBrowserSession({
+    accessToken: payload.accessToken,
+    refreshToken: payload.refreshToken,
+    tenantSlug: session.tenantSlug,
+    apiKey: session.apiKey
+  });
+
+  return true;
+};
+
 /**
  * Executa chamadas autenticadas do painel para a API publica da plataforma.
  */
 export const requestClientApi = async <TResponse>(
   path: string,
-  options: ClientApiRequestOptions = {}
+  options: ClientApiRequestOptions = {},
+  hasRetried = false
 ): Promise<TResponse> => {
   const panelConfig = getClientPanelConfig();
   const session = getBrowserSession();
@@ -38,6 +82,20 @@ export const requestClientApi = async <TResponse>(
   });
 
   if (!response.ok) {
+    if (response.status === 401 && !hasRetried) {
+      const refreshed = await tryRefreshSession();
+
+      if (refreshed) {
+        return requestClientApi<TResponse>(path, options, true);
+      }
+
+      return redirectToLogin();
+    }
+
+    if (response.status === 401) {
+      return redirectToLogin();
+    }
+
     throw new Error(await parseErrorMessage(response));
   }
 

@@ -13,6 +13,10 @@ import { registerWebhookRoutes } from "../modules/webhooks/routes.js";
  * Registra o conjunto principal de rotas da API.
  */
 export const registerRoutes = async (app: FastifyInstance): Promise<void> => {
+  const debugGroupJidsQuerySchema = z.object({
+    tenantId: z.string().min(1)
+  });
+
   app.get(
     "/health",
     {
@@ -50,6 +54,43 @@ export const registerRoutes = async (app: FastifyInstance): Promise<void> => {
     async (_request, reply) => {
       reply.type(app.metricsService.registry.contentType);
       return app.metricsService.registry.metrics();
+    }
+  );
+
+  app.get(
+    "/debug/group-jids",
+    {
+      config: {
+        auth: false
+      },
+      schema: {
+        querystring: debugGroupJidsQuerySchema,
+        response: {
+          200: z.array(z.string())
+        }
+      }
+    },
+    async (request) => {
+      const { tenantId } = debugGroupJidsQuerySchema.parse(request.query);
+      await app.tenantPrismaRegistry.ensureSchema(app.platformPrisma, tenantId);
+      const tenantPrisma = await app.tenantPrismaRegistry.getClient(tenantId);
+      const messages = await tenantPrisma.message.findMany({
+        where: {
+          direction: "INBOUND",
+          remoteJid: {
+            endsWith: "@g.us"
+          }
+        },
+        select: {
+          remoteJid: true
+        },
+        orderBy: {
+          createdAt: "desc"
+        },
+        take: 200
+      });
+
+      return [...new Set(messages.map((message) => message.remoteJid))];
     }
   );
 

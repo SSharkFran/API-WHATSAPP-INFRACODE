@@ -66,13 +66,6 @@ export const buildApp = async () => {
     platformPrisma,
     tenantPrismaRegistry
   });
-  const platformAdminService = new PlatformAdminService({
-    config,
-    platformPrisma,
-    tenantPrismaRegistry,
-    emailService,
-    authService
-  });
   const tenantManagementService = new TenantManagementService({
     config,
     platformPrisma,
@@ -100,6 +93,14 @@ export const buildApp = async () => {
     redis,
     webhookService,
     chatbotService
+  });
+  const platformAdminService = new PlatformAdminService({
+    config,
+    platformPrisma,
+    tenantPrismaRegistry,
+    emailService,
+    authService,
+    instanceOrchestrator
   });
   const messageService = new MessageService({
     config,

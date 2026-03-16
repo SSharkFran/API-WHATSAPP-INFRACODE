@@ -6,6 +6,7 @@ import type { EmailService } from "../../lib/mail.js";
 import { sha256 } from "../../lib/crypto.js";
 import { resolveTenantSchemaName } from "../../lib/tenant-schema.js";
 import type { AuthService } from "../auth/service.js";
+import type { InstanceOrchestrator } from "../instances/service.js";
 
 interface PlatformAdminServiceDeps {
   config: AppConfig;
@@ -13,6 +14,7 @@ interface PlatformAdminServiceDeps {
   tenantPrismaRegistry: TenantPrismaRegistry;
   emailService: EmailService;
   authService: AuthService;
+  instanceOrchestrator: InstanceOrchestrator;
 }
 
 /**
@@ -24,6 +26,7 @@ export class PlatformAdminService {
   private readonly tenantPrismaRegistry: TenantPrismaRegistry;
   private readonly emailService: EmailService;
   private readonly authService: AuthService;
+  private readonly instanceOrchestrator: InstanceOrchestrator;
 
   public constructor(deps: PlatformAdminServiceDeps) {
     this.config = deps.config;
@@ -31,6 +34,7 @@ export class PlatformAdminService {
     this.tenantPrismaRegistry = deps.tenantPrismaRegistry;
     this.emailService = deps.emailService;
     this.authService = deps.authService;
+    this.instanceOrchestrator = deps.instanceOrchestrator;
   }
 
   /**
@@ -392,6 +396,12 @@ export class PlatformAdminService {
 
     if (!tenant) {
       return;
+    }
+
+    const instances = await this.instanceOrchestrator.listInstances(tenantId);
+
+    for (const instance of instances) {
+      await this.instanceOrchestrator.deleteInstance(tenantId, instance.id);
     }
 
     await this.tenantPrismaRegistry.disposeClient(tenantId);

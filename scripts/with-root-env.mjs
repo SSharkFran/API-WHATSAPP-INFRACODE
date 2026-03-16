@@ -45,7 +45,13 @@ const parseEnvFile = (content) => {
 const env = { ...process.env };
 
 if (existsSync(rootEnvPath)) {
-  Object.assign(env, parseEnvFile(readFileSync(rootEnvPath, "utf8")));
+  const rootEnv = parseEnvFile(readFileSync(rootEnvPath, "utf8"));
+
+  for (const [key, value] of Object.entries(rootEnv)) {
+    if (env[key] === undefined || env[key] === "") {
+      env[key] = value;
+    }
+  }
 }
 
 const child = spawn(command, {

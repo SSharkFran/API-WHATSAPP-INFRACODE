@@ -4,7 +4,12 @@ const bootstrap = async (): Promise<void> => {
   const app = await buildApp();
 
   try {
-    await app.instanceOrchestrator.bootstrapPersistedInstances();
+    try {
+      await app.instanceOrchestrator.bootstrapPersistedInstances();
+    } catch (error) {
+      app.log.warn({ err: error }, "Falha ao bootstrapar instancias persistidas; API seguira inicializando");
+    }
+
     await app.listen({
       host: app.config.HOST,
       port: app.config.PORT

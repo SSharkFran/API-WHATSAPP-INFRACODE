@@ -24,6 +24,12 @@ Para o Railway ler os manifests deste monorepo, configure o **Config File Path**
 - `panel`: `/apps/panel/railway.json`
 - `worker`: `/apps/worker/railway.json`
 
+Importante:
+
+- o **Root Directory** dos servicos `api`, `panel` e `worker` deve ficar em `/` ou em branco
+- nao coloque `/apps/api/railway.json`, `/apps/panel/railway.json` ou `/apps/worker/railway.json` no **Root Directory**
+- esses caminhos sao apenas para o campo **Config File Path**
+
 Os manifests usam Dockerfiles do repositorio e watch patterns especificos para evitar rebuild desnecessario.
 
 ## Arquitetura recomendada
@@ -131,4 +137,3 @@ Com isso:
 - o `api` agora sobe com `trustProxy` habilitado automaticamente quando existe `RAILWAY_PUBLIC_DOMAIN`
 - o `panel` agora respeita `PORT` dinamico do Railway
 - se quiser volume em outro mount path, ajuste `requiredMountPath` no manifest do `api` e a configuracao do servic
-

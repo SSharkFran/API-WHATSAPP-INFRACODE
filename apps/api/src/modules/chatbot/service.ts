@@ -238,6 +238,8 @@ export class ChatbotService {
             isEnabled: false,
             welcomeMessage: null,
             fallbackMessage: null,
+            leadsGroupJid: null,
+            leadsGroupName: null,
             rules: [],
             ai: this.buildRuntimeAiConfig(defaultAiSettings, managedAiProvider),
             createdAt: new Date(0).toISOString(),
@@ -344,6 +346,8 @@ export class ChatbotService {
       isEnabled: boolean;
       welcomeMessage: string | null;
       fallbackMessage: string | null;
+      leadsGroupJid?: string | null;
+      leadsGroupName?: string | null;
       rules: unknown;
       aiSettings?: unknown;
       createdAt: Date;
@@ -362,6 +366,8 @@ export class ChatbotService {
       isEnabled: record.isEnabled,
       welcomeMessage: record.welcomeMessage,
       fallbackMessage: record.fallbackMessage,
+      leadsGroupJid: record.leadsGroupJid ?? null,
+      leadsGroupName: record.leadsGroupName ?? null,
       rules: chatbotRulesArraySchema.parse(record.rules),
       ai: this.buildRuntimeAiConfig(aiSettings, managedAiProvider),
       createdAt: record.createdAt.toISOString(),

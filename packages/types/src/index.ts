@@ -290,6 +290,8 @@ export interface ChatbotConfig {
   isEnabled: boolean;
   welcomeMessage?: string | null;
   fallbackMessage?: string | null;
+  leadsGroupJid?: string | null;
+  leadsGroupName?: string | null;
   rules: ChatbotRule[];
   ai: ChatbotAiConfig;
   createdAt: string;

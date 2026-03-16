@@ -94,4 +94,57 @@ export const registerChatbotRoutes = async (app: FastifyInstance): Promise<void>
       return app.chatbotService.simulate(tenantId, params.id, body);
     }
   );
+
+  app.delete(
+    "/instances/:id/chatbot/leads-group",
+    {
+      config: {
+        auth: "tenant",
+        allowApiKey: true,
+        requiredScopes: ["write"]
+      },
+      schema: {
+        tags: ["Chatbot"],
+        summary: "Desconecta o grupo configurado para resumos de leads",
+        params: instanceParamsSchema,
+        response: {
+          200: chatbotConfigSchema
+        }
+      }
+    },
+    async (request) => {
+      const tenantId = requireTenantId(request);
+      const params = instanceParamsSchema.parse(request.params);
+      const tenantPrisma = await app.tenantPrismaRegistry.getClient(tenantId);
+
+      await tenantPrisma.chatbotConfig.updateMany({
+        where: {
+          instanceId: params.id
+        },
+        data: {
+          leadsGroupJid: null,
+          leadsGroupName: null
+        }
+      });
+
+      const payload = {
+        leadsGroupJid: null,
+        leadsGroupName: null
+      };
+      const config = await app.chatbotService.getConfig(tenantId, params.id);
+
+      await recordPlatformAuditLog(
+        app.platformPrisma,
+        request,
+        "chatbot.leads-group.disconnect",
+        "Instance",
+        params.id,
+        payload,
+        app.config.JWT_SECRET
+      );
+      await recordTenantAuditLog(tenantPrisma, request, "chatbot.leads-group.disconnect", "Instance", params.id, payload, app.config.JWT_SECRET);
+
+      return config;
+    }
+  );
 };

@@ -124,7 +124,7 @@ export const ChatbotStudio = ({ initialInstances }: ChatbotStudioProps) => {
   const [simulationForm, setSimulationForm] = useState<SimulationFormState>(buildSimulationFormState);
   const [lastSavedConfig, setLastSavedConfig] = useState<ChatbotConfig | null>(null);
   const [simulationResult, setSimulationResult] = useState<ChatbotSimulationResult | null>(null);
-  const [pendingAction, setPendingAction] = useState<"load" | "save" | "simulate" | null>(null);
+  const [pendingAction, setPendingAction] = useState<"load" | "save" | "simulate" | "disconnect-group" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
@@ -281,6 +281,33 @@ export const ChatbotStudio = ({ initialInstances }: ChatbotStudioProps) => {
       setSuccess("Simulacao executada com a configuracao persistida da instancia.");
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Falha ao simular o chatbot.");
+    } finally {
+      setPendingAction(null);
+    }
+  };
+
+  const disconnectLeadsGroup = async () => {
+    if (!selectedInstance) {
+      return;
+    }
+
+    setPendingAction("disconnect-group");
+    setError(null);
+    setSuccess(null);
+
+    try {
+      const saved = await requestClientApi<ChatbotConfig>(`/instances/${selectedInstance.id}/chatbot/leads-group`, {
+        method: "DELETE"
+      });
+
+      setLastSavedConfig(saved);
+      setFormState(mapConfigToFormState(saved));
+      setSuccess("Grupo de leads desconectado. Envie 'conectar' novamente em um grupo para reativar.");
+      startTransition(() => {
+        router.refresh();
+      });
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Falha ao desconectar o grupo de leads.");
     } finally {
       setPendingAction(null);
     }
@@ -712,7 +739,18 @@ export const ChatbotStudio = ({ initialInstances }: ChatbotStudioProps) => {
                     ? `${formState.ai.mode} / ${formState.ai.provider ?? "aguardando admin"} / ${formState.ai.model || "modelo nao definido"}`
                     : "desabilitada"}
                 </div>
+                <div className="list-row-light rounded-[22px] p-4">
+                  Grupo de leads:{" "}
+                  {lastSavedConfig?.leadsGroupName
+                    ? `${lastSavedConfig.leadsGroupName} (conectado)`
+                    : "nao configurado — envie 'conectar' em um grupo para ativar"}
+                </div>
               </div>
+              {lastSavedConfig?.leadsGroupJid ? (
+                <Button disabled={pendingAction !== null} onClick={() => void disconnectLeadsGroup()} variant="ghost">
+                  {pendingAction === "disconnect-group" ? "Desconectando..." : "Desconectar grupo"}
+                </Button>
+              ) : null}
             </CardContent>
           </Card>
         </div>

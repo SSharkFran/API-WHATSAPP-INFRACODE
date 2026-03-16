@@ -129,11 +129,15 @@ export const buildTenantSchemaSql = (schemaName: string): string[] => {
       "rules" JSONB NOT NULL DEFAULT '[]'::JSONB,
       "aiSettings" JSONB NOT NULL DEFAULT '{}'::JSONB,
       "aiApiKeyEncrypted" TEXT,
+      "leadsGroupJid" TEXT,
+      "leadsGroupName" TEXT,
       "createdAt" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       "updatedAt" TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );`,
     `ALTER TABLE ${schema}."ChatbotConfig" ADD COLUMN IF NOT EXISTS "aiSettings" JSONB NOT NULL DEFAULT '{}'::JSONB;`,
     `ALTER TABLE ${schema}."ChatbotConfig" ADD COLUMN IF NOT EXISTS "aiApiKeyEncrypted" TEXT;`,
+    `ALTER TABLE ${schema}."ChatbotConfig" ADD COLUMN IF NOT EXISTS "leadsGroupJid" TEXT;`,
+    `ALTER TABLE ${schema}."ChatbotConfig" ADD COLUMN IF NOT EXISTS "leadsGroupName" TEXT;`,
     `CREATE TABLE IF NOT EXISTS ${schema}."AuditLog" (
       "id" TEXT PRIMARY KEY,
       "actorType" TEXT NOT NULL,

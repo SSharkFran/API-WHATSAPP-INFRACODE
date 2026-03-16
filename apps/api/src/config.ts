@@ -45,8 +45,7 @@ const envSchema = z.object({
     .transform((value) => value === "true"),
   DATA_DIR: z.string().default(defaultDataDir),
   PUBLIC_API_BASE_URL: z.string().url().default(defaultPublicApiBaseUrl),
-  SMTP_FROM: z.string().email().default("noreply@infracode.local"),
-  LEADS_GROUP_JID: z.string().optional()
+  SMTP_FROM: z.string().email().default("noreply@infracode.local")
 });
 
 export type AppConfig = z.infer<typeof envSchema>;

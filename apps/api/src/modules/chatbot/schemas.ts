@@ -40,6 +40,8 @@ export const chatbotConfigSchema = z.object({
   isEnabled: z.boolean(),
   welcomeMessage: z.string().nullable(),
   fallbackMessage: z.string().nullable(),
+  leadsGroupJid: z.string().nullable().optional(),
+  leadsGroupName: z.string().nullable().optional(),
   rules: z.array(chatbotRuleSchema),
   ai: chatbotAiConfigSchema,
   createdAt: z.string(),

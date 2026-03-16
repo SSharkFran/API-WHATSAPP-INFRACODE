@@ -766,6 +766,64 @@ export class InstanceOrchestrator {
 
     try {
       const inputText = typeof event.payload.text === "string" ? event.payload.text : null;
+      const normalizedInputText = (inputText ?? "").normalize("NFKC").trim().toLowerCase();
+
+      if (event.remoteJid.endsWith("@g.us")) {
+        if (normalizedInputText === "conectar") {
+          const leadsGroupName =
+            typeof event.payload.pushName === "string" && event.payload.pushName.trim()
+              ? event.payload.pushName.trim()
+              : "Grupo sem nome";
+          const chatbotConfig = await prisma.chatbotConfig.findUnique({
+            where: {
+              instanceId: instance.id
+            }
+          });
+
+          if (chatbotConfig) {
+            await prisma.chatbotConfig.update({
+              where: {
+                instanceId: instance.id
+              },
+              data: {
+                leadsGroupJid: event.remoteJid,
+                leadsGroupName
+              }
+            });
+          } else {
+            await prisma.chatbotConfig.create({
+              data: {
+                instanceId: instance.id,
+                isEnabled: false,
+                rules: [] as Prisma.InputJsonValue,
+                aiSettings: {} as Prisma.InputJsonValue,
+                leadsGroupJid: event.remoteJid,
+                leadsGroupName
+              }
+            });
+          }
+
+          await this.sendAutomatedTextMessage(
+            tenantId,
+            instance.id,
+            remoteNumber,
+            event.remoteJid,
+            "Grupo conectado com sucesso! Os resumos de leads serao enviados aqui.",
+            {
+              action: "leads_group_connected",
+              kind: "chatbot"
+            }
+          );
+        }
+
+        return;
+      }
+
+      const chatbotConfig = await prisma.chatbotConfig.findUnique({
+        where: {
+          instanceId: instance.id
+        }
+      });
       const chatbotResult = await this.chatbotService.evaluateInbound(tenantId, instance.id, {
         text: inputText,
         isFirstContact,
@@ -783,20 +841,27 @@ export class InstanceOrchestrator {
       const resumoLead = resumoMatch?.[1]?.trim() ?? null;
       const clientResponseText = chatbotResult.responseText.replace(resumoRegex, "").trim();
 
-      if (resumoLead && this.config.LEADS_GROUP_JID) {
-        const leadsGroupNumber = normalizePhoneNumber(this.config.LEADS_GROUP_JID.split("@")[0] ?? "");
+      if (resumoLead) {
+        const groupJid = chatbotConfig?.leadsGroupJid ?? null;
 
-        await this.sendAutomatedTextMessage(
-          tenantId,
-          instance.id,
-          leadsGroupNumber,
-          this.config.LEADS_GROUP_JID,
-          `🔔 Novo lead agendado:\n\n${resumoLead}`,
-          {
+        if (groupJid) {
+          const leadsGroupNumber = normalizePhoneNumber(groupJid.split("@")[0] ?? "");
+
+          await this.sendAutomatedTextMessage(tenantId, instance.id, leadsGroupNumber, groupJid, `🔔 Novo lead agendado:\n\n${resumoLead}`, {
             action: "lead_summary",
             kind: "chatbot"
-          }
-        );
+          });
+        } else {
+          this.emitLog(buildWorkerKey(tenantId, instance.id), {
+            context: {
+              instanceId: instance.id
+            },
+            instanceId: instance.id,
+            level: "warn",
+            message: "Resumo de lead gerado, mas nenhum grupo foi conectado para recebimento",
+            timestamp: new Date().toISOString()
+          });
+        }
       }
 
       if (!clientResponseText.trim()) {

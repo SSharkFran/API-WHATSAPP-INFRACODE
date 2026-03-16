@@ -9,6 +9,7 @@ export const resolveTenantSlugFromHostname = (
   const normalizedHost = hostname.toLowerCase();
   const normalizedRoot = rootDomain.toLowerCase();
   const normalizedAdmin = adminSubdomain.toLowerCase();
+  const reservedSubdomains = new Set([normalizedAdmin, "api"]);
 
   if (normalizedHost === normalizedRoot || normalizedHost === `${normalizedAdmin}.${normalizedRoot}`) {
     return undefined;
@@ -20,7 +21,7 @@ export const resolveTenantSlugFromHostname = (
 
   const candidate = normalizedHost.slice(0, normalizedHost.length - normalizedRoot.length - 1);
 
-  if (!candidate || candidate === normalizedAdmin || candidate.includes(".")) {
+  if (!candidate || reservedSubdomains.has(candidate) || candidate.includes(".")) {
     return undefined;
   }
 

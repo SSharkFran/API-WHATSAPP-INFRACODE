@@ -496,14 +496,24 @@ export class ChatbotService {
     }
 
     const currentInput = input.text?.trim();
-    const lastMessage = messages.at(-1);
 
-    if (
-      currentInput &&
-      (!lastMessage ||
-        lastMessage.role !== "user" ||
-        normalizeText(lastMessage.content) !== normalizeText(currentInput))
-    ) {
+    if (currentInput) {
+      const normalizedCurrentInput = normalizeText(currentInput);
+
+      while (messages.length > 0) {
+        const lastMessage = messages.at(-1);
+
+        if (
+          !lastMessage ||
+          lastMessage.role !== "user" ||
+          normalizeText(lastMessage.content) !== normalizedCurrentInput
+        ) {
+          break;
+        }
+
+        messages.pop();
+      }
+
       messages.push({
         role: "user",
         content: currentInput
@@ -525,24 +535,61 @@ export class ChatbotService {
     },
     temperature: number
   ): Promise<string | null> {
+    const provider = managedAiProvider.provider as string | null;
     const baseUrl = managedAiProvider.baseUrl.endsWith("/") ? managedAiProvider.baseUrl : `${managedAiProvider.baseUrl}/`;
-    const response = await fetch(new URL("chat/completions", baseUrl).toString(), {
+    const isAnthropic = provider === "ANTHROPIC";
+    const response = await fetch(new URL(isAnthropic ? "v1/messages" : "chat/completions", baseUrl).toString(), {
       method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        model: managedAiProvider.model,
-        system: conversation.system,
-        messages: conversation.messages,
-        temperature,
-        max_tokens: 300
-      })
+      headers: isAnthropic
+        ? {
+            "Content-Type": "application/json",
+            "x-api-key": apiKey,
+            "anthropic-version": "2023-06-01"
+          }
+        : {
+            Authorization: `Bearer ${apiKey}`,
+            "Content-Type": "application/json"
+          },
+      body: JSON.stringify(
+        isAnthropic
+          ? {
+              model: managedAiProvider.model,
+              system: conversation.system,
+              messages: conversation.messages,
+              max_tokens: 300,
+              temperature
+            }
+          : {
+              model: managedAiProvider.model,
+              system: conversation.system,
+              messages: conversation.messages,
+              temperature,
+              max_tokens: 300
+            }
+      )
     });
 
     if (!response.ok) {
       throw new Error(`IA indisponivel: ${response.status}`);
+    }
+
+    if (isAnthropic) {
+      const json = (await response.json()) as {
+        content?: Array<{
+          type?: string;
+          text?: string;
+        }>;
+      };
+      const content = json.content;
+
+      if (Array.isArray(content)) {
+        return content
+          .map((item) => (item.type === "text" && typeof item.text === "string" ? item.text : ""))
+          .join("\n")
+          .trim();
+      }
+
+      return null;
     }
 
     const json = (await response.json()) as {
@@ -552,7 +599,6 @@ export class ChatbotService {
         };
       }>;
     };
-
     const content = json.choices?.[0]?.message?.content;
 
     if (typeof content === "string") {

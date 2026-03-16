@@ -91,8 +91,7 @@ export class WebhookService {
         id: tenantId
       },
       data: {
-        onboardingCompletedAt: new Date(),
-        onboardingStep: "COMPLETED"
+        onboardingStep: "WEBHOOK_CONFIGURED"
       }
     });
 
@@ -101,6 +100,32 @@ export class WebhookService {
       instanceId,
       url: record.url,
       secret: payload.secret,
+      headers: record.headers as Record<string, string>,
+      subscribedEvents: record.subscribedEvents,
+      isActive: record.isActive
+    };
+  }
+
+  /**
+   * Retorna a configuracao atual do webhook de uma instancia.
+   */
+  public async getConfig(tenantId: string, instanceId: string): Promise<WebhookConfig | null> {
+    const prisma = await this.tenantPrismaRegistry.getClient(tenantId);
+    const record = await prisma.webhookEndpoint.findFirst({
+      where: {
+        instanceId
+      }
+    });
+
+    if (!record) {
+      return null;
+    }
+
+    return {
+      id: record.id,
+      instanceId,
+      url: record.url,
+      secret: this.decryptSecret(record.secretEncrypted),
       headers: record.headers as Record<string, string>,
       subscribedEvents: record.subscribedEvents,
       isActive: record.isActive

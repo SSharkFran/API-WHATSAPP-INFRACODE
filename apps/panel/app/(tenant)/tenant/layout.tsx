@@ -5,6 +5,7 @@ const navigation = [
   { href: "/tenant", label: "Dashboard", meta: "Visao geral de consumo, fila e capacidade." },
   { href: "/tenant/instances", label: "Instancias", meta: "Fleet, QR Code, uptime, risco e acoes operacionais." },
   { href: "/tenant/onboarding", label: "Onboarding", meta: "Senha, primeira instancia, QR e webhook." },
+  { href: "/tenant/chatbot", label: "Chatbot", meta: "Regras por instancia, simulacao e respostas automaticas." },
   { href: "/tenant/api-keys", label: "API Keys", meta: "Integracoes, tokens e contexto do runtime." }
 ];
 
@@ -57,6 +58,7 @@ export default function TenantLayout({
               <div className="flex flex-wrap gap-3">
                 <span className="rounded-full border border-slate-200 bg-white/80 px-4 py-2 text-sm text-slate-600">QR em tempo real</span>
                 <span className="rounded-full border border-sky-200 bg-sky-50 px-4 py-2 text-sm text-sky-800">Webhook por instancia</span>
+                <span className="rounded-full border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm text-emerald-800">Chatbot nativo</span>
               </div>
             </header>
             {children}

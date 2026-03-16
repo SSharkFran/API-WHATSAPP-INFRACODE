@@ -241,3 +241,32 @@ export interface ApiErrorShape {
   message: string;
   details?: Record<string, unknown>;
 }
+
+export type ChatbotTriggerType = "EXACT" | "CONTAINS" | "REGEX" | "FIRST_CONTACT";
+
+export interface ChatbotRule {
+  id: string;
+  name: string;
+  triggerType: ChatbotTriggerType;
+  matchValue?: string | null;
+  responseText: string;
+  isActive: boolean;
+}
+
+export interface ChatbotConfig {
+  id: string;
+  instanceId: string;
+  isEnabled: boolean;
+  welcomeMessage?: string | null;
+  fallbackMessage?: string | null;
+  rules: ChatbotRule[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ChatbotSimulationResult {
+  action: "MATCHED" | "WELCOME" | "FALLBACK" | "NO_MATCH";
+  matchedRuleId?: string | null;
+  matchedRuleName?: string | null;
+  responseText?: string | null;
+}

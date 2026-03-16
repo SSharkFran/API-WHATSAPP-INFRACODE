@@ -20,6 +20,7 @@ import { authPlugin } from "./plugins/auth.js";
 import { swaggerPlugin } from "./plugins/swagger.js";
 import { PlatformAdminService } from "./modules/admin/service.js";
 import { AuthService } from "./modules/auth/service.js";
+import { ChatbotService } from "./modules/chatbot/service.js";
 import { InstanceOrchestrator } from "./modules/instances/service.js";
 import { MessageService } from "./modules/messages/service.js";
 import { PlanEnforcementService } from "./modules/platform/plan-enforcement.service.js";
@@ -57,6 +58,10 @@ export const buildApp = async () => {
     platformPrisma,
     emailService
   });
+  const chatbotService = new ChatbotService({
+    platformPrisma,
+    tenantPrismaRegistry
+  });
   const planEnforcementService = new PlanEnforcementService({
     platformPrisma,
     tenantPrismaRegistry
@@ -93,7 +98,8 @@ export const buildApp = async () => {
     tenantPrismaRegistry,
     planEnforcementService,
     redis,
-    webhookService
+    webhookService,
+    chatbotService
   });
   const messageService = new MessageService({
     config,
@@ -115,6 +121,7 @@ export const buildApp = async () => {
   app.decorate("metricsService", metricsService);
   app.decorate("authService", authService);
   app.decorate("platformAdminService", platformAdminService);
+  app.decorate("chatbotService", chatbotService);
   app.decorate("tenantManagementService", tenantManagementService);
   app.decorate("planEnforcementService", planEnforcementService);
   app.decorate("instanceOrchestrator", instanceOrchestrator);

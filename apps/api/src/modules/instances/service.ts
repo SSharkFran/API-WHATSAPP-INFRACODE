@@ -17,6 +17,7 @@ import type { PlatformPrisma, TenantPrismaRegistry } from "../../lib/database.js
 import { ApiError } from "../../lib/errors.js";
 import type { MetricsService } from "../../lib/metrics.js";
 import { normalizePhoneNumber } from "../../lib/phone.js";
+import type { ChatbotService } from "../chatbot/service.js";
 import type { PlanEnforcementService } from "../platform/plan-enforcement.service.js";
 import type { WebhookService } from "../webhooks/service.js";
 
@@ -28,6 +29,7 @@ interface InstanceOrchestratorDeps {
   metricsService: MetricsService;
   webhookService: WebhookService;
   planEnforcementService: PlanEnforcementService;
+  chatbotService: ChatbotService;
 }
 
 interface StatusWorkerEvent {
@@ -121,6 +123,7 @@ export class InstanceOrchestrator {
   private readonly redis: IORedis;
   private readonly webhookService: WebhookService;
   private readonly planEnforcementService: PlanEnforcementService;
+  private readonly chatbotService: ChatbotService;
   private readonly logEmitter = new EventEmitter();
   private readonly qrEmitter = new EventEmitter();
   private readonly latestQrCodes = new Map<string, QrCodeEvent>();
@@ -134,6 +137,7 @@ export class InstanceOrchestrator {
     this.redis = deps.redis;
     this.webhookService = deps.webhookService;
     this.planEnforcementService = deps.planEnforcementService;
+    this.chatbotService = deps.chatbotService;
   }
 
   /**
@@ -694,6 +698,8 @@ export class InstanceOrchestrator {
       }
     });
 
+    const isFirstContact = !conversation;
+
     if (!conversation) {
       await prisma.conversation.create({
         data: {
@@ -752,6 +758,145 @@ export class InstanceOrchestrator {
         type: event.messageType
       }
     });
+
+    if (contact.isBlacklisted) {
+      return;
+    }
+
+    try {
+      const inputText = typeof event.payload.text === "string" ? event.payload.text : null;
+      const chatbotResult = await this.chatbotService.evaluateInbound(tenantId, instance.id, {
+        text: inputText,
+        isFirstContact,
+        contactName: contact.displayName,
+        phoneNumber: remoteNumber
+      });
+
+      if (!chatbotResult?.responseText) {
+        return;
+      }
+
+      await this.sendAutomatedTextMessage(tenantId, instance.id, remoteNumber, chatbotResult.responseText, {
+        action: chatbotResult.action,
+        matchedRuleId: chatbotResult.matchedRuleId ?? null,
+        matchedRuleName: chatbotResult.matchedRuleName ?? null
+      });
+    } catch (error) {
+      this.emitLog(buildWorkerKey(tenantId, instance.id), {
+        context: {
+          error: error instanceof Error ? error.message : "unknown"
+        },
+        instanceId: instance.id,
+        level: "warn",
+        message: "Falha ao processar resposta automatica do chatbot",
+        timestamp: new Date().toISOString()
+      });
+    }
+  }
+
+  private async sendAutomatedTextMessage(
+    tenantId: string,
+    instanceId: string,
+    remoteNumber: string,
+    text: string,
+    metadata: Record<string, unknown>
+  ): Promise<void> {
+    await this.planEnforcementService.assertCanSendMessage(tenantId);
+    const tenant = await this.platformPrisma.tenant.findUnique({
+      where: {
+        id: tenantId
+      }
+    });
+
+    if (!tenant) {
+      throw new ApiError(404, "TENANT_NOT_FOUND", "Tenant nao encontrado");
+    }
+
+    await this.enforceAutomatedRateLimit(instanceId, tenantId, tenant.rateLimitPerMinute);
+    const payload: SendMessagePayload = {
+      type: "text",
+      to: remoteNumber,
+      text
+    };
+    const rpcResult = await this.sendMessage(tenantId, instanceId, payload);
+    const prisma = await this.tenantPrismaRegistry.getClient(tenantId);
+    const created = await prisma.message.create({
+      data: {
+        instanceId,
+        remoteJid: `${remoteNumber}@s.whatsapp.net`,
+        externalMessageId: (rpcResult.externalMessageId as string | undefined) ?? null,
+        direction: "OUTBOUND",
+        type: "text",
+        status: "SENT",
+        payload: {
+          ...payload,
+          automation: {
+            kind: "chatbot",
+            ...metadata
+          }
+        } as Prisma.InputJsonValue,
+        traceId: crypto.randomUUID(),
+        sentAt: new Date()
+      }
+    });
+
+    await prisma.instanceUsage.update({
+      where: { instanceId },
+      data: {
+        messagesSent: {
+          increment: 1
+        }
+      }
+    });
+
+    await this.platformPrisma.tenant.update({
+      where: { id: tenantId },
+      data: {
+        messagesThisMonth: {
+          increment: 1
+        }
+      }
+    });
+
+    this.metricsService.messagesTotal.inc({
+      direction: "OUTBOUND",
+      instance_id: instanceId,
+      status: "SENT",
+      tenant_id: tenantId,
+      type: "text"
+    });
+
+    await this.webhookService.enqueueEvent({
+      tenantId,
+      instanceId,
+      eventType: "message.sent",
+      payload: {
+        externalMessageId: (rpcResult.externalMessageId as string | undefined) ?? null,
+        instanceId,
+        messageId: created.id,
+        status: created.status,
+        traceId: created.traceId,
+        type: created.type
+      }
+    });
+  }
+
+  private async enforceAutomatedRateLimit(instanceId: string, tenantId: string, limitPerMinute: number): Promise<void> {
+    const now = new Date();
+    const bucket = `${now.getUTCFullYear()}-${now.getUTCMonth()}-${now.getUTCDate()}-${now.getUTCHours()}-${now.getUTCMinutes()}`;
+    const key = `rate:auto:${tenantId}:${instanceId}:${bucket}`;
+    const current = await this.redis.incr(key);
+
+    if (current === 1) {
+      await this.redis.expire(key, 60);
+    }
+
+    if (current > limitPerMinute) {
+      throw new ApiError(429, "INSTANCE_RATE_LIMIT_EXCEEDED", "Limite de mensagens por minuto excedido", {
+        current,
+        limitPerMinute
+      });
+    }
   }
 
   private async requireInstanceWithUsage(tenantId: string, instanceId: string) {

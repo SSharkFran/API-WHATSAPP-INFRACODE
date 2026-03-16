@@ -6,7 +6,7 @@ const publicApiBaseUrl = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localh
 const internalApiBaseUrl = (process.env.API_INTERNAL_BASE_URL ?? publicApiBaseUrl).replace(/\/$/, "");
 const defaultTenantSlug = process.env.NEXT_PUBLIC_DEFAULT_TENANT ?? "tenant-demo";
 
-interface TenantDashboardSnapshot {
+export interface TenantDashboardSnapshot {
   tenantId: string;
   tenantName: string;
   activeInstances: number;
@@ -19,7 +19,7 @@ interface TenantDashboardSnapshot {
   usersLimit: number;
 }
 
-interface OnboardingSnapshot {
+export interface OnboardingSnapshot {
   tenantId: string;
   tenantSlug: string;
   currentStep: string;
@@ -31,7 +31,7 @@ interface OnboardingSnapshot {
   }>;
 }
 
-interface AdminTenantSummary {
+export interface AdminTenantSummary {
   id: string;
   name: string;
   slug: string;
@@ -48,7 +48,7 @@ interface AdminTenantSummary {
   } | null;
 }
 
-interface BillingSummary {
+export interface BillingSummary {
   id: string;
   tenantId: string;
   tenantName: string;
@@ -229,6 +229,39 @@ const mockBilling: BillingSummary[] = [
   }
 ];
 
+const mockPlans: AdminPlanSummary[] = [
+  {
+    id: "plan-starter",
+    code: "STARTER_10K",
+    name: "Starter 10K",
+    description: "Plano base para onboarding rapido de novos clientes.",
+    priceCents: 9900,
+    currency: "BRL",
+    instanceLimit: 1,
+    messagesPerMonth: 10000,
+    usersLimit: 2,
+    rateLimitPerMinute: 20,
+    isActive: true,
+    createdAt: now,
+    updatedAt: now
+  },
+  {
+    id: "plan-scale",
+    code: "SCALE_50K",
+    name: "Scale 50K",
+    description: "Plano comercial para operacoes com maior throughput.",
+    priceCents: 29900,
+    currency: "BRL",
+    instanceLimit: 5,
+    messagesPerMonth: 50000,
+    usersLimit: 8,
+    rateLimitPerMinute: 60,
+    isActive: true,
+    createdAt: now,
+    updatedAt: now
+  }
+];
+
 /**
  * Lista instancias do tenant atual e faz fallback para dados demo quando a API nao responde.
  */
@@ -290,6 +323,17 @@ export const getAdminBilling = async (): Promise<BillingSummary[]> => {
 };
 
 /**
+ * Lista planos comerciais disponiveis para provisionamento de tenants.
+ */
+export const getAdminPlans = async (): Promise<AdminPlanSummary[]> => {
+  try {
+    return await request<AdminPlanSummary[]>("/admin/plans", "admin");
+  } catch {
+    return mockPlans;
+  }
+};
+
+/**
  * Expose o runtime efetivo usado pelo painel no SSR.
  */
 export const getServerPanelConfig = () => {
@@ -303,3 +347,18 @@ export const getServerPanelConfig = () => {
     tenantSlug: session.tenantSlug ?? defaultTenantSlug
   };
 };
+export interface AdminPlanSummary {
+  id: string;
+  code: string;
+  name: string;
+  description?: string | null;
+  priceCents: number;
+  currency: string;
+  instanceLimit: number;
+  messagesPerMonth: number;
+  usersLimit: number;
+  rateLimitPerMinute: number;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}

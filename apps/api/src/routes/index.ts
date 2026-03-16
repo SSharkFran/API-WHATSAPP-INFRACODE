@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { registerAdminRoutes } from "../modules/admin/routes.js";
 import { registerAuthRoutes } from "../modules/auth/routes.js";
+import { registerChatbotRoutes } from "../modules/chatbot/routes.js";
 import { registerInstanceRoutes } from "../modules/instances/routes.js";
 import { registerMessageRoutes } from "../modules/messages/routes.js";
 import { registerPrivacyRoutes } from "../modules/privacy/routes.js";
@@ -54,6 +55,7 @@ export const registerRoutes = async (app: FastifyInstance): Promise<void> => {
 
   await registerAuthRoutes(app);
   await registerAdminRoutes(app);
+  await registerChatbotRoutes(app);
   await registerTenantRoutes(app);
   await registerInstanceRoutes(app);
   await registerMessageRoutes(app);

@@ -120,6 +120,16 @@ export const buildTenantSchemaSql = (schemaName: string): string[] => {
       "createdAt" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       "updatedAt" TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );`,
+    `CREATE TABLE IF NOT EXISTS ${schema}."ChatbotConfig" (
+      "id" TEXT PRIMARY KEY,
+      "instanceId" TEXT NOT NULL UNIQUE REFERENCES ${schema}."Instance"("id") ON DELETE CASCADE,
+      "isEnabled" BOOLEAN NOT NULL DEFAULT FALSE,
+      "welcomeMessage" TEXT,
+      "fallbackMessage" TEXT,
+      "rules" JSONB NOT NULL DEFAULT '[]'::JSONB,
+      "createdAt" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      "updatedAt" TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );`,
     `CREATE TABLE IF NOT EXISTS ${schema}."AuditLog" (
       "id" TEXT PRIMARY KEY,
       "actorType" TEXT NOT NULL,

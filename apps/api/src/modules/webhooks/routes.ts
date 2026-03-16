@@ -2,12 +2,36 @@ import type { FastifyInstance } from "fastify";
 import { recordPlatformAuditLog, recordTenantAuditLog } from "../../lib/audit.js";
 import { requireTenantId } from "../../lib/request-auth.js";
 import { instanceParamsSchema } from "../instances/schemas.js";
-import { listWebhookDeliveriesQuerySchema, upsertWebhookBodySchema } from "./schemas.js";
+import { listWebhookDeliveriesQuerySchema, upsertWebhookBodySchema, webhookConfigResponseSchema } from "./schemas.js";
 
 /**
  * Registra rotas REST de configuracao e historico de webhooks.
  */
 export const registerWebhookRoutes = async (app: FastifyInstance): Promise<void> => {
+  app.get(
+    "/instances/:id/webhooks",
+    {
+      config: {
+        auth: "tenant",
+        allowApiKey: true,
+        requiredScopes: ["read"]
+      },
+      schema: {
+        tags: ["Webhooks"],
+        summary: "Retorna a configuracao atual do webhook da instancia",
+        params: instanceParamsSchema,
+        response: {
+          200: webhookConfigResponseSchema.nullable()
+        }
+      }
+    },
+    async (request) => {
+      const tenantId = requireTenantId(request);
+      const params = instanceParamsSchema.parse(request.params);
+      return app.webhookService.getConfig(tenantId, params.id);
+    }
+  );
+
   app.post(
     "/instances/:id/webhooks",
     {

@@ -16,9 +16,6 @@
     ]
   },
   "deploy": {
-    "preDeployCommand": [
-      "pnpm --filter @infracode/api prisma:push:platform && pnpm --filter @infracode/api seed:platform-owner"
-    ],
     "startCommand": "node apps/api/dist/apps/api/src/server.js",
     "healthcheckPath": "/health",
     "healthcheckTimeout": 300,

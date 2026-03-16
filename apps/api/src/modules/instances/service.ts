@@ -832,6 +832,11 @@ export class InstanceOrchestrator {
         remoteJid: event.remoteJid
       });
 
+      console.log("[leads] responseText:", chatbotResult?.responseText?.slice(0, 500));
+      console.log("[leads] temResumo:", chatbotResult?.responseText?.includes("[RESUMO_LEAD]"));
+      console.log("[leads] groupJid config:", (this.config as { LEADS_GROUP_JID?: string }).LEADS_GROUP_JID ?? "NAO CONFIGURADO");
+      console.log("[leads] groupJid banco:", chatbotConfig?.leadsGroupJid ?? "NAO CONFIGURADO");
+
       if (!chatbotResult?.responseText) {
         return;
       }

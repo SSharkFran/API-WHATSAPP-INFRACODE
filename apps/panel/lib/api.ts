@@ -1,6 +1,7 @@
 import "server-only";
 import type { InstanceSummary } from "@infracode/types";
 import { redirect } from "next/navigation";
+import { isRedirectError } from "next/dist/client/components/redirect";
 import { getServerPanelSession } from "./server-session";
 
 const publicApiBaseUrl = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3333").replace(/\/$/, "");
@@ -275,7 +276,11 @@ const mockPlans: AdminPlanSummary[] = [
 export const getTenantInstances = async (): Promise<InstanceSummary[]> => {
   try {
     return await request<InstanceSummary[]>("/instances", "tenant");
-  } catch {
+  } catch (error) {
+    if (isRedirectError(error)) {
+      throw error;
+    }
+
     if (allowMockFallback) {
       return mockInstances;
     }
@@ -295,7 +300,11 @@ export const getInstances = getTenantInstances;
 export const getTenantDashboard = async (): Promise<TenantDashboardSnapshot> => {
   try {
     return await request<TenantDashboardSnapshot>("/tenant/dashboard", "tenant");
-  } catch {
+  } catch (error) {
+    if (isRedirectError(error)) {
+      throw error;
+    }
+
     if (allowMockFallback) {
       return mockTenantDashboard;
     }
@@ -310,7 +319,11 @@ export const getTenantDashboard = async (): Promise<TenantDashboardSnapshot> => 
 export const getTenantOnboarding = async (): Promise<OnboardingSnapshot> => {
   try {
     return await request<OnboardingSnapshot>("/tenant/onboarding", "tenant");
-  } catch {
+  } catch (error) {
+    if (isRedirectError(error)) {
+      throw error;
+    }
+
     if (allowMockFallback) {
       return mockOnboarding;
     }
@@ -325,7 +338,11 @@ export const getTenantOnboarding = async (): Promise<OnboardingSnapshot> => {
 export const getAdminTenants = async (): Promise<AdminTenantSummary[]> => {
   try {
     return await request<AdminTenantSummary[]>("/admin/tenants", "admin");
-  } catch {
+  } catch (error) {
+    if (isRedirectError(error)) {
+      throw error;
+    }
+
     if (allowMockFallback) {
       return mockAdminTenants;
     }
@@ -340,7 +357,11 @@ export const getAdminTenants = async (): Promise<AdminTenantSummary[]> => {
 export const getAdminBilling = async (): Promise<BillingSummary[]> => {
   try {
     return await request<BillingSummary[]>("/admin/billing", "admin");
-  } catch {
+  } catch (error) {
+    if (isRedirectError(error)) {
+      throw error;
+    }
+
     if (allowMockFallback) {
       return mockBilling;
     }
@@ -355,7 +376,11 @@ export const getAdminBilling = async (): Promise<BillingSummary[]> => {
 export const getAdminPlans = async (): Promise<AdminPlanSummary[]> => {
   try {
     return await request<AdminPlanSummary[]>("/admin/plans", "admin");
-  } catch {
+  } catch (error) {
+    if (isRedirectError(error)) {
+      throw error;
+    }
+
     if (allowMockFallback) {
       return mockPlans;
     }

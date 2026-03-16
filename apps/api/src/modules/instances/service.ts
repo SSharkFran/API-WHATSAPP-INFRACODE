@@ -778,7 +778,32 @@ export class InstanceOrchestrator {
         return;
       }
 
-      await this.sendAutomatedTextMessage(tenantId, instance.id, remoteNumber, event.remoteJid, chatbotResult.responseText, {
+      const resumoRegex = /\[RESUMO_LEAD\]([\s\S]*?)\[\/RESUMO_LEAD\]/;
+      const resumoMatch = chatbotResult.responseText.match(resumoRegex);
+      const resumoLead = resumoMatch?.[1]?.trim() ?? null;
+      const clientResponseText = chatbotResult.responseText.replace(resumoRegex, "").trim();
+
+      if (resumoLead && this.config.LEADS_GROUP_JID) {
+        const leadsGroupNumber = normalizePhoneNumber(this.config.LEADS_GROUP_JID.split("@")[0] ?? "");
+
+        await this.sendAutomatedTextMessage(
+          tenantId,
+          instance.id,
+          leadsGroupNumber,
+          this.config.LEADS_GROUP_JID,
+          `🔔 Novo lead agendado:\n\n${resumoLead}`,
+          {
+            action: "lead_summary",
+            kind: "chatbot"
+          }
+        );
+      }
+
+      if (!clientResponseText.trim()) {
+        return;
+      }
+
+      await this.sendAutomatedTextMessage(tenantId, instance.id, remoteNumber, event.remoteJid, clientResponseText, {
         action: chatbotResult.action,
         matchedRuleId: chatbotResult.matchedRuleId ?? null,
         matchedRuleName: chatbotResult.matchedRuleName ?? null

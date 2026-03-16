@@ -868,11 +868,25 @@ export class InstanceOrchestrator {
         return;
       }
 
-      await this.sendAutomatedTextMessage(tenantId, instance.id, remoteNumber, event.remoteJid, clientResponseText, {
-        action: chatbotResult.action,
-        matchedRuleId: chatbotResult.matchedRuleId ?? null,
-        matchedRuleName: chatbotResult.matchedRuleName ?? null
-      });
+      const responseParts = clientResponseText
+        .split("|||")
+        .map((part) => part.trim())
+        .filter((part) => part.length > 0);
+
+      for (let index = 0; index < responseParts.length; index += 1) {
+        const responsePart = responseParts[index];
+
+        await this.sendAutomatedTextMessage(tenantId, instance.id, remoteNumber, event.remoteJid, responsePart, {
+          action: chatbotResult.action,
+          matchedRuleId: chatbotResult.matchedRuleId ?? null,
+          matchedRuleName: chatbotResult.matchedRuleName ?? null
+        });
+
+        if (index < responseParts.length - 1) {
+          const delayMs = 1_000 + Math.floor(Math.random() * 501);
+          await new Promise((resolve) => setTimeout(resolve, delayMs));
+        }
+      }
     } catch (error) {
       this.emitLog(buildWorkerKey(tenantId, instance.id), {
         context: {

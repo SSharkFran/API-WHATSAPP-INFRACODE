@@ -523,6 +523,7 @@ export class ChatbotService {
       systemPrompt.trim() || defaultAiSettings.systemPrompt,
       `Data atual: ${formatDate(new Date())} ${formatTime(new Date())}.`,
       `Nome do contato: ${input.contactName?.trim() || "cliente"}.`,
+      `Se o nome do contato for "cliente" ou estiver vazio, pergunte o nome do cliente antes de prosseguir com o atendimento. Nunca assuma um nome que não foi informado.`,
       `Numero: ${normalizePhoneNumber(input.phoneNumber)}.`,
       "Se nao souber algo factual da empresa, admita a limitacao e ofereca transferir para humano.",
       "Evite respostas longas. Responda em 1 a 4 frases.",
@@ -540,7 +541,8 @@ export class ChatbotService {
         "Problema: {problema relatado}\n" +
         "Serviço de interesse: {serviço}\n" +
         "Horário agendado: {data e hora}\n" +
-        "[/RESUMO_LEAD]"
+        "[/RESUMO_LEAD]",
+      `REGRA OBRIGATÓRIA: No campo "Contato" do bloco [RESUMO_LEAD], use SEMPRE o número real do cliente: ${normalizePhoneNumber(input.phoneNumber)}. NUNCA escreva "(número)", "(celular)" ou deixe em branco. O número já está disponível e deve ser copiado exatamente.`
     ].join("\n");
 
     const messages: Array<{ role: "user" | "assistant"; content: string }> = [];
@@ -600,21 +602,21 @@ export class ChatbotService {
     messages.unshift(
       {
         role: "user",
-        content: "Quero agendar para sexta às 14h. Meu nome é João Silva."
+        content: "Quero agendar uma reunião. Meu nome é Carlos Mendes, pode ser quinta às 10h?"
       },
       {
         role: "assistant",
         content:
-          "Ótimo, João Silva! Agendado com Francisco Gleidson " +
-          "para sexta às 14h. Qualquer dúvida pode falar comigo!\n\n" +
+          "Claro, Carlos Mendes! Agendado com Francisco Gleidson " +
+          "para quinta às 10h. Qualquer dúvida pode falar comigo!\n\n" +
           "[RESUMO_LEAD]\n" +
-          "Nome: João Silva\n" +
-          "Contato: (número)\n" +
+          "Nome: Carlos Mendes\n" +
+          `Contato: ${normalizePhoneNumber(input.phoneNumber)}\n` +
           "E-mail: não informado\n" +
           "Empresa: não informado\n" +
           "Problema: não informado\n" +
           "Serviço de interesse: não informado\n" +
-          "Horário agendado: Sexta às 14h\n" +
+          "Horário agendado: Quinta às 10h\n" +
           "[/RESUMO_LEAD]"
       }
     );

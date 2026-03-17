@@ -938,8 +938,12 @@ export class InstanceOrchestrator {
       }
 
       const leadsEnabled = chatbotConfig?.leadsEnabled ?? true;
+      const resumoDedupeKey = `leads:sent:${instance.id}:${remoteNumber}:${Date.now().toString().slice(0, -3)}`;
+      const jaEnviado = resumoLead ? await this.redis.get(resumoDedupeKey) : null;
 
-      if (leadsPhone && leadsEnabled && resumoLead) {
+      if (jaEnviado) {
+        console.log("[leads] resumo duplicado ignorado para:", remoteNumber);
+      } else if (leadsPhone && leadsEnabled && resumoLead) {
         console.log("[leads] tentando enviar para telefone configurado...");
         try {
           await this.sendAutomatedTextMessage(tenantId, instance.id, leadsPhone, undefined, `🔔 Novo lead agendado:\n\n${resumoLead}`, {
@@ -947,6 +951,7 @@ export class InstanceOrchestrator {
             kind: "chatbot"
           });
           console.log("[leads] enviado com sucesso!");
+          await this.redis.set(resumoDedupeKey, "1", "EX", 30);
         } catch (err) {
           console.error("[leads] erro ao enviar:", err);
         }

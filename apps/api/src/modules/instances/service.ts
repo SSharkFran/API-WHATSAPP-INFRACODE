@@ -877,20 +877,22 @@ export class InstanceOrchestrator {
         matchedRuleName: chatbotResult.matchedRuleName ?? null
       };
 
-      const groupJid = chatbotConfig?.leadsGroupJid;
+      const leadsGroupJid = chatbotConfig?.leadsGroupJid;
 
       if (resumoMatch) {
         const resumoConteudo = resumoMatch[1].trim();
         console.log("[leads] conteudo:", resumoConteudo.slice(0, 100));
-        console.log("[leads] groupJid para envio:", groupJid ?? "UNDEFINED");
+        console.log("[leads] groupJid para envio:", leadsGroupJid ?? "UNDEFINED");
       }
 
-      if (groupJid && resumoLead) {
-        const leadsGroupNumber = groupJid.split("@")[0] ?? "";
+      if (leadsGroupJid && resumoLead) {
+        const leadsGroupNumber = leadsGroupJid.endsWith("@g.us")
+          ? leadsGroupJid.slice(0, -5)
+          : leadsGroupJid.split("@")[0] ?? "";
         console.log("[leads] tentando enviar para grupo...");
 
         try {
-          await this.sendAutomatedTextMessage(tenantId, instance.id, leadsGroupNumber, groupJid, `🔔 Novo lead agendado:\n\n${resumoLead}`, {
+          await this.sendAutomatedTextMessage(tenantId, instance.id, leadsGroupNumber, leadsGroupJid, `🔔 Novo lead agendado:\n\n${resumoLead}`, {
             action: "lead_summary",
             kind: "chatbot"
           });

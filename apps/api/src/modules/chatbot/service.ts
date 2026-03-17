@@ -471,7 +471,21 @@ export class ChatbotService {
       `Numero: ${normalizePhoneNumber(input.phoneNumber)}.`,
       "Se nao souber algo factual da empresa, admita a limitacao e ofereca transferir para humano.",
       "Evite respostas longas. Responda em 1 a 4 frases.",
-      "ATENCAO CRITICA: Quando confirmar um agendamento, inclua OBRIGATORIAMENTE ao final da resposta o bloco [RESUMO_LEAD] preenchido com os dados coletados. Sem este bloco o agendamento nao sera registrado."
+      "ATENCAO CRITICA: Quando confirmar um agendamento, inclua OBRIGATORIAMENTE ao final da resposta o bloco [RESUMO_LEAD] preenchido com os dados coletados. Sem este bloco o agendamento nao sera registrado." +
+        "\n\nREGRA CRÍTICA DE SISTEMA: Sempre que confirmar um " +
+        "agendamento com data e horário, você DEVE incluir " +
+        "OBRIGATORIAMENTE ao final da sua resposta o bloco abaixo " +
+        "preenchido. Sem ele o agendamento não será registrado " +
+        "e o lead será perdido:\n\n" +
+        "[RESUMO_LEAD]\n" +
+        "Nome: {nome completo do cliente}\n" +
+        "Contato: {número do WhatsApp}\n" +
+        "E-mail: {e-mail ou 'não informado'}\n" +
+        "Empresa: {empresa ou 'não informado'}\n" +
+        "Problema: {problema relatado}\n" +
+        "Serviço de interesse: {serviço}\n" +
+        "Horário agendado: {data e hora}\n" +
+        "[/RESUMO_LEAD]"
     ].join("\n");
 
     const messages: Array<{ role: "user" | "assistant"; content: string }> = [];
@@ -528,6 +542,28 @@ export class ChatbotService {
       });
     }
 
+    messages.unshift(
+      {
+        role: "user",
+        content: "Quero agendar para sexta às 14h. Meu nome é João Silva."
+      },
+      {
+        role: "assistant",
+        content:
+          "Ótimo, João Silva! Agendado com Francisco Gleidson " +
+          "para sexta às 14h. Qualquer dúvida pode falar comigo!\n\n" +
+          "[RESUMO_LEAD]\n" +
+          "Nome: João Silva\n" +
+          "Contato: (número)\n" +
+          "E-mail: não informado\n" +
+          "Empresa: não informado\n" +
+          "Problema: não informado\n" +
+          "Serviço de interesse: não informado\n" +
+          "Horário agendado: Sexta às 14h\n" +
+          "[/RESUMO_LEAD]"
+      }
+    );
+
     return {
       system,
       messages
@@ -572,14 +608,14 @@ export class ChatbotService {
               model: managedAiProvider.model,
               system: conversation.system,
               messages: conversation.messages,
-              max_tokens: 300,
+              max_tokens: 500,
               temperature
             }
           : {
               model: managedAiProvider.model,
               messages: messagesWithSystem,
               temperature,
-              max_tokens: 300
+              max_tokens: 500
             }
       )
     });

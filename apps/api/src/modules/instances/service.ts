@@ -671,6 +671,30 @@ export class InstanceOrchestrator {
   ): Promise<void> {
     const prisma = await this.tenantPrismaRegistry.getClient(tenantId);
     const remoteNumber = normalizePhoneNumber(event.remoteJid.split("@")[0] ?? "");
+    const msgText = typeof event.payload.text === "string" ? event.payload.text.trim().toLowerCase() : "";
+
+    if (msgText === "/reset") {
+      await prisma.message.deleteMany({
+        where: {
+          instanceId: instance.id,
+          remoteJid: event.remoteJid
+        }
+      });
+
+      await this.sendAutomatedTextMessage(
+        tenantId,
+        instance.id,
+        remoteNumber,
+        event.remoteJid,
+        "🔄 Conversa resetada!",
+        {
+          action: "reset",
+          kind: "chatbot"
+        }
+      );
+
+      return;
+    }
 
     const contact = await prisma.contact.upsert({
       where: {

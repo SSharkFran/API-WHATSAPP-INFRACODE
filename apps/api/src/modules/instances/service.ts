@@ -946,10 +946,17 @@ export class InstanceOrchestrator {
       } else if (leadsPhone && leadsEnabled && resumoLead) {
         console.log("[leads] tentando enviar para telefone configurado...");
         try {
-          await this.sendAutomatedTextMessage(tenantId, instance.id, leadsPhone, undefined, `🔔 Novo lead agendado:\n\n${resumoLead}`, {
-            action: "lead_summary",
-            kind: "chatbot"
-          });
+          await this.sendAutomatedTextMessage(
+            tenantId,
+            instance.id,
+            leadsPhone,
+            `${leadsPhone}@s.whatsapp.net`,
+            `🔔 Novo lead agendado:\n\n${resumoLead}`,
+            {
+              action: "lead_summary",
+              kind: "chatbot"
+            }
+          );
           console.log("[leads] enviado com sucesso!");
           await this.redis.set(resumoDedupeKey, "1", "EX", 30);
         } catch (err) {

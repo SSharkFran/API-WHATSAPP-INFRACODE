@@ -451,13 +451,26 @@ const handleSendMessage = async (command: RpcCommand): Promise<void> => {
 
     const payload = command.payload;
     const jid = payload.targetJid ?? toJid(payload.to);
+    let resolvedJid = jid;
+    if (!jid.endsWith("@g.us") && !jid.endsWith("@lid")) {
+      try {
+        const onWhatsAppResult = await activeSocket.onWhatsApp(payload.to);
+        const result = Array.isArray(onWhatsAppResult) ? onWhatsAppResult[0] : undefined;
+        if (result?.exists && result.jid) {
+          resolvedJid = result.jid;
+          log("info", `JID resolvido via onWhatsApp: ${resolvedJid}`);
+        }
+      } catch {
+        log("warn", "Falha ao resolver JID via onWhatsApp, usando JID padrão");
+      }
+    }
     const mentionJids = payload.mentionNumbers?.map((number) => toJid(number)) ?? [];
 
     if (payload.simulateTypingMs && payload.simulateTypingMs > 0) {
-      await activeSocket.presenceSubscribe(jid);
-      await activeSocket.sendPresenceUpdate("composing", jid);
+      await activeSocket.presenceSubscribe(resolvedJid);
+      await activeSocket.sendPresenceUpdate("composing", resolvedJid);
       await delay(payload.simulateTypingMs);
-      await activeSocket.sendPresenceUpdate("paused", jid);
+      await activeSocket.sendPresenceUpdate("paused", resolvedJid);
     }
 
     const content = await buildMessageContent(payload);
@@ -472,7 +485,7 @@ const handleSendMessage = async (command: RpcCommand): Promise<void> => {
             quoted: {
               key: {
                 id: payload.replyToMessageId,
-                remoteJid: jid,
+                remoteJid: resolvedJid,
                 fromMe: false
               },
               message: {}
@@ -480,15 +493,15 @@ const handleSendMessage = async (command: RpcCommand): Promise<void> => {
           }
         : undefined;
 
-    if (jid.endsWith("@g.us")) {
+    if (resolvedJid.endsWith("@g.us")) {
       try {
-        await activeSocket.groupMetadata(jid);
+        await activeSocket.groupMetadata(resolvedJid);
       } catch (e) {
         console.warn("[baileys] groupMetadata fetch failed:", e);
       }
     }
 
-    const result = await activeSocket.sendMessage(jid, content, sendOptions);
+    const result = await activeSocket.sendMessage(resolvedJid, content, sendOptions);
 
     if (!result) {
       throw new Error("Baileys nao retornou confirmacao de envio");
@@ -503,7 +516,7 @@ const handleSendMessage = async (command: RpcCommand): Promise<void> => {
       requestId: command.requestId,
       data: {
         externalMessageId: result.key.id ?? null,
-        remoteJid: result.key.remoteJid ?? jid
+        remoteJid: result.key.remoteJid ?? resolvedJid
       }
     });
   } catch (error) {

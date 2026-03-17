@@ -8,6 +8,7 @@ import type {
   ChatbotRule,
   ChatbotSimulationResult,
   ChatbotTriggerType,
+  FiadoTab,
   InstanceSummary
 } from "@infracode/types";
 import { Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Input } from "@infracode/ui";
@@ -21,6 +22,9 @@ interface ChatbotFormState {
   isEnabled: boolean;
   welcomeMessage: string;
   fallbackMessage: string;
+  leadsPhoneNumber: string;
+  leadsEnabled: boolean;
+  fiadoEnabled: boolean;
   rules: ChatbotRule[];
   ai: {
     isEnabled: boolean;
@@ -71,6 +75,9 @@ const buildDefaultFormState = (): ChatbotFormState => ({
   isEnabled: false,
   welcomeMessage: "",
   fallbackMessage: "",
+  leadsPhoneNumber: "",
+  leadsEnabled: true,
+  fiadoEnabled: false,
   rules: [],
   ai: {
     isEnabled: false,
@@ -98,6 +105,9 @@ const mapConfigToFormState = (config: ChatbotConfig): ChatbotFormState => ({
   isEnabled: config.isEnabled,
   welcomeMessage: config.welcomeMessage ?? "",
   fallbackMessage: config.fallbackMessage ?? "",
+  leadsPhoneNumber: config.leadsPhoneNumber ?? "",
+  leadsEnabled: config.leadsEnabled ?? true,
+  fiadoEnabled: config.fiadoEnabled ?? false,
   rules: config.rules,
   ai: {
     isEnabled: config.ai.isEnabled,
@@ -124,9 +134,10 @@ export const ChatbotStudio = ({ initialInstances }: ChatbotStudioProps) => {
   const [simulationForm, setSimulationForm] = useState<SimulationFormState>(buildSimulationFormState);
   const [lastSavedConfig, setLastSavedConfig] = useState<ChatbotConfig | null>(null);
   const [simulationResult, setSimulationResult] = useState<ChatbotSimulationResult | null>(null);
-  const [pendingAction, setPendingAction] = useState<"load" | "save" | "simulate" | "disconnect-group" | null>(null);
+  const [pendingAction, setPendingAction] = useState<"load" | "save" | "simulate" | "disconnect-group" | "save-leads-phone" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [fiadoTabs, setFiadoTabs] = useState<FiadoTab[]>([]);
 
   const selectedInstance = useMemo(
     () => instances.find((instance) => instance.id === selectedInstanceId) ?? null,
@@ -179,6 +190,30 @@ export const ChatbotStudio = ({ initialInstances }: ChatbotStudioProps) => {
     };
   }, [selectedInstanceId]);
 
+  useEffect(() => {
+    if (!selectedInstanceId || !formState.fiadoEnabled) {
+      setFiadoTabs([]);
+      return;
+    }
+
+    let active = true;
+    requestClientApi<FiadoTab[]>(`/instances/${selectedInstanceId}/fiado`)
+      .then((tabs) => {
+        if (active) {
+          setFiadoTabs(tabs);
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setFiadoTabs([]);
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [selectedInstanceId, formState.fiadoEnabled]);
+
   const updateRule = (ruleId: string, patch: Partial<ChatbotRule>) => {
     setFormState((current) => ({
       ...current,
@@ -229,6 +264,9 @@ export const ChatbotStudio = ({ initialInstances }: ChatbotStudioProps) => {
           isEnabled: formState.isEnabled,
           welcomeMessage: formState.welcomeMessage.trim() || null,
           fallbackMessage: formState.fallbackMessage.trim() || null,
+          leadsPhoneNumber: formState.leadsPhoneNumber.trim() || null,
+          leadsEnabled: formState.leadsEnabled,
+          fiadoEnabled: formState.fiadoEnabled,
           rules: formState.rules.map((rule) => ({
             ...rule,
             matchValue: rule.triggerType === "FIRST_CONTACT" ? null : rule.matchValue?.trim() || null,
@@ -254,6 +292,53 @@ export const ChatbotStudio = ({ initialInstances }: ChatbotStudioProps) => {
       setError(caught instanceof Error ? caught.message : "Falha ao salvar o chatbot.");
     } finally {
       setPendingAction(null);
+    }
+  };
+
+  const saveLeadsPhone = async () => {
+    if (!selectedInstance) {
+      return;
+    }
+
+    setPendingAction("save-leads-phone");
+    setError(null);
+    setSuccess(null);
+
+    try {
+      const saved = await requestClientApi<ChatbotConfig>(`/instances/${selectedInstance.id}/chatbot/leads-phone`, {
+        method: "PATCH",
+        body: {
+          leadsPhoneNumber: formState.leadsPhoneNumber.trim() || null,
+          leadsEnabled: formState.leadsEnabled
+        }
+      });
+
+      setLastSavedConfig(saved);
+      setFormState(mapConfigToFormState(saved));
+      setSuccess("Configuração de leads salva com sucesso.");
+      startTransition(() => {
+        router.refresh();
+      });
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Falha ao salvar configuração de leads.");
+    } finally {
+      setPendingAction(null);
+    }
+  };
+
+  const clearFiado = async (phoneNumber: string) => {
+    if (!selectedInstance) {
+      return;
+    }
+
+    try {
+      await requestClientApi(`/instances/${selectedInstance.id}/fiado/${phoneNumber}`, {
+        method: "DELETE"
+      });
+      setFiadoTabs((current) => current.filter((t) => t.phoneNumber !== phoneNumber));
+      setSuccess("Fiado limpo com sucesso.");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Falha ao limpar fiado.");
     }
   };
 
@@ -712,48 +797,135 @@ export const ChatbotStudio = ({ initialInstances }: ChatbotStudioProps) => {
                   <p className="mt-3">Rode a simulacao para validar a resposta atual da instancia.</p>
                 )}
               </div>
-            </CardContent>
-          </Card>
+          </CardContent>
+        </Card>
 
+        <Card className="surface-card">
+          <CardHeader>
+            <CardDescription className="font-[var(--font-mono)] uppercase tracking-[0.24em] text-slate-500">
+              Leads & Fiado
+            </CardDescription>
+            <CardTitle className="text-2xl text-slate-950">Configuração de notificações</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <label className="space-y-2 text-sm">
+              <span className="text-slate-600">Número para receber alertas de lead</span>
+              <Input
+                placeholder="5511999999999"
+                value={formState.leadsPhoneNumber}
+                onChange={(event) => setFormState((current) => ({ ...current, leadsPhoneNumber: event.target.value }))}
+              />
+            </label>
+
+            <label className="flex items-center gap-3 rounded-[20px] border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+              <input
+                type="checkbox"
+                checked={formState.leadsEnabled}
+                onChange={(event) => setFormState((current) => ({ ...current, leadsEnabled: event.target.checked }))}
+              />
+              Enviar resumo de leads para esse número
+            </label>
+
+            <label className="flex items-center gap-3 rounded-[20px] border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+              <input
+                type="checkbox"
+                checked={formState.fiadoEnabled}
+                onChange={(event) => setFormState((current) => ({ ...current, fiadoEnabled: event.target.checked }))}
+              />
+              Ativar controle de fiado para esta instância
+            </label>
+
+            <Button
+              disabled={pendingAction !== null || !selectedInstance}
+              onClick={() => void saveLeadsPhone()}
+              variant="secondary"
+              className="rounded-2xl"
+            >
+              {pendingAction === "save-leads-phone" ? "Salvando..." : "Salvar configuração de leads"}
+            </Button>
+          </CardContent>
+        </Card>
+
+        <Card className="surface-card">
+          <CardHeader>
+            <CardDescription className="font-[var(--font-mono)] uppercase tracking-[0.24em] text-slate-500">Resumo</CardDescription>
+            <CardTitle className="text-2xl text-slate-950">Estado publicado</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4 text-sm leading-7 text-slate-600">
+            <div className="list-row-light rounded-[22px] p-4">
+              <p className="control-kicker text-slate-400">Instancia</p>
+              <p className="mt-2 text-lg font-semibold text-slate-950">
+                {selectedInstance ? `${selectedInstance.name} / ${selectedInstance.status}` : "Nenhuma instancia selecionada"}
+              </p>
+            </div>
+            <div className="grid gap-3">
+              <div className="list-row-light rounded-[22px] p-4">Ultima gravacao: {formatDateTime(lastSavedConfig?.updatedAt)}</div>
+              <div className="list-row-light rounded-[22px] p-4">Regras cadastradas: {formState.rules.length}</div>
+              <div className="list-row-light rounded-[22px] p-4">
+                Chatbot: {formState.isEnabled ? "habilitado e pronto para responder" : "desabilitado"}
+              </div>
+              <div className="list-row-light rounded-[22px] p-4">
+                IA:{" "}
+                {formState.ai.isEnabled
+                  ? `${formState.ai.mode} / ${formState.ai.provider ?? "aguardando admin"} / ${formState.ai.model || "modelo nao definido"}`
+                  : "desabilitada"}
+              </div>
+              <div className="list-row-light rounded-[22px] p-4">
+                Alertas de lead: {lastSavedConfig?.leadsPhoneNumber || "número não configurado"}
+              </div>
+              <div className="list-row-light rounded-[22px] p-4">
+                Resumo de leads: {lastSavedConfig?.leadsEnabled !== false ? "ativo" : "inativo"}
+              </div>
+              <div className="list-row-light rounded-[22px] p-4">
+                Controle de fiado: {lastSavedConfig?.fiadoEnabled ? "ativo" : "inativo"}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+        {formState.fiadoEnabled && selectedInstance ? (
           <Card className="surface-card">
             <CardHeader>
-              <CardDescription className="font-[var(--font-mono)] uppercase tracking-[0.24em] text-slate-500">Resumo</CardDescription>
-              <CardTitle className="text-2xl text-slate-950">Estado publicado</CardTitle>
+              <CardDescription className="font-[var(--font-mono)] uppercase tracking-[0.24em] text-slate-500">
+                Fiado
+              </CardDescription>
+              <CardTitle className="text-2xl text-slate-950">Contas em aberto</CardTitle>
             </CardHeader>
-            <CardContent className="space-y-4 text-sm leading-7 text-slate-600">
-              <div className="list-row-light rounded-[22px] p-4">
-                <p className="control-kicker text-slate-400">Instancia</p>
-                <p className="mt-2 text-lg font-semibold text-slate-950">
-                  {selectedInstance ? `${selectedInstance.name} / ${selectedInstance.status}` : "Nenhuma instancia selecionada"}
-                </p>
-              </div>
-              <div className="grid gap-3">
-                <div className="list-row-light rounded-[22px] p-4">Ultima gravacao: {formatDateTime(lastSavedConfig?.updatedAt)}</div>
-                <div className="list-row-light rounded-[22px] p-4">Regras cadastradas: {formState.rules.length}</div>
-                <div className="list-row-light rounded-[22px] p-4">
-                  Chatbot: {formState.isEnabled ? "habilitado e pronto para responder" : "desabilitado"}
+            <CardContent className="space-y-3">
+              {fiadoTabs.length === 0 ? (
+                <div className="list-row-light rounded-[22px] p-4 text-sm text-slate-600">
+                  Nenhuma conta em aberto.
                 </div>
-                <div className="list-row-light rounded-[22px] p-4">
-                  IA:{" "}
-                  {formState.ai.isEnabled
-                    ? `${formState.ai.mode} / ${formState.ai.provider ?? "aguardando admin"} / ${formState.ai.model || "modelo nao definido"}`
-                    : "desabilitada"}
-                </div>
-                <div className="list-row-light rounded-[22px] p-4">
-                  Grupo de leads:{" "}
-                  {lastSavedConfig?.leadsGroupName
-                    ? `${lastSavedConfig.leadsGroupName} (conectado)`
-                    : "nao configurado — envie 'conectar' em um grupo para ativar"}
-                </div>
-              </div>
-              {lastSavedConfig?.leadsGroupJid ? (
-                <Button disabled={pendingAction !== null} onClick={() => void disconnectLeadsGroup()} variant="ghost">
-                  {pendingAction === "disconnect-group" ? "Desconectando..." : "Desconectar grupo"}
-                </Button>
-              ) : null}
+              ) : (
+                fiadoTabs.map((tab) => (
+                  <div className="list-row-light rounded-[24px] p-4" key={tab.phoneNumber}>
+                    <div className="flex items-center justify-between gap-4">
+                      <div>
+                        <p className="text-sm font-semibold text-slate-950">
+                          {tab.displayName ?? tab.phoneNumber}
+                        </p>
+                        <p className="text-xs text-slate-500">{tab.phoneNumber}</p>
+                      </div>
+                      <p className="font-[var(--font-mono)] text-sm font-semibold text-slate-950">
+                        R$ {tab.total.toFixed(2).replace(".", ",")}
+                      </p>
+                    </div>
+                    <div className="mt-3 flex items-center justify-between">
+                      <p className="text-xs text-slate-400">{tab.items.length} item(s)</p>
+                      <Button
+                        className="rounded-2xl"
+                        variant="ghost"
+                        onClick={() => void clearFiado(tab.phoneNumber)}
+                      >
+                        Marcar como pago
+                      </Button>
+                    </div>
+                  </div>
+                ))
+              )}
             </CardContent>
           </Card>
-        </div>
+        ) : null}
+      </div>
       </div>
     </section>
   );

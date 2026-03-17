@@ -16,10 +16,11 @@ import type { AppConfig } from "../../config.js";
 import type { PlatformPrisma, TenantPrismaRegistry } from "../../lib/database.js";
 import { ApiError } from "../../lib/errors.js";
 import type { MetricsService } from "../../lib/metrics.js";
-import { normalizePhoneNumber } from "../../lib/phone.js";
+import { normalizePhoneNumber, toJid } from "../../lib/phone.js";
 import type { ChatbotService } from "../chatbot/service.js";
 import type { PlanEnforcementService } from "../platform/plan-enforcement.service.js";
 import type { WebhookService } from "../webhooks/service.js";
+import type { FiadoService } from "../chatbot/fiado.service.js";
 
 interface InstanceOrchestratorDeps {
   config: AppConfig;
@@ -30,6 +31,7 @@ interface InstanceOrchestratorDeps {
   webhookService: WebhookService;
   planEnforcementService: PlanEnforcementService;
   chatbotService: ChatbotService;
+  fiadoService: FiadoService;
 }
 
 interface StatusWorkerEvent {
@@ -124,6 +126,7 @@ export class InstanceOrchestrator {
   private readonly webhookService: WebhookService;
   private readonly planEnforcementService: PlanEnforcementService;
   private readonly chatbotService: ChatbotService;
+  private readonly fiadoService: FiadoService;
   private readonly logEmitter = new EventEmitter();
   private readonly qrEmitter = new EventEmitter();
   private readonly latestQrCodes = new Map<string, QrCodeEvent>();
@@ -138,6 +141,7 @@ export class InstanceOrchestrator {
     this.webhookService = deps.webhookService;
     this.planEnforcementService = deps.planEnforcementService;
     this.chatbotService = deps.chatbotService;
+    this.fiadoService = deps.fiadoService;
   }
 
   /**
@@ -858,7 +862,7 @@ export class InstanceOrchestrator {
 
       console.log("[leads] responseText:", chatbotResult?.responseText?.slice(0, 500));
       console.log("[leads] temResumo:", chatbotResult?.responseText?.includes("[RESUMO_LEAD]"));
-      console.log("[leads] groupJid banco:", chatbotConfig?.leadsGroupJid ?? "NAO CONFIGURADO");
+      console.log("[leads] leadsPhone banco:", chatbotConfig?.leadsPhoneNumber ?? "NAO CONFIGURADO");
 
       if (!chatbotResult?.responseText) {
         return;
@@ -877,27 +881,68 @@ export class InstanceOrchestrator {
         matchedRuleName: chatbotResult.matchedRuleName ?? null
       };
 
-      const leadsGroupJid = chatbotConfig?.leadsGroupJid;
+      const fiadoEnabled = chatbotConfig?.fiadoEnabled ?? false;
+      if (fiadoEnabled && inputText) {
+        const fiadoRegex = /(\d+)\s+(.+?)\s+(?:por\s+)?(?:R\$\s*)?(\d+(?:[.,]\d{1,2})?)/i;
+        const match = inputText.match(fiadoRegex);
+        if (match) {
+          const qty = parseInt(match[1]);
+          const desc = `${qty}x ${match[2].trim()}`;
+          const value = parseFloat(match[3].replace(",", "."));
+          if (!isNaN(value) && value > 0) {
+            try {
+              const tab = await this.fiadoService.addItem(
+                tenantId,
+                instance.id,
+                remoteNumber,
+                contact.displayName ?? null,
+                desc,
+                value
+              );
+              const totalFormatted = tab.total.toFixed(2).replace(".", ",");
+              await this.sendAutomatedTextMessage(
+                tenantId,
+                instance.id,
+                remoteNumber,
+                event.remoteJid,
+                `✅ Adicionado: ${desc} — R$${value.toFixed(2).replace(".", ",")}\nSeu total: R$${totalFormatted}`,
+                { action: "fiado_add", kind: "chatbot" }
+              );
 
-      if (resumoMatch) {
-        const resumoConteudo = resumoMatch[1].trim();
-        console.log("[leads] conteudo:", resumoConteudo.slice(0, 100));
-        console.log("[leads] groupJid para envio:", leadsGroupJid ?? "UNDEFINED");
+              const leadsPhone = chatbotConfig?.leadsPhoneNumber;
+              const leadsEnabled2 = chatbotConfig?.leadsEnabled ?? true;
+              if (leadsPhone && leadsEnabled2) {
+                const name = contact.displayName ?? remoteNumber;
+                await this.sendAutomatedTextMessage(
+                  tenantId,
+                  instance.id,
+                  leadsPhone,
+                  undefined,
+                  `🧾 ${name} adicionou: ${desc} — R$${value.toFixed(2).replace(".", ",")}\nTotal atual: R$${totalFormatted}`,
+                  { action: "fiado_notify", kind: "chatbot" }
+                );
+              }
+              return;
+            } catch (err) {
+              console.error("[fiado] erro:", err);
+            }
+          }
+        }
       }
 
-      if (leadsGroupJid && resumoLead) {
-        const leadsGroupNumber = leadsGroupJid.endsWith("@g.us")
-          ? leadsGroupJid.slice(0, -5)
-          : leadsGroupJid.split("@")[0] ?? "";
-        console.log("[leads] tentando enviar para grupo...");
-        console.log("[leads] payload grupo:", JSON.stringify({
-          to: leadsGroupJid.replace("@g.us", ""),
-          targetJid: leadsGroupJid,
-          text: `🔔 Novo lead agendado:\n\n${resumoLead}`
-        }));
+      const leadsPhone = chatbotConfig?.leadsPhoneNumber;
 
+      if (resumoLead) {
+        console.log("[leads] conteudo:", resumoLead.slice(0, 100));
+        console.log("[leads] leadsPhone para envio:", leadsPhone ?? "UNDEFINED");
+      }
+
+      const leadsEnabled = chatbotConfig?.leadsEnabled ?? true;
+
+      if (leadsPhone && leadsEnabled && resumoLead) {
+        console.log("[leads] tentando enviar para telefone configurado...");
         try {
-          await this.sendAutomatedTextMessage(tenantId, instance.id, leadsGroupNumber, leadsGroupJid, `🔔 Novo lead agendado:\n\n${resumoLead}`, {
+          await this.sendAutomatedTextMessage(tenantId, instance.id, leadsPhone, undefined, `🔔 Novo lead agendado:\n\n${resumoLead}`, {
             action: "lead_summary",
             kind: "chatbot"
           });
@@ -906,14 +951,14 @@ export class InstanceOrchestrator {
           console.error("[leads] erro ao enviar:", err);
         }
       } else if (resumoLead) {
-          console.log("[leads] groupJid nao encontrado, nao enviou");
+          console.log("[leads] leadsPhone nao encontrado, nao enviou");
           this.emitLog(buildWorkerKey(tenantId, instance.id), {
             context: {
               instanceId: instance.id
             },
             instanceId: instance.id,
             level: "warn",
-            message: "Resumo de lead gerado, mas nenhum grupo foi conectado para recebimento",
+            message: "Resumo de lead gerado, mas leadsPhoneNumber não configurado ou leadsEnabled=false",
             timestamp: new Date().toISOString()
           });
         }
@@ -952,7 +997,7 @@ export class InstanceOrchestrator {
     tenantId: string,
     instanceId: string,
     remoteNumber: string,
-    targetJid: string,
+    targetJid: string | undefined,
     text: string,
     metadata: Record<string, unknown>
   ): Promise<void> {
@@ -980,7 +1025,7 @@ export class InstanceOrchestrator {
     const created = await prisma.message.create({
       data: {
         instanceId,
-        remoteJid: (rpcResult.remoteJid as string | undefined) ?? targetJid,
+        remoteJid: (rpcResult.remoteJid as string | undefined) ?? targetJid ?? toJid(remoteNumber),
         externalMessageId: (rpcResult.externalMessageId as string | undefined) ?? null,
         direction: "OUTBOUND",
         type: "text",

@@ -6,7 +6,8 @@ import {
   chatbotConfigSchema,
   chatbotSimulationBodySchema,
   chatbotSimulationResponseSchema,
-  upsertChatbotBodySchema
+  upsertChatbotBodySchema,
+  upsertLeadsPhoneBodySchema
 } from "./schemas.js";
 
 /**
@@ -92,6 +93,63 @@ export const registerChatbotRoutes = async (app: FastifyInstance): Promise<void>
       const params = instanceParamsSchema.parse(request.params);
       const body = chatbotSimulationBodySchema.parse(request.body);
       return app.chatbotService.simulate(tenantId, params.id, body);
+    }
+  );
+
+  app.patch(
+    "/instances/:id/chatbot/leads-phone",
+    {
+      config: {
+        auth: "tenant",
+        allowApiKey: true,
+        requiredScopes: ["write"]
+      },
+      schema: {
+        tags: ["Chatbot"],
+        summary: "Configura o numero que recebe resumos de leads",
+        params: instanceParamsSchema,
+        body: upsertLeadsPhoneBodySchema,
+        response: {
+          200: chatbotConfigSchema
+        }
+      }
+    },
+    async (request) => {
+      const tenantId = requireTenantId(request);
+      const params = instanceParamsSchema.parse(request.params);
+      const body = upsertLeadsPhoneBodySchema.parse(request.body);
+      const tenantPrisma = await app.tenantPrismaRegistry.getClient(tenantId);
+
+      await tenantPrisma.chatbotConfig.updateMany({
+        where: { instanceId: params.id },
+        data: {
+          leadsPhoneNumber: body.leadsPhoneNumber ?? null,
+          leadsEnabled: body.leadsEnabled
+        }
+      });
+
+      const config = await app.chatbotService.getConfig(tenantId, params.id);
+
+      await recordPlatformAuditLog(
+        app.platformPrisma,
+        request,
+        "chatbot.leads-phone.update",
+        "Instance",
+        params.id,
+        body,
+        app.config.JWT_SECRET
+      );
+      await recordTenantAuditLog(
+        tenantPrisma,
+        request,
+        "chatbot.leads-phone.update",
+        "Instance",
+        params.id,
+        body,
+        app.config.JWT_SECRET
+      );
+
+      return config;
     }
   );
 

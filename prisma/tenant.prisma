@@ -31,6 +31,7 @@ model Instance {
   messages          Message[]
   webhookEndpoint   WebhookEndpoint?
   chatbotConfig     ChatbotConfig?
+  fiadoTabs         FiadoTab[]
   contacts          Contact[]
   conversations     Conversation[]
 
@@ -155,6 +156,9 @@ model ChatbotConfig {
   aiApiKeyEncrypted String?
   leadsGroupJid   String?
   leadsGroupName  String?
+  leadsPhoneNumber String?
+  leadsEnabled     Boolean  @default(true)
+  fiadoEnabled     Boolean  @default(false)
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
   instance        Instance @relation(fields: [instanceId], references: [id], onDelete: Cascade)
@@ -173,4 +177,19 @@ model AuditLog {
   createdAt  DateTime @default(now())
 
   @@index([createdAt])
+}
+
+model FiadoTab {
+  id          String    @id
+  instanceId  String
+  phoneNumber String
+  displayName String?
+  total       Decimal   @default(0) @db.Decimal(10, 2)
+  items       Json
+  paidAt      DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  instance    Instance  @relation(fields: [instanceId], references: [id], onDelete: Cascade)
+
+  @@unique([instanceId, phoneNumber])
 }

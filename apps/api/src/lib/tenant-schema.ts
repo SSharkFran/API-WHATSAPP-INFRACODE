@@ -131,6 +131,9 @@ export const buildTenantSchemaSql = (schemaName: string): string[] => {
       "aiApiKeyEncrypted" TEXT,
       "leadsGroupJid" TEXT,
       "leadsGroupName" TEXT,
+      "leadsPhoneNumber" TEXT,
+      "leadsEnabled" BOOLEAN NOT NULL DEFAULT TRUE,
+      "fiadoEnabled" BOOLEAN NOT NULL DEFAULT FALSE,
       "createdAt" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       "updatedAt" TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );`,
@@ -138,6 +141,9 @@ export const buildTenantSchemaSql = (schemaName: string): string[] => {
     `ALTER TABLE ${schema}."ChatbotConfig" ADD COLUMN IF NOT EXISTS "aiApiKeyEncrypted" TEXT;`,
     `ALTER TABLE ${schema}."ChatbotConfig" ADD COLUMN IF NOT EXISTS "leadsGroupJid" TEXT;`,
     `ALTER TABLE ${schema}."ChatbotConfig" ADD COLUMN IF NOT EXISTS "leadsGroupName" TEXT;`,
+    `ALTER TABLE ${schema}."ChatbotConfig" ADD COLUMN IF NOT EXISTS "leadsPhoneNumber" TEXT;`,
+    `ALTER TABLE ${schema}."ChatbotConfig" ADD COLUMN IF NOT EXISTS "leadsEnabled" BOOLEAN NOT NULL DEFAULT TRUE;`,
+    `ALTER TABLE ${schema}."ChatbotConfig" ADD COLUMN IF NOT EXISTS "fiadoEnabled" BOOLEAN NOT NULL DEFAULT FALSE;`,
     `CREATE TABLE IF NOT EXISTS ${schema}."AuditLog" (
       "id" TEXT PRIMARY KEY,
       "actorType" TEXT NOT NULL,
@@ -149,6 +155,18 @@ export const buildTenantSchemaSql = (schemaName: string): string[] => {
       "payload" JSONB NOT NULL,
       "signature" TEXT NOT NULL,
       "createdAt" TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );`,
+    `CREATE TABLE IF NOT EXISTS ${schema}."FiadoTab" (
+      "id" TEXT PRIMARY KEY,
+      "instanceId" TEXT NOT NULL REFERENCES ${schema}."Instance"("id") ON DELETE CASCADE,
+      "phoneNumber" TEXT NOT NULL,
+      "displayName" TEXT,
+      "total" DECIMAL(10,2) NOT NULL DEFAULT 0,
+      "items" JSONB NOT NULL DEFAULT '[]'::JSONB,
+      "paidAt" TIMESTAMPTZ,
+      "createdAt" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      "updatedAt" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      CONSTRAINT "uniq_${schemaName}_fiado_instance_phone" UNIQUE ("instanceId", "phoneNumber")
     );`,
     `CREATE INDEX IF NOT EXISTS "idx_${schemaName}_audit_created" ON ${schema}."AuditLog" ("createdAt");`
   ];

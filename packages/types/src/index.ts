@@ -292,8 +292,29 @@ export interface ChatbotConfig {
   fallbackMessage?: string | null;
   leadsGroupJid?: string | null;
   leadsGroupName?: string | null;
+  leadsPhoneNumber?: string | null;
+  leadsEnabled?: boolean;
+  fiadoEnabled?: boolean;
   rules: ChatbotRule[];
   ai: ChatbotAiConfig;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface FiadoItem {
+  description: string;
+  value: number;
+  addedAt: string;
+}
+
+export interface FiadoTab {
+  id: string;
+  instanceId: string;
+  phoneNumber: string;
+  displayName?: string | null;
+  total: number;
+  items: FiadoItem[];
+  paidAt?: string | null;
   createdAt: string;
   updatedAt: string;
 }

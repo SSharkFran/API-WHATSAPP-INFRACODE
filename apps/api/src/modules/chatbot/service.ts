@@ -5,7 +5,7 @@ import type { AppConfig } from "../../config.js";
 import type { PlatformPrisma, TenantPrismaRegistry } from "../../lib/database.js";
 import { decrypt } from "../../lib/crypto.js";
 import { ApiError } from "../../lib/errors.js";
-import { normalizePhoneNumber } from "../../lib/phone.js";
+import { assertValidPhoneNumber, normalizePhoneNumber } from "../../lib/phone.js";
 import { chatbotAiConfigSchema, chatbotRuleSchema, upsertChatbotAiBodySchema } from "./schemas.js";
 
 interface ChatbotServiceDeps {
@@ -145,11 +145,20 @@ export class ChatbotService {
       fallbackMessage?: string | null;
       rules: ChatbotRule[];
       ai?: z.infer<typeof chatbotAiUpsertSchema>;
+      leadsPhoneNumber?: string | null;
+      leadsEnabled?: boolean;
+      fiadoEnabled?: boolean;
     }
   ): Promise<ChatbotConfig> {
     const { prisma, managedAiProvider } = await this.getContext(tenantId, instanceId);
     const rules = chatbotRulesArraySchema.parse(input.rules);
     const aiInput = chatbotAiUpsertSchema.parse(input.ai ?? defaultAiSettings);
+    const leadsPhoneNumberRaw = input.leadsPhoneNumber?.trim() ?? null;
+    const normalizedLeadsPhoneNumber = leadsPhoneNumberRaw ? normalizePhoneNumber(leadsPhoneNumberRaw) : null;
+
+    if (leadsPhoneNumberRaw && normalizedLeadsPhoneNumber) {
+      assertValidPhoneNumber(normalizedLeadsPhoneNumber);
+    }
 
     const record = await prisma.chatbotConfig.upsert({
       where: {
@@ -162,7 +171,10 @@ export class ChatbotService {
         fallbackMessage: input.fallbackMessage?.trim() || null,
         rules,
         aiSettings: this.buildPersistedAiSettings(aiInput),
-        aiApiKeyEncrypted: null
+        aiApiKeyEncrypted: null,
+        leadsPhoneNumber: normalizedLeadsPhoneNumber,
+        leadsEnabled: input.leadsEnabled ?? true,
+        fiadoEnabled: input.fiadoEnabled ?? false
       } as Prisma.ChatbotConfigUncheckedCreateInput,
       update: {
         isEnabled: input.isEnabled,
@@ -170,7 +182,41 @@ export class ChatbotService {
         fallbackMessage: input.fallbackMessage?.trim() || null,
         rules,
         aiSettings: this.buildPersistedAiSettings(aiInput),
-        aiApiKeyEncrypted: null
+        aiApiKeyEncrypted: null,
+        leadsPhoneNumber: normalizedLeadsPhoneNumber,
+        leadsEnabled: input.leadsEnabled ?? true,
+        fiadoEnabled: input.fiadoEnabled ?? false
+      } as Prisma.ChatbotConfigUncheckedUpdateInput
+    });
+
+    return this.mapConfig(record, managedAiProvider);
+  }
+
+  public async setLeadsPhoneNumber(
+    tenantId: string,
+    instanceId: string,
+    phoneNumber: string
+  ): Promise<ChatbotConfig> {
+    const { prisma, managedAiProvider } = await this.getContext(tenantId, instanceId);
+    const normalizedPhoneNumber = normalizePhoneNumber(phoneNumber);
+    assertValidPhoneNumber(normalizedPhoneNumber);
+
+    const record = await prisma.chatbotConfig.upsert({
+      where: {
+        instanceId
+      },
+      create: {
+        instanceId,
+        isEnabled: false,
+        welcomeMessage: null,
+        fallbackMessage: null,
+        rules: [] as Prisma.InputJsonValue,
+        aiSettings: this.buildPersistedAiSettings(defaultAiSettings),
+        aiApiKeyEncrypted: null,
+        leadsPhoneNumber: normalizedPhoneNumber
+      } as Prisma.ChatbotConfigUncheckedCreateInput,
+      update: {
+        leadsPhoneNumber: normalizedPhoneNumber
       } as Prisma.ChatbotConfigUncheckedUpdateInput
     });
 
@@ -238,9 +284,12 @@ export class ChatbotService {
             isEnabled: false,
             welcomeMessage: null,
             fallbackMessage: null,
-            leadsGroupJid: null,
-            leadsGroupName: null,
-            rules: [],
+        leadsGroupJid: null,
+        leadsGroupName: null,
+        leadsPhoneNumber: null,
+        leadsEnabled: true,
+        fiadoEnabled: false,
+        rules: [],
             ai: this.buildRuntimeAiConfig(defaultAiSettings, managedAiProvider),
             createdAt: new Date(0).toISOString(),
             updatedAt: new Date(0).toISOString()
@@ -348,6 +397,9 @@ export class ChatbotService {
       fallbackMessage: string | null;
       leadsGroupJid?: string | null;
       leadsGroupName?: string | null;
+      leadsPhoneNumber?: string | null;
+      leadsEnabled?: boolean | null;
+      fiadoEnabled?: boolean | null;
       rules: unknown;
       aiSettings?: unknown;
       createdAt: Date;
@@ -368,6 +420,9 @@ export class ChatbotService {
       fallbackMessage: record.fallbackMessage,
       leadsGroupJid: record.leadsGroupJid ?? null,
       leadsGroupName: record.leadsGroupName ?? null,
+      leadsPhoneNumber: record.leadsPhoneNumber ?? null,
+      leadsEnabled: record.leadsEnabled ?? true,
+      fiadoEnabled: record.fiadoEnabled ?? false,
       rules: chatbotRulesArraySchema.parse(record.rules),
       ai: this.buildRuntimeAiConfig(aiSettings, managedAiProvider),
       createdAt: record.createdAt.toISOString(),

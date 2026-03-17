@@ -42,6 +42,9 @@ export const chatbotConfigSchema = z.object({
   fallbackMessage: z.string().nullable(),
   leadsGroupJid: z.string().nullable().optional(),
   leadsGroupName: z.string().nullable().optional(),
+  leadsPhoneNumber: z.string().nullable().optional(),
+  leadsEnabled: z.boolean().default(true),
+  fiadoEnabled: z.boolean().default(false),
   rules: z.array(chatbotRuleSchema),
   ai: chatbotAiConfigSchema,
   createdAt: z.string(),
@@ -53,7 +56,15 @@ export const upsertChatbotBodySchema = z.object({
   welcomeMessage: z.string().max(2_000).nullable().optional(),
   fallbackMessage: z.string().max(2_000).nullable().optional(),
   rules: z.array(chatbotRuleSchema).max(50).default([]),
-  ai: upsertChatbotAiBodySchema.optional()
+  ai: upsertChatbotAiBodySchema.optional(),
+  leadsPhoneNumber: z.string().min(10).max(20).nullable().optional(),
+  leadsEnabled: z.boolean().default(true),
+  fiadoEnabled: z.boolean().default(false)
+});
+
+export const upsertLeadsPhoneBodySchema = z.object({
+  leadsPhoneNumber: z.string().min(10).max(20).nullable().optional(),
+  leadsEnabled: z.boolean().default(true)
 });
 
 export const chatbotSimulationBodySchema = z.object({

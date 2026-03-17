@@ -477,6 +477,14 @@ const handleSendMessage = async (command: RpcCommand): Promise<void> => {
           }
         : undefined;
 
+    if (jid.endsWith("@g.us")) {
+      try {
+        await activeSocket.groupMetadata(jid);
+      } catch (e) {
+        console.warn("[baileys] groupMetadata fetch failed:", e);
+      }
+    }
+
     const result = await activeSocket.sendMessage(jid, content, sendOptions);
 
     if (!result) {

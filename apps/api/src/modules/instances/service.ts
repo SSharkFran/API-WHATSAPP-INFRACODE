@@ -856,7 +856,7 @@ export class InstanceOrchestrator {
         text: inputText,
         isFirstContact,
         contactName: contact.displayName,
-        phoneNumber: remoteNumber,
+        phoneNumber: contact.phoneNumber,
         remoteJid: event.remoteJid
       });
 
@@ -938,31 +938,42 @@ export class InstanceOrchestrator {
       }
 
       const leadsEnabled = chatbotConfig?.leadsEnabled ?? true;
-      const resumoDedupeKey = `leads:sent:${instance.id}:${remoteNumber}:${Date.now().toString().slice(0, -3)}`;
-      const jaEnviado = resumoLead ? await this.redis.get(resumoDedupeKey) : null;
+      const camposObrigatorios = [
+        /Nome:\s*(?!não informado|nao informado|\(nome\))/i,
+        /Contato:\s*\d{8,}/,
+        /Horário agendado:\s*(?!não informado|nao informado)/i,
+        /Serviço de interesse:\s*(?!não informado|nao informado)/i
+      ];
+      const resumoCompleto = camposObrigatorios.every((regex) => regex.test(resumoLead ?? ""));
 
-      if (jaEnviado) {
-        console.log("[leads] resumo duplicado ignorado para:", remoteNumber);
-      } else if (leadsPhone && leadsEnabled && resumoLead) {
-        console.log("[leads] tentando enviar para telefone configurado...");
-        try {
-          await this.sendAutomatedTextMessage(
-            tenantId,
-            instance.id,
-            leadsPhone,
-            `${leadsPhone}@s.whatsapp.net`,
-            `🔔 Novo lead agendado:\n\n${resumoLead}`,
-            {
-              action: "lead_summary",
-              kind: "chatbot"
-            }
-          );
-          console.log("[leads] enviado com sucesso!");
-          await this.redis.set(resumoDedupeKey, "1", "EX", 30);
-        } catch (err) {
-          console.error("[leads] erro ao enviar:", err);
-        }
-      } else if (resumoLead) {
+      if (!resumoCompleto) {
+        console.log("[leads] resumo incompleto, aguardando mais informações");
+      } else {
+        const resumoDedupeKey = `leads:sent:${instance.id}:${remoteNumber}:${Date.now().toString().slice(0, -3)}`;
+        const jaEnviado = resumoLead ? await this.redis.get(resumoDedupeKey) : null;
+
+        if (jaEnviado) {
+          console.log("[leads] resumo duplicado ignorado para:", remoteNumber);
+        } else if (leadsPhone && leadsEnabled && resumoLead) {
+          console.log("[leads] tentando enviar para telefone configurado...");
+          try {
+            await this.sendAutomatedTextMessage(
+              tenantId,
+              instance.id,
+              leadsPhone,
+              `${leadsPhone}@s.whatsapp.net`,
+              `🔔 Novo lead agendado:\n\n${resumoLead}`,
+              {
+                action: "lead_summary",
+                kind: "chatbot"
+              }
+            );
+            console.log("[leads] enviado com sucesso!");
+            await this.redis.set(resumoDedupeKey, "1", "EX", 30);
+          } catch (err) {
+            console.error("[leads] erro ao enviar:", err);
+          }
+        } else if (resumoLead) {
           console.log("[leads] leadsPhone nao encontrado, nao enviou");
           this.emitLog(buildWorkerKey(tenantId, instance.id), {
             context: {
@@ -974,6 +985,7 @@ export class InstanceOrchestrator {
             timestamp: new Date().toISOString()
           });
         }
+      }
       if (!clientResponseText.trim()) {
         return;
       }

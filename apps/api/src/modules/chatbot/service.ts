@@ -525,6 +525,7 @@ export class ChatbotService {
       `Nome do contato: ${input.contactName?.trim() || "cliente"}.`,
       `Se o nome do contato for "cliente" ou estiver vazio, pergunte o nome do cliente antes de prosseguir com o atendimento. Nunca assuma um nome que não foi informado.`,
       `Numero: ${normalizePhoneNumber(input.phoneNumber)}.`,
+      `ATENÇÃO: O número de telefone do cliente é ${normalizePhoneNumber(input.phoneNumber)}. Use este número exato no campo Contato do [RESUMO_LEAD]. Nunca use IDs internos, apenas o número no formato internacional.`,
       "Se nao souber algo factual da empresa, admita a limitacao e ofereca transferir para humano.",
       "Evite respostas longas. Responda em 1 a 4 frases.",
       "ATENCAO CRITICA: Quando confirmar um agendamento, inclua OBRIGATORIAMENTE ao final da resposta o bloco [RESUMO_LEAD] preenchido com os dados coletados. Sem este bloco o agendamento nao sera registrado." +
@@ -542,7 +543,8 @@ export class ChatbotService {
         "Serviço de interesse: {serviço}\n" +
         "Horário agendado: {data e hora}\n" +
         "[/RESUMO_LEAD]",
-      `REGRA OBRIGATÓRIA: No campo "Contato" do bloco [RESUMO_LEAD], use SEMPRE o número real do cliente: ${normalizePhoneNumber(input.phoneNumber)}. NUNCA escreva "(número)", "(celular)" ou deixe em branco. O número já está disponível e deve ser copiado exatamente.`
+      `REGRA OBRIGATÓRIA: No campo "Contato" do bloco [RESUMO_LEAD], use SEMPRE o número real do cliente: ${normalizePhoneNumber(input.phoneNumber)}. NUNCA escreva "(número)", "(celular)" ou deixe em branco. O número já está disponível e deve ser copiado exatamente.`,
+      "REGRA CRÍTICA: Só inclua o bloco [RESUMO_LEAD] quando o agendamento estiver 100% confirmado, com nome completo do cliente, data E horário definidos e serviço de interesse identificado. Se qualquer um desses campos estiver faltando, PERGUNTE ao cliente antes de gerar o bloco. NUNCA gere [RESUMO_LEAD] com campos 'não informado' nos campos Nome, Horário agendado ou Serviço de interesse."
     ].join("\n");
 
     const messages: Array<{ role: "user" | "assistant"; content: string }> = [];
@@ -602,22 +604,13 @@ export class ChatbotService {
     messages.unshift(
       {
         role: "user",
-        content: "Quero agendar uma reunião. Meu nome é Carlos Mendes, pode ser quinta às 10h?"
+        content: "Quero agendar uma reunião, pode ser quinta às 10h?"
       },
       {
         role: "assistant",
         content:
-          "Claro, Carlos Mendes! Agendado com Francisco Gleidson " +
-          "para quinta às 10h. Qualquer dúvida pode falar comigo!\n\n" +
-          "[RESUMO_LEAD]\n" +
-          "Nome: Carlos Mendes\n" +
-          `Contato: ${normalizePhoneNumber(input.phoneNumber)}\n` +
-          "E-mail: não informado\n" +
-          "Empresa: não informado\n" +
-          "Problema: não informado\n" +
-          "Serviço de interesse: não informado\n" +
-          "Horário agendado: Quinta às 10h\n" +
-          "[/RESUMO_LEAD]"
+          "Claro! Antes de confirmar, pode me dizer seu nome completo?\n\n" +
+          "Assim consigo registrar o agendamento direitinho para você."
       }
     );
 

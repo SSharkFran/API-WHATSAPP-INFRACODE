@@ -840,10 +840,13 @@ export class InstanceOrchestrator {
         return;
       }
 
+      const responseText = chatbotResult.responseText;
       const resumoRegex = /\[RESUMO_LEAD\]([\s\S]*?)\[\/RESUMO_LEAD\]/;
-      const resumoMatch = chatbotResult.responseText.match(resumoRegex);
+      console.log("[leads] extraindo resumo...");
+      const resumoMatch = responseText.match(resumoRegex);
+      console.log("[leads] resumoMatch:", resumoMatch ? "encontrado" : "nao encontrado");
       const resumoLead = resumoMatch?.[1]?.trim() ?? null;
-      const clientResponseText = chatbotResult.responseText.replace(resumoRegex, "").trim();
+      const clientResponseText = responseText.replace(resumoRegex, "").trim();
       const automationMetadata = {
         action: chatbotResult.action,
         matchedRuleId: chatbotResult.matchedRuleId ?? null,
@@ -852,14 +855,27 @@ export class InstanceOrchestrator {
 
       const groupJid = chatbotConfig?.leadsGroupJid;
 
+      if (resumoMatch) {
+        const resumoConteudo = resumoMatch[1].trim();
+        console.log("[leads] conteudo:", resumoConteudo.slice(0, 100));
+        console.log("[leads] groupJid para envio:", groupJid ?? "UNDEFINED");
+      }
+
       if (groupJid && resumoLead) {
         const leadsGroupNumber = groupJid.split("@")[0] ?? "";
+        console.log("[leads] tentando enviar para grupo...");
 
+        try {
           await this.sendAutomatedTextMessage(tenantId, instance.id, leadsGroupNumber, groupJid, `🔔 Novo lead agendado:\n\n${resumoLead}`, {
             action: "lead_summary",
             kind: "chatbot"
           });
+          console.log("[leads] enviado com sucesso!");
+        } catch (err) {
+          console.error("[leads] erro ao enviar:", err);
+        }
       } else if (resumoLead) {
+          console.log("[leads] groupJid nao encontrado, nao enviou");
           this.emitLog(buildWorkerKey(tenantId, instance.id), {
             context: {
               instanceId: instance.id

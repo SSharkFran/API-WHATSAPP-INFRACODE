@@ -7,6 +7,7 @@ import { parentPort, workerData } from "node:worker_threads";
 import {
   DisconnectReason,
   fetchLatestBaileysVersion,
+  makeInMemoryStore,
   makeWASocket,
   type AnyMessageContent,
   type WASocket
@@ -63,6 +64,7 @@ let saveCreds: (() => Promise<void>) | null = null;
 let closeAuthStore: (() => void) | null = null;
 let reconnectAttempts = 0;
 let stopping = false;
+const store = makeInMemoryStore({});
 
 const scheduleReconnect = async (message: string): Promise<void> => {
   if (stopping) {
@@ -377,6 +379,7 @@ const startSocket = async (): Promise<void> => {
       ...(versionData.version ? { version: versionData.version } : {})
     });
     socket = nextSocket;
+    store.bind(nextSocket.ev);
 
     nextSocket.ev.on("creds.update", async () => {
       await saveCreds?.();

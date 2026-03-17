@@ -8,6 +8,7 @@ import {
   instanceParamsSchema,
   instanceSummarySchema
 } from "./schemas.js";
+import { raw2NextJobData } from "bullmq";
 
 /**
  * Registra rotas REST e streams em tempo real para instancias.

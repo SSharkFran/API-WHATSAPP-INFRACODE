@@ -890,6 +890,11 @@ export class InstanceOrchestrator {
           ? leadsGroupJid.slice(0, -5)
           : leadsGroupJid.split("@")[0] ?? "";
         console.log("[leads] tentando enviar para grupo...");
+        console.log("[leads] payload grupo:", JSON.stringify({
+          to: leadsGroupJid.replace("@g.us", ""),
+          targetJid: leadsGroupJid,
+          text: `🔔 Novo lead agendado:\n\n${resumoLead}`
+        }));
 
         try {
           await this.sendAutomatedTextMessage(tenantId, instance.id, leadsGroupNumber, leadsGroupJid, `🔔 Novo lead agendado:\n\n${resumoLead}`, {
@@ -969,6 +974,7 @@ export class InstanceOrchestrator {
       targetJid,
       text
     };
+    console.log("[sendAutomatedTextMessage] payload final:", JSON.stringify(payload));
     const rpcResult = await this.sendMessage(tenantId, instanceId, payload);
     const prisma = await this.tenantPrismaRegistry.getClient(tenantId);
     const created = await prisma.message.create({

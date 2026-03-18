@@ -779,7 +779,7 @@ export class InstanceOrchestrator {
         fields: nextContactFields
       }
     });
-    const resolvedContactNumber = contact.phoneNumber;
+    const resolvedContactNumber = contact.phoneNumber ?? remoteNumber;
 
     const conversation = await prisma.conversation.findFirst({
       where: {

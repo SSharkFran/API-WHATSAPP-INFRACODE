@@ -146,10 +146,10 @@ const textareaClass = [
 
 /* ─── Tab list ──────────────────────────────────────────────────────── */
 const tabs: { id: StudioTab; label: string }[] = [
-  { id: "geral",  label: "Geral" },
+  { id: "geral", label: "Geral" },
   { id: "prompt", label: "Prompt IA" },
-  { id: "leads",  label: "Leads" },
-  { id: "fiado",  label: "Fiado" },
+  { id: "leads", label: "Leads" },
+  { id: "fiado", label: "Fiado" },
   { id: "estado", label: "Estado" }
 ];
 
@@ -227,12 +227,12 @@ export const ChatbotStudio = ({ initialInstances }: ChatbotStudioProps) => {
       rules: current.rules.map((rule) =>
         rule.id === ruleId
           ? {
-              ...rule, ...patch,
-              matchValue:
-                patch.triggerType === "FIRST_CONTACT" ? null
+            ...rule, ...patch,
+            matchValue:
+              patch.triggerType === "FIRST_CONTACT" ? null
                 : patch.matchValue !== undefined ? patch.matchValue
-                : rule.matchValue
-            }
+                  : rule.matchValue
+          }
           : rule
       )
     }));
@@ -316,15 +316,11 @@ export const ChatbotStudio = ({ initialInstances }: ChatbotStudioProps) => {
       });
       setSimulationResult(result); setSuccess("Simulação executada.");
     } catch (caught) {
-<<<<<<< HEAD
-      setError(caught instanceof Error ? caught.message : "Falha ao simular.");
-    } finally { setPendingAction(null); }
-=======
+
       setError(caught instanceof Error ? caught.message : "Falha ao simular o chatbot.");
     } finally {
       setPendingAction(null);
     }
->>>>>>> 355d31a (verificação no codigo)
   };
 
   if (instances.length === 0) {
@@ -332,7 +328,7 @@ export const ChatbotStudio = ({ initialInstances }: ChatbotStudioProps) => {
       <EmptyState
         icon={Server}
         label="Conecte uma instância para configurar o chatbot"
-        action={{ label: "Ver instâncias", onClick: () => {} }}
+        action={{ label: "Ver instâncias", onClick: () => { } }}
       />
     );
   }
@@ -360,7 +356,7 @@ export const ChatbotStudio = ({ initialInstances }: ChatbotStudioProps) => {
 
         <label className="flex items-center gap-2.5 cursor-pointer group mt-5">
           <span className="relative inline-flex h-6 w-11 items-center rounded-full cursor-pointer transition-colors duration-200"
-               style={{ background: formState.isEnabled ? "var(--accent-green)" : "var(--bg-active)" }}>
+            style={{ background: formState.isEnabled ? "var(--accent-green)" : "var(--bg-active)" }}>
             <input type="checkbox" className="sr-only" checked={formState.isEnabled}
               onChange={(e) => setFormState((c) => ({ ...c, isEnabled: e.target.checked }))} />
             <span className={["inline-block h-4 w-4 rounded-full bg-white shadow-sm transition-transform duration-200",
@@ -603,8 +599,8 @@ export const ChatbotStudio = ({ initialInstances }: ChatbotStudioProps) => {
               <div className="grid grid-cols-3 gap-3">
                 {[
                   { label: "Provedor", value: formState.ai.provider ?? "Não configurado" },
-                  { label: "Modelo",   value: formState.ai.model   || "Gerenciado pelo admin" },
-                  { label: "Status",   value: formState.ai.isProviderConfigured ? (formState.ai.isProviderActive ? "Ativo" : "Inativo") : "Aguardando admin" }
+                  { label: "Modelo", value: formState.ai.model || "Gerenciado pelo admin" },
+                  { label: "Status", value: formState.ai.isProviderConfigured ? (formState.ai.isProviderActive ? "Ativo" : "Inativo") : "Aguardando admin" }
                 ].map(({ label, value }) => (
                   <div key={label} className="rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--bg-tertiary)] px-4 py-3">
                     <p className="text-[10px] uppercase tracking-widest text-[var(--text-tertiary)] font-mono">{label}</p>
@@ -622,7 +618,7 @@ export const ChatbotStudio = ({ initialInstances }: ChatbotStudioProps) => {
               {/* Enable AI toggle */}
               <label className="flex items-center gap-3 cursor-pointer">
                 <span className="relative inline-flex h-6 w-11 items-center rounded-full cursor-pointer transition-colors duration-200"
-                    style={{ background: formState.ai.isEnabled ? "var(--accent-green)" : "var(--bg-active)" }}>
+                  style={{ background: formState.ai.isEnabled ? "var(--accent-green)" : "var(--bg-active)" }}>
                   <input type="checkbox" className="sr-only" checked={formState.ai.isEnabled}
                     onChange={(e) => setFormState((c) => ({ ...c, ai: { ...c.ai, isEnabled: e.target.checked } }))} />
                   <span className={["inline-block h-4 w-4 rounded-full bg-white shadow-sm transition-transform duration-200",
@@ -697,7 +693,7 @@ export const ChatbotStudio = ({ initialInstances }: ChatbotStudioProps) => {
 
               <label className="flex items-center gap-2.5 cursor-pointer">
                 <span className="relative inline-flex h-6 w-11 items-center rounded-full cursor-pointer transition-colors duration-200"
-                    style={{ background: formState.leadsEnabled ? "var(--accent-green)" : "var(--bg-active)" }}>
+                  style={{ background: formState.leadsEnabled ? "var(--accent-green)" : "var(--bg-active)" }}>
                   <input type="checkbox" className="sr-only" checked={formState.leadsEnabled}
                     onChange={(e) => setFormState((c) => ({ ...c, leadsEnabled: e.target.checked }))} />
                   <span className={["inline-block h-4 w-4 rounded-full bg-white shadow-sm transition-transform duration-200",
@@ -708,7 +704,7 @@ export const ChatbotStudio = ({ initialInstances }: ChatbotStudioProps) => {
 
               <label className="flex items-center gap-2.5 cursor-pointer">
                 <span className="relative inline-flex h-6 w-11 items-center rounded-full cursor-pointer transition-colors duration-200"
-                    style={{ background: formState.fiadoEnabled ? "var(--accent-green)" : "var(--bg-active)" }}>
+                  style={{ background: formState.fiadoEnabled ? "var(--accent-green)" : "var(--bg-active)" }}>
                   <input type="checkbox" className="sr-only" checked={formState.fiadoEnabled}
                     onChange={(e) => setFormState((c) => ({ ...c, fiadoEnabled: e.target.checked }))} />
                   <span className={["inline-block h-4 w-4 rounded-full bg-white shadow-sm transition-transform duration-200",
@@ -769,14 +765,14 @@ export const ChatbotStudio = ({ initialInstances }: ChatbotStudioProps) => {
             </div>
             <div className="p-5 space-y-2 text-sm">
               {[
-                { label: "Instância",       value: selectedInstance ? `${selectedInstance.name} — ${selectedInstance.status}` : "—" },
+                { label: "Instância", value: selectedInstance ? `${selectedInstance.name} — ${selectedInstance.status}` : "—" },
                 { label: "Última gravação", value: formatDateTime(lastSavedConfig?.updatedAt) },
-                { label: "Regras",          value: String(formState.rules.length) },
-                { label: "Chatbot",         value: formState.isEnabled ? "Habilitado" : "Desabilitado" },
-                { label: "IA",              value: formState.ai.isEnabled ? `${formState.ai.mode} · ${formState.ai.provider ?? "aguardando admin"}` : "Desabilitada" },
-                { label: "Alertas lead",    value: lastSavedConfig?.leadsPhoneNumber || "Não configurado" },
-                { label: "Resumo leads",    value: lastSavedConfig?.leadsEnabled !== false ? "Ativo" : "Inativo" },
-                { label: "Fiado",           value: lastSavedConfig?.fiadoEnabled ? "Ativo" : "Inativo" }
+                { label: "Regras", value: String(formState.rules.length) },
+                { label: "Chatbot", value: formState.isEnabled ? "Habilitado" : "Desabilitado" },
+                { label: "IA", value: formState.ai.isEnabled ? `${formState.ai.mode} · ${formState.ai.provider ?? "aguardando admin"}` : "Desabilitada" },
+                { label: "Alertas lead", value: lastSavedConfig?.leadsPhoneNumber || "Não configurado" },
+                { label: "Resumo leads", value: lastSavedConfig?.leadsEnabled !== false ? "Ativo" : "Inativo" },
+                { label: "Fiado", value: lastSavedConfig?.fiadoEnabled ? "Ativo" : "Inativo" }
               ].map(({ label, value }) => (
                 <div key={label} className="flex justify-between px-4 py-2.5 rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--bg-tertiary)]">
                   <span className="text-[var(--text-tertiary)] text-xs font-mono uppercase tracking-wide">{label}</span>

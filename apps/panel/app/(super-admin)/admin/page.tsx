@@ -1,92 +1,123 @@
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@infracode/ui";
+import { Users, XCircle, AlertTriangle, Zap } from "lucide-react";
 import { StatCard } from "../../../components/dashboard/stat-card";
 import { getAdminBilling, getAdminTenants } from "../../../lib/api";
+import { Badge } from "../../../components/ui/Badge";
 
 const formatNumber = (value: number) => new Intl.NumberFormat("pt-BR").format(value);
 
 export default async function SuperAdminOverviewPage() {
   const [tenants, billing] = await Promise.all([getAdminTenants(), getAdminBilling()]);
-  const activeTenants = tenants.filter((tenant) => tenant.status === "ACTIVE");
-  const suspendedTenants = tenants.filter((tenant) => tenant.status === "SUSPENDED");
-  const overdueAccounts = billing.filter((item) => item.status === "PAST_DUE");
-  const monthlyCapacity = tenants.reduce((total, tenant) => total + tenant.messagesPerMonth, 0);
+  const activeTenants = tenants.filter((t) => t.status === "ACTIVE");
+  const suspendedTenants = tenants.filter((t) => t.status === "SUSPENDED");
+  const overdueAccounts = billing.filter((b) => b.status === "PAST_DUE");
+  const monthlyCapacity = tenants.reduce((sum, t) => sum + t.messagesPerMonth, 0);
 
   return (
-    <div className="space-y-8">
-      <section className="grid gap-5 lg:grid-cols-4">
-        <StatCard hint="Clientes com operacao liberada." label="Tenants ativos" tone="dark" value={String(activeTenants.length)} />
-        <StatCard hint="Contas temporariamente bloqueadas." label="Suspensos" tone="dark" value={String(suspendedTenants.length)} />
-        <StatCard hint="Assinaturas precisando de acao financeira." label="Past due" tone="dark" value={String(overdueAccounts.length)} />
-        <StatCard hint="Capacidade somada de envio por mes." label="Capacidade mensal" tone="dark" value={formatNumber(monthlyCapacity)} />
+    <div className="space-y-6">
+      {/* Metrics */}
+      <section className="grid gap-4 grid-cols-2 xl:grid-cols-4">
+        <StatCard label="Tenants ativos"    value={String(activeTenants.length)}    icon={Users} />
+        <StatCard label="Suspensos"         value={String(suspendedTenants.length)} icon={XCircle} />
+        <StatCard label="Past due"          value={String(overdueAccounts.length)}  icon={AlertTriangle} />
+        <StatCard label="Capacidade/mês"   value={formatNumber(monthlyCapacity)}   icon={Zap} />
       </section>
 
-      <section className="grid gap-5 xl:grid-cols-[1.25fr_0.95fr]">
-        <Card className="surface-card-dark text-white">
-          <CardHeader className="border-b border-white/8">
-            <CardDescription className="font-[var(--font-mono)] uppercase tracking-[0.24em] text-slate-400">Tenants</CardDescription>
-            <CardTitle className="text-2xl text-white">Consumo e headroom por cliente</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
+      {/* Content grid */}
+      <section className="grid gap-4 xl:grid-cols-[1.25fr_0.95fr]">
+        {/* Tenant consumption */}
+        <div className="rounded-[var(--radius-lg)] border border-[var(--border-subtle)] bg-[var(--bg-secondary)] overflow-hidden">
+          <div className="px-5 py-4 border-b border-[var(--border-subtle)]">
+            <p className="text-[10px] font-mono uppercase tracking-widest text-[var(--text-tertiary)] mb-1">Tenants</p>
+            <h2 className="text-base font-semibold text-[var(--text-primary)]">Consumo por cliente</h2>
+          </div>
+          <div className="p-4 space-y-2">
             {tenants.map((tenant) => {
-              const usage = Math.round((tenant.messagesThisMonth / Math.max(tenant.messagesPerMonth, 1)) * 100);
-
+              const usage = Math.round(
+                (tenant.messagesThisMonth / Math.max(tenant.messagesPerMonth, 1)) * 100
+              );
               return (
-                <div className="list-row-dark rounded-[24px] p-4" key={tenant.id}>
-                  <div className="flex items-start justify-between gap-4">
-                    <div>
-                      <p className="text-lg font-semibold text-white">{tenant.name}</p>
-                      <p className="mt-1 text-sm text-slate-400">{tenant.slug}</p>
+                <div
+                  key={tenant.id}
+                  className="px-4 py-3 rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--bg-tertiary)] hover:border-[var(--border-default)] transition-colors duration-150"
+                >
+                  <div className="flex items-start justify-between gap-3 mb-3">
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-[var(--text-primary)] truncate">{tenant.name}</p>
+                      <p className="text-xs text-[var(--text-tertiary)] font-mono truncate mt-0.5">{tenant.slug}</p>
                     </div>
-                    <span className="status-pill bg-white/10 text-slate-200">{tenant.status}</span>
+                    <Badge
+                      variant={tenant.status === "ACTIVE" ? "success" : tenant.status === "SUSPENDED" ? "error" : "neutral"}
+                      pulse={tenant.status === "ACTIVE"}
+                    >
+                      {tenant.status}
+                    </Badge>
                   </div>
-
-                  <div className="mt-4 flex items-center justify-between text-sm text-slate-300">
-                    <span>{formatNumber(tenant.messagesThisMonth)} de {formatNumber(tenant.messagesPerMonth)} mensagens</span>
-                    <span className="font-[var(--font-mono)]">{usage}% do plano</span>
+                  <div className="flex items-center justify-between text-xs text-[var(--text-tertiary)] mb-2">
+                    <span>{formatNumber(tenant.messagesThisMonth)} / {formatNumber(tenant.messagesPerMonth)}</span>
+                    <span className="font-mono">{usage}%</span>
                   </div>
-
-                  <div className="progress-track mt-3">
-                    <div className="progress-fill" style={{ width: `${Math.max(8, Math.min(100, usage))}%` }} />
+                  <div className="progress-track">
+                    <div
+                      className="progress-fill"
+                      style={{ width: `${Math.max(2, Math.min(100, usage))}%` }}
+                    />
                   </div>
                 </div>
               );
             })}
-          </CardContent>
-        </Card>
+          </div>
+        </div>
 
-        <div className="grid gap-5">
-          <Card className="surface-card">
-            <CardHeader>
-              <CardDescription className="font-[var(--font-mono)] uppercase tracking-[0.24em] text-slate-500">Control plane</CardDescription>
-              <CardTitle className="text-2xl text-slate-950">Sinais da camada global</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4 text-sm leading-7 text-slate-600">
-              <div className="list-row-light rounded-[22px] p-4">
-                Impersonation deve gerar trilha completa de auditoria com ator original e contexto do suporte.
-              </div>
-              <div className="list-row-light rounded-[22px] p-4">
-                Nginx aplica rate limit por host e por host mais IP, reduzindo efeito de noisy neighbor.
-              </div>
-              <div className="list-row-light rounded-[22px] p-4">
-                PgBouncer e cache LRU seguram o crescimento de conexoes ao escalar tenants simultaneos.
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="surface-card-dark text-white">
-            <CardHeader className="border-b border-white/8">
-              <CardDescription className="font-[var(--font-mono)] uppercase tracking-[0.24em] text-slate-400">Billing pulse</CardDescription>
-              <CardTitle className="text-2xl text-white">Radar financeiro</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3 text-sm leading-7 text-slate-300">
-              {billing.map((item) => (
-                <div className="flex items-center justify-between rounded-[20px] border border-white/8 bg-white/5 px-4 py-3" key={item.id}>
-                  <span>{item.tenantName}</span>
-                  <span className="font-[var(--font-mono)]">{item.status}</span>
+        {/* Right column */}
+        <div className="grid gap-4">
+          {/* Control plane */}
+          <div className="rounded-[var(--radius-lg)] border border-[var(--border-subtle)] bg-[var(--bg-secondary)] overflow-hidden">
+            <div className="px-5 py-4 border-b border-[var(--border-subtle)]">
+              <p className="text-[10px] font-mono uppercase tracking-widest text-[var(--text-tertiary)] mb-1">Control plane</p>
+              <h2 className="text-base font-semibold text-[var(--text-primary)]">Sinais globais</h2>
+            </div>
+            <div className="p-4 space-y-2">
+              {[
+                "Impersonation gera trilha de auditoria com ator e contexto.",
+                "Nginx aplica rate limit por host e por host+IP.",
+                "PgBouncer e cache LRU seguram conexões ao escalar tenants."
+              ].map((tip, i) => (
+                <div
+                  key={i}
+                  className="px-4 py-3 rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--bg-tertiary)] text-xs text-[var(--text-secondary)] leading-relaxed"
+                >
+                  {tip}
                 </div>
               ))}
-            </CardContent>
-          </Card>
+            </div>
+          </div>
+
+          {/* Billing radar */}
+          <div className="rounded-[var(--radius-lg)] border border-[var(--border-subtle)] bg-[var(--bg-secondary)] overflow-hidden">
+            <div className="px-5 py-4 border-b border-[var(--border-subtle)]">
+              <p className="text-[10px] font-mono uppercase tracking-widest text-[var(--text-tertiary)] mb-1">Billing</p>
+              <h2 className="text-base font-semibold text-[var(--text-primary)]">Radar financeiro</h2>
+            </div>
+            <div className="p-4 space-y-2">
+              {billing.map((item) => (
+                <div
+                  key={item.id}
+                  className="flex items-center justify-between px-4 py-3 rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--bg-tertiary)]"
+                >
+                  <span className="text-sm text-[var(--text-primary)] truncate">{item.tenantName}</span>
+                  <Badge
+                    variant={
+                      item.status === "PAID" ? "success" :
+                      item.status === "PAST_DUE" ? "error" :
+                      item.status === "PENDING" ? "warning" : "neutral"
+                    }
+                  >
+                    {item.status}
+                  </Badge>
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
       </section>
     </div>

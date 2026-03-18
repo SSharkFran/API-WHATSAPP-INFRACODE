@@ -1,6 +1,7 @@
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@infracode/ui";
+import { Server, MessageSquare, Users, Zap } from "lucide-react";
 import { StatCard } from "../../../components/dashboard/stat-card";
 import { getTenantDashboard, getTenantInstances } from "../../../lib/api";
+import { Badge } from "../../../components/ui/Badge";
 
 const formatNumber = (value: number) => new Intl.NumberFormat("pt-BR").format(value);
 
@@ -8,60 +9,87 @@ export default async function TenantDashboardPage() {
   const [dashboard, instances] = await Promise.all([getTenantDashboard(), getTenantInstances()]);
 
   return (
-    <div className="space-y-8">
-      <section className="grid gap-5 lg:grid-cols-4">
-        <StatCard hint="Fleet operacional no tenant." label="Instancias conectadas" value={String(dashboard.connectedInstances)} />
-        <StatCard hint="Mensagens aguardando envio." label="Fila" value={String(dashboard.queuedMessages)} />
-        <StatCard hint="RBAC interno usado no tenant." label="Usuarios" value={`${dashboard.usersUsed}/${dashboard.usersLimit}`} />
-        <StatCard hint="Consumo atual do plano contratado." label="Mensagens no mes" value={`${formatNumber(dashboard.messagesThisMonth)}/${formatNumber(dashboard.messagesPerMonth)}`} />
+    <div className="space-y-6">
+      {/* Metric cards */}
+      <section className="grid gap-4 grid-cols-2 xl:grid-cols-4">
+        <StatCard
+          label="Instâncias"
+          value={String(dashboard.connectedInstances)}
+          icon={Server}
+        />
+        <StatCard
+          label="Fila"
+          value={String(dashboard.queuedMessages)}
+          icon={Zap}
+        />
+        <StatCard
+          label="Usuários"
+          value={`${dashboard.usersUsed}/${dashboard.usersLimit}`}
+          icon={Users}
+        />
+        <StatCard
+          label="Mensagens/mês"
+          value={`${formatNumber(dashboard.messagesThisMonth)}/${formatNumber(dashboard.messagesPerMonth)}`}
+          icon={MessageSquare}
+        />
       </section>
 
-      <section className="grid gap-5 xl:grid-cols-[1.3fr_0.95fr]">
-        <Card className="surface-card">
-          <CardHeader>
-            <CardDescription className="font-[var(--font-mono)] uppercase tracking-[0.24em] text-slate-500">Instancias</CardDescription>
-            <CardTitle className="text-2xl text-slate-950">Mapa rapido da operacao</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
+      {/* Instance map */}
+      <section className="grid gap-4 xl:grid-cols-[1.3fr_0.95fr]">
+        <div className="rounded-[var(--radius-lg)] border border-[var(--border-subtle)] bg-[var(--bg-secondary)] overflow-hidden">
+          <div className="px-5 py-4 border-b border-[var(--border-subtle)]">
+            <p className="text-[10px] font-mono uppercase tracking-widest text-[var(--text-tertiary)] mb-1">Instâncias</p>
+            <h2 className="text-base font-semibold text-[var(--text-primary)]">Mapa da operação</h2>
+          </div>
+          <div className="p-4 space-y-2">
             {instances.map((instance) => (
-              <div className="list-row-light rounded-[24px] p-4" key={instance.id}>
-                <div className="flex items-start justify-between gap-4">
-                  <div>
-                    <p className="text-lg font-semibold text-slate-950">{instance.name}</p>
-                    <p className="mt-1 text-sm text-slate-500">{instance.phoneNumber ?? "Aguardando numero"}</p>
-                  </div>
-                  <span className="status-pill bg-slate-950 text-white">{instance.status}</span>
-                </div>
-                <div className="mt-4 grid gap-3 text-sm text-slate-600 sm:grid-cols-3">
-                  <div>
-                    <p className="control-kicker text-slate-400">Enviadas</p>
-                    <p className="mt-2 text-lg font-semibold text-slate-950">{formatNumber(instance.usage.messagesSent)}</p>
-                  </div>
-                  <div>
-                    <p className="control-kicker text-slate-400">Recebidas</p>
-                    <p className="mt-2 text-lg font-semibold text-slate-950">{formatNumber(instance.usage.messagesReceived)}</p>
-                  </div>
-                  <div>
-                    <p className="control-kicker text-slate-400">Risco</p>
-                    <p className="mt-2 text-lg font-semibold text-slate-950">{instance.usage.riskScore}</p>
+              <div
+                key={instance.id}
+                className="flex items-start justify-between gap-4 px-4 py-3 rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--bg-tertiary)] hover:border-[var(--border-default)] transition-colors duration-150"
+              >
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-[var(--text-primary)] truncate">{instance.name}</p>
+                  <p className="text-xs text-[var(--text-tertiary)] truncate mt-0.5 font-mono">
+                    {instance.phoneNumber ?? "Aguardando número"}
+                  </p>
+                  <div className="flex items-center gap-3 mt-2 text-xs text-[var(--text-tertiary)]">
+                    <span>Enviadas: <span className="text-[var(--text-secondary)]">{formatNumber(instance.usage.messagesSent)}</span></span>
+                    <span>Recebidas: <span className="text-[var(--text-secondary)]">{formatNumber(instance.usage.messagesReceived)}</span></span>
+                    <span>Risco: <span className="text-[var(--text-secondary)]">{instance.usage.riskScore}</span></span>
                   </div>
                 </div>
+                <Badge
+                  variant={instance.status === "CONNECTED" ? "success" : instance.status === "QR_PENDING" ? "warning" : "neutral"}
+                  pulse={instance.status === "CONNECTED"}
+                >
+                  {instance.status}
+                </Badge>
               </div>
             ))}
-          </CardContent>
-        </Card>
+          </div>
+        </div>
 
-        <Card className="surface-card-dark text-white">
-          <CardHeader className="border-b border-white/8">
-            <CardDescription className="font-[var(--font-mono)] uppercase tracking-[0.24em] text-slate-400">Recomendacoes</CardDescription>
-            <CardTitle className="text-2xl text-white">Anti-ban e operacao</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4 text-sm leading-7 text-slate-300">
-            <div className="list-row-dark rounded-[22px] p-4">Evite bursts longos com o mesmo template em sequencia curta.</div>
-            <div className="list-row-dark rounded-[22px] p-4">Distribua campanhas com jitter e acompanhe QR pendente em tempo real.</div>
-            <div className="list-row-dark rounded-[22px] p-4">Use webhook ativo para fechar onboarding e monitorar retries.</div>
-          </CardContent>
-        </Card>
+        {/* Quick panel */}
+        <div className="rounded-[var(--radius-lg)] border border-[var(--border-subtle)] bg-[var(--bg-secondary)] overflow-hidden">
+          <div className="px-5 py-4 border-b border-[var(--border-subtle)]">
+            <p className="text-[10px] font-mono uppercase tracking-widest text-[var(--text-tertiary)] mb-1">Operação</p>
+            <h2 className="text-base font-semibold text-[var(--text-primary)]">Anti-ban</h2>
+          </div>
+          <div className="p-4 space-y-2">
+            {[
+              "Evite bursts longos com o mesmo template em sequência curta.",
+              "Distribua campanhas com jitter e acompanhe QR pendente em tempo real.",
+              "Use webhook ativo para fechar onboarding e monitorar retries."
+            ].map((tip, i) => (
+              <div
+                key={i}
+                className="px-4 py-3 rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--bg-tertiary)] text-xs text-[var(--text-secondary)] leading-relaxed"
+              >
+                {tip}
+              </div>
+            ))}
+          </div>
+        </div>
       </section>
     </div>
   );

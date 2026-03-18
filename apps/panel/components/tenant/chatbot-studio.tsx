@@ -11,8 +11,11 @@ import type {
   FiadoTab,
   InstanceSummary
 } from "@infracode/types";
-import { Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Input } from "@infracode/ui";
 import { requestClientApi } from "../../lib/client-api";
+import { Button } from "../ui/Button";
+import { Badge } from "../ui/Badge";
+import { EmptyState } from "../ui/EmptyState";
+import { Bot, Save, RotateCcw, Play, Plus, Trash2, Server } from "lucide-react";
 
 interface ChatbotStudioProps {
   initialInstances: InstanceSummary[];
@@ -47,12 +50,11 @@ interface SimulationFormState {
   phoneNumber: string;
 }
 
-const selectClassName =
-  "h-12 w-full rounded-2xl border border-slate-200/80 bg-white/92 px-4 text-sm text-slate-950 outline-none ring-0 shadow-[inset_0_1px_0_rgba(255,255,255,0.45)] transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100";
+type StudioTab = "geral" | "prompt" | "leads" | "fiado" | "estado";
 
 const triggerTypeLabels: Record<ChatbotTriggerType, string> = {
-  EXACT: "Texto exato",
-  CONTAINS: "Contem termo",
+  EXACT: "Exato",
+  CONTAINS: "Contém",
   REGEX: "Regex",
   FIRST_CONTACT: "Primeiro contato"
 };
@@ -124,8 +126,34 @@ const mapConfigToFormState = (config: ChatbotConfig): ChatbotFormState => ({
 });
 
 const formatDateTime = (value?: string | null): string =>
-  value ? new Date(value).toLocaleString("pt-BR") : "Nao salvo ainda";
+  value ? new Date(value).toLocaleString("pt-BR") : "Não salvo";
 
+/* ─── Shared input styles ───────────────────────────────────────────── */
+const fieldClass = [
+  "w-full rounded-[var(--radius-md)] border border-[var(--border-default)] bg-[var(--bg-tertiary)]",
+  "px-3 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)]",
+  "transition-[border-color] duration-150",
+  "focus:outline-none focus:border-[var(--accent-blue)]"
+].join(" ");
+
+const selectClass = [fieldClass, "h-11 cursor-pointer"].join(" ");
+
+const textareaClass = [
+  fieldClass,
+  "py-3 resize-y font-mono text-xs leading-relaxed",
+  "bg-[#0d1117]" // code-editor feel
+].join(" ");
+
+/* ─── Tab list ──────────────────────────────────────────────────────── */
+const tabs: { id: StudioTab; label: string }[] = [
+  { id: "geral",  label: "Geral" },
+  { id: "prompt", label: "Prompt IA" },
+  { id: "leads",  label: "Leads" },
+  { id: "fiado",  label: "Fiado" },
+  { id: "estado", label: "Estado" }
+];
+
+/* ─── Main component ────────────────────────────────────────────────── */
 export const ChatbotStudio = ({ initialInstances }: ChatbotStudioProps) => {
   const router = useRouter();
   const [instances] = useState(initialInstances);
@@ -138,6 +166,7 @@ export const ChatbotStudio = ({ initialInstances }: ChatbotStudioProps) => {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [fiadoTabs, setFiadoTabs] = useState<FiadoTab[]>([]);
+  const [activeTab, setActiveTab] = useState<StudioTab>("geral");
 
   const selectedInstance = useMemo(
     () => instances.find((instance) => instance.id === selectedInstanceId) ?? null,
@@ -160,34 +189,22 @@ export const ChatbotStudio = ({ initialInstances }: ChatbotStudioProps) => {
     const loadConfig = async () => {
       try {
         const config = await requestClientApi<ChatbotConfig>(`/instances/${selectedInstanceId}/chatbot`);
-
-        if (!active) {
-          return;
-        }
-
+        if (!active) return;
         setLastSavedConfig(config);
         setFormState(mapConfigToFormState(config));
         setSimulationResult(null);
       } catch (caught) {
-        if (!active) {
-          return;
-        }
-
+        if (!active) return;
         setError(caught instanceof Error ? caught.message : "Falha ao carregar o chatbot da instancia.");
         setFormState(buildDefaultFormState());
         setLastSavedConfig(null);
       } finally {
-        if (active) {
-          setPendingAction(null);
-        }
+        if (active) setPendingAction(null);
       }
     };
 
     void loadConfig();
-
-    return () => {
-      active = false;
-    };
+    return () => { active = false; };
   }, [selectedInstanceId]);
 
   useEffect(() => {
@@ -198,20 +215,10 @@ export const ChatbotStudio = ({ initialInstances }: ChatbotStudioProps) => {
 
     let active = true;
     requestClientApi<FiadoTab[]>(`/instances/${selectedInstanceId}/fiado`)
-      .then((tabs) => {
-        if (active) {
-          setFiadoTabs(tabs);
-        }
-      })
-      .catch(() => {
-        if (active) {
-          setFiadoTabs([]);
-        }
-      });
+      .then((tabs) => { if (active) setFiadoTabs(tabs); })
+      .catch(() => { if (active) setFiadoTabs([]); });
 
-    return () => {
-      active = false;
-    };
+    return () => { active = false; };
   }, [selectedInstanceId, formState.fiadoEnabled]);
 
   const updateRule = (ruleId: string, patch: Partial<ChatbotRule>) => {
@@ -220,43 +227,23 @@ export const ChatbotStudio = ({ initialInstances }: ChatbotStudioProps) => {
       rules: current.rules.map((rule) =>
         rule.id === ruleId
           ? {
-              ...rule,
-              ...patch,
+              ...rule, ...patch,
               matchValue:
-                patch.triggerType === "FIRST_CONTACT"
-                  ? null
-                  : patch.matchValue !== undefined
-                    ? patch.matchValue
-                    : rule.matchValue
+                patch.triggerType === "FIRST_CONTACT" ? null
+                : patch.matchValue !== undefined ? patch.matchValue
+                : rule.matchValue
             }
           : rule
       )
     }));
   };
 
-  const addRule = () => {
-    setFormState((current) => ({
-      ...current,
-      rules: [...current.rules, buildEmptyRule()]
-    }));
-  };
-
-  const removeRule = (ruleId: string) => {
-    setFormState((current) => ({
-      ...current,
-      rules: current.rules.filter((rule) => rule.id !== ruleId)
-    }));
-  };
+  const addRule = () => setFormState((c) => ({ ...c, rules: [...c.rules, buildEmptyRule()] }));
+  const removeRule = (ruleId: string) => setFormState((c) => ({ ...c, rules: c.rules.filter((r) => r.id !== ruleId) }));
 
   const saveConfig = async () => {
-    if (!selectedInstance) {
-      return;
-    }
-
-    setPendingAction("save");
-    setError(null);
-    setSuccess(null);
-
+    if (!selectedInstance) return;
+    setPendingAction("save"); setError(null); setSuccess(null);
     try {
       const saved = await requestClientApi<ChatbotConfig>(`/instances/${selectedInstance.id}/chatbot`, {
         method: "PUT",
@@ -281,13 +268,10 @@ export const ChatbotStudio = ({ initialInstances }: ChatbotStudioProps) => {
           }
         }
       });
-
       setLastSavedConfig(saved);
       setFormState(mapConfigToFormState(saved));
-      setSuccess("Chatbot salvo. As respostas automaticas da instancia ja foram atualizadas.");
-      startTransition(() => {
-        router.refresh();
-      });
+      setSuccess("Chatbot salvo com sucesso.");
+      startTransition(() => { router.refresh(); });
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Falha ao salvar o chatbot.");
     } finally {
@@ -296,637 +280,522 @@ export const ChatbotStudio = ({ initialInstances }: ChatbotStudioProps) => {
   };
 
   const saveLeadsPhone = async () => {
-    if (!selectedInstance) {
-      return;
-    }
-
-    setPendingAction("save-leads-phone");
-    setError(null);
-    setSuccess(null);
-
+    if (!selectedInstance) return;
+    setPendingAction("save-leads-phone"); setError(null); setSuccess(null);
     try {
       const saved = await requestClientApi<ChatbotConfig>(`/instances/${selectedInstance.id}/chatbot/leads-phone`, {
         method: "PATCH",
-        body: {
-          leadsPhoneNumber: formState.leadsPhoneNumber.trim() || null,
-          leadsEnabled: formState.leadsEnabled
-        }
+        body: { leadsPhoneNumber: formState.leadsPhoneNumber.trim() || null, leadsEnabled: formState.leadsEnabled }
       });
-
-      setLastSavedConfig(saved);
-      setFormState(mapConfigToFormState(saved));
-      setSuccess("Configuração de leads salva com sucesso.");
-      startTransition(() => {
-        router.refresh();
-      });
+      setLastSavedConfig(saved); setFormState(mapConfigToFormState(saved));
+      setSuccess("Configuração de leads salva.");
+      startTransition(() => { router.refresh(); });
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Falha ao salvar configuração de leads.");
-    } finally {
-      setPendingAction(null);
-    }
+      setError(caught instanceof Error ? caught.message : "Falha ao salvar leads.");
+    } finally { setPendingAction(null); }
   };
 
   const clearFiado = async (phoneNumber: string) => {
-    if (!selectedInstance) {
-      return;
-    }
-
+    if (!selectedInstance) return;
     try {
-      await requestClientApi(`/instances/${selectedInstance.id}/fiado/${phoneNumber}`, {
-        method: "DELETE"
-      });
+      await requestClientApi(`/instances/${selectedInstance.id}/fiado/${phoneNumber}`, { method: "DELETE" });
       setFiadoTabs((current) => current.filter((t) => t.phoneNumber !== phoneNumber));
-      setSuccess("Fiado limpo com sucesso.");
+      setSuccess("Fiado limpo.");
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Falha ao limpar fiado.");
     }
   };
 
   const runSimulation = async () => {
-    if (!selectedInstance) {
-      return;
-    }
-
-    setPendingAction("simulate");
-    setError(null);
-    setSuccess(null);
-
+    if (!selectedInstance) return;
+    setPendingAction("simulate"); setError(null); setSuccess(null);
     try {
       const result = await requestClientApi<ChatbotSimulationResult>(`/instances/${selectedInstance.id}/chatbot/simulate`, {
         method: "POST",
-        body: {
-          text: simulationForm.text,
-          isFirstContact: simulationForm.isFirstContact,
-          contactName: simulationForm.contactName || undefined,
-          phoneNumber: simulationForm.phoneNumber
-        }
+        body: { text: simulationForm.text, isFirstContact: simulationForm.isFirstContact, contactName: simulationForm.contactName || undefined, phoneNumber: simulationForm.phoneNumber }
       });
-
-      setSimulationResult(result);
-      setSuccess("Simulacao executada com a configuracao persistida da instancia.");
+      setSimulationResult(result); setSuccess("Simulação executada.");
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Falha ao simular o chatbot.");
-    } finally {
-      setPendingAction(null);
-    }
-  };
-
-  const disconnectLeadsGroup = async () => {
-    if (!selectedInstance) {
-      return;
-    }
-
-    setPendingAction("disconnect-group");
-    setError(null);
-    setSuccess(null);
-
-    try {
-      const saved = await requestClientApi<ChatbotConfig>(`/instances/${selectedInstance.id}/chatbot/leads-group`, {
-        method: "DELETE"
-      });
-
-      setLastSavedConfig(saved);
-      setFormState(mapConfigToFormState(saved));
-      setSuccess("Grupo de leads desconectado. Envie 'conectar' novamente em um grupo para reativar.");
-      startTransition(() => {
-        router.refresh();
-      });
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Falha ao desconectar o grupo de leads.");
-    } finally {
-      setPendingAction(null);
-    }
+      setError(caught instanceof Error ? caught.message : "Falha ao simular.");
+    } finally { setPendingAction(null); }
   };
 
   if (instances.length === 0) {
     return (
-      <section className="space-y-6">
-        <div className="max-w-3xl space-y-2">
-          <p className="control-kicker text-sky-700">Chatbot nativo</p>
-          <h2 className="text-3xl font-semibold text-slate-950">Configure automacao por instancia</h2>
-          <p className="text-sm leading-7 text-slate-600">
-            O builder basico do tenant libera respostas automaticas, fallback e simulacao antes mesmo de abrir a primeira conversa.
-          </p>
-        </div>
-
-        <Card className="surface-card">
-          <CardHeader>
-            <CardDescription className="font-[var(--font-mono)] uppercase tracking-[0.24em] text-slate-500">Prerequisito</CardDescription>
-            <CardTitle className="text-2xl text-slate-950">Crie uma instancia primeiro</CardTitle>
-          </CardHeader>
-          <CardContent className="text-sm leading-7 text-slate-600">
-            O chatbot eh configurado por instancia. Conclua o onboarding, gere o QR Code e depois volte para montar as regras de atendimento.
-          </CardContent>
-        </Card>
-      </section>
+      <EmptyState
+        icon={Server}
+        label="Conecte uma instância para configurar o chatbot"
+        action={{ label: "Ver instâncias", onClick: () => {} }}
+      />
     );
   }
 
   return (
-    <section className="space-y-6">
-      <div className="max-w-4xl space-y-2">
-        <p className="control-kicker text-sky-700">Chatbot nativo</p>
-        <h2 className="text-3xl font-semibold text-slate-950">Regras textuais por instancia com simulacao imediata</h2>
-        <p className="text-sm leading-7 text-slate-600">
-          Ative respostas automaticas por canal, monte regras simples e valide o comportamento antes de colocar o atendimento no ar.
-        </p>
+    <div className="space-y-5 animate-fade-in">
+      {/* Instance selector + enable toggle */}
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="flex-1 min-w-[200px]">
+          <label className="text-[10px] uppercase tracking-widest text-[var(--text-tertiary)] font-mono mb-1.5 block">
+            Instância
+          </label>
+          <select
+            className={selectClass}
+            value={selectedInstanceId}
+            onChange={(e) => setSelectedInstanceId(e.target.value)}
+          >
+            {instances.map((instance) => (
+              <option key={instance.id} value={instance.id}>
+                {instance.name} — {instance.status}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <label className="flex items-center gap-2.5 cursor-pointer group mt-5">
+          <span className="relative inline-flex h-6 w-11 items-center rounded-full cursor-pointer transition-colors duration-200"
+               style={{ background: formState.isEnabled ? "var(--accent-green)" : "var(--bg-active)" }}>
+            <input type="checkbox" className="sr-only" checked={formState.isEnabled}
+              onChange={(e) => setFormState((c) => ({ ...c, isEnabled: e.target.checked }))} />
+            <span className={["inline-block h-4 w-4 rounded-full bg-white shadow-sm transition-transform duration-200",
+              formState.isEnabled ? "translate-x-6" : "translate-x-1"].join(" ")} />
+          </span>
+          <span className="text-sm text-[var(--text-secondary)] select-none">Chatbot ativo</span>
+        </label>
       </div>
 
-      {error ? <p className="rounded-[20px] border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</p> : null}
-      {success ? <p className="rounded-[20px] border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{success}</p> : null}
+      {/* Alert banners */}
+      {error && (
+        <div className="rounded-[var(--radius-md)] border border-[var(--accent-red)]/20 bg-[var(--accent-red)]/8 px-4 py-3 text-sm text-[var(--accent-red)]" role="alert">
+          {error}
+        </div>
+      )}
+      {success && (
+        <div className="rounded-[var(--radius-md)] border border-[var(--accent-green)]/20 bg-[var(--accent-green)]/8 px-4 py-3 text-sm text-[var(--accent-green)]">
+          {success}
+        </div>
+      )}
 
-      <div className="grid gap-5 xl:grid-cols-[1.2fr_0.8fr]">
-        <Card className="surface-card">
-          <CardHeader>
-            <CardDescription className="font-[var(--font-mono)] uppercase tracking-[0.24em] text-slate-500">Builder</CardDescription>
-            <CardTitle className="text-2xl text-slate-950">Regras e mensagens base</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-5">
-            <label className="space-y-2 text-sm">
-              <span className="text-slate-600">Instancia alvo</span>
-              <select className={selectClassName} onChange={(event) => setSelectedInstanceId(event.target.value)} value={selectedInstanceId}>
-                {instances.map((instance) => (
-                  <option key={instance.id} value={instance.id}>
-                    {instance.name} / {instance.status}
-                  </option>
-                ))}
-              </select>
-            </label>
+      {/* Tab bar */}
+      <div className="flex gap-0 border-b border-[var(--border-subtle)]" role="tablist">
+        {tabs.map((tab) => (
+          <button
+            key={tab.id}
+            role="tab"
+            aria-selected={activeTab === tab.id}
+            onClick={() => setActiveTab(tab.id)}
+            className={[
+              "px-4 py-2.5 text-sm font-medium transition-colors duration-150 cursor-pointer",
+              "border-b-2 -mb-px focus-visible:outline-none",
+              activeTab === tab.id
+                ? "border-[var(--accent-blue)] text-[var(--text-primary)]"
+                : "border-transparent text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]"
+            ].join(" ")}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
 
-            <label className="flex items-center gap-3 rounded-[20px] border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
-              <input
-                checked={formState.isEnabled}
-                onChange={(event) => setFormState((current) => ({ ...current, isEnabled: event.target.checked }))}
-                type="checkbox"
-              />
-              Chatbot habilitado para a instancia
-            </label>
+      {/* Tab content */}
+      <div role="tabpanel" className="animate-fade-in">
 
-            <label className="space-y-2 text-sm">
-              <span className="text-slate-600">Mensagem de boas-vindas</span>
-              <textarea
-                className="min-h-[130px] w-full rounded-[24px] border border-slate-200/80 bg-white/92 px-4 py-3 text-sm text-slate-950 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
-                onChange={(event) => setFormState((current) => ({ ...current, welcomeMessage: event.target.value }))}
-                placeholder="Ola {{nome}}, bem-vindo ao atendimento da InfraCode."
-                value={formState.welcomeMessage}
-              />
-            </label>
-
-            <label className="space-y-2 text-sm">
-              <span className="text-slate-600">Fallback</span>
-              <textarea
-                className="min-h-[130px] w-full rounded-[24px] border border-slate-200/80 bg-white/92 px-4 py-3 text-sm text-slate-950 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
-                onChange={(event) => setFormState((current) => ({ ...current, fallbackMessage: event.target.value }))}
-                placeholder="Nao encontrei uma resposta pronta para isso. Digite suporte para falar com o time."
-                value={formState.fallbackMessage}
-              />
-            </label>
-
-            <div className="space-y-4 rounded-[24px] border border-slate-200 bg-slate-50/70 p-4">
-              <div>
-                <p className="text-lg font-semibold text-slate-950">Modo IA gerenciado pela InfraCode</p>
-                <p className="text-sm text-slate-600">
-                  O tenant escolhe como a IA participa do atendimento. Provedor, modelo e chave ficam no painel do super admin.
-                </p>
+        {/* ── GERAL ─────────────────────────────────────────────────────── */}
+        {activeTab === "geral" && (
+          <div className="grid gap-5 xl:grid-cols-[1.2fr_0.8fr]">
+            {/* Builder card */}
+            <div className="rounded-[var(--radius-lg)] border border-[var(--border-subtle)] bg-[var(--bg-secondary)] overflow-hidden">
+              <div className="px-5 py-4 border-b border-[var(--border-subtle)]">
+                <p className="text-[10px] font-mono uppercase tracking-widest text-[var(--text-tertiary)] mb-1">Builder</p>
+                <h2 className="text-base font-semibold text-[var(--text-primary)]">Mensagens e regras</h2>
               </div>
-
-              <div className="grid gap-3 lg:grid-cols-3">
-                <div className="rounded-[20px] border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
-                  <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Provedor</p>
-                  <p className="mt-2 font-semibold text-slate-950">{formState.ai.provider ?? "Nao configurado"}</p>
-                </div>
-                <div className="rounded-[20px] border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
-                  <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Modelo</p>
-                  <p className="mt-2 font-semibold text-slate-950">{formState.ai.model || "Definido pela InfraCode"}</p>
-                </div>
-                <div className="rounded-[20px] border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
-                  <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Status</p>
-                  <p className="mt-2 font-semibold text-slate-950">
-                    {formState.ai.isProviderConfigured
-                      ? formState.ai.isProviderActive
-                        ? "Ativo"
-                        : "Configurado, mas inativo"
-                      : "Aguardando configuracao do admin"}
-                  </p>
-                </div>
-              </div>
-
-              <label className="flex items-center gap-3 rounded-[20px] border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
-                <input
-                  checked={formState.ai.isEnabled}
-                  onChange={(event) =>
-                    setFormState((current) => ({
-                      ...current,
-                      ai: {
-                        ...current.ai,
-                        isEnabled: event.target.checked
-                      }
-                    }))
-                  }
-                  type="checkbox"
-                />
-                Responder com IA quando aplicavel
-              </label>
-
-              {!formState.ai.isProviderConfigured ? (
-                <div className="rounded-[20px] border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
-                  A InfraCode ainda nao vinculou um provedor de IA para este tenant. Voce ja pode deixar o modo pronto e salvar.
-                </div>
-              ) : null}
-
-              <div className="grid gap-4 lg:grid-cols-2">
-                <label className="space-y-2 text-sm">
-                  <span className="text-slate-600">Modo</span>
-                  <select
-                    className={selectClassName}
-                    onChange={(event) =>
-                      setFormState((current) => ({
-                        ...current,
-                        ai: {
-                          ...current.ai,
-                          mode: event.target.value as ChatbotAiMode
-                        }
-                      }))
-                    }
-                    value={formState.ai.mode}
-                  >
-                    <option value="RULES_ONLY">Somente regras</option>
-                    <option value="RULES_THEN_AI">Regras e depois IA</option>
-                    <option value="AI_ONLY">Somente IA</option>
-                  </select>
-                </label>
-                <div className="rounded-[20px] border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
-                  <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Gestao</p>
-                  <p className="mt-2">As credenciais desta IA ficam bloqueadas no control plane da InfraCode.</p>
-                </div>
-              </div>
-
-              <div className="grid gap-4 lg:grid-cols-2">
-                <label className="space-y-2 text-sm">
-                  <span className="text-slate-600">Temperatura</span>
-                  <Input
-                    onChange={(event) =>
-                      setFormState((current) => ({
-                        ...current,
-                        ai: {
-                          ...current.ai,
-                          temperature: Number(event.target.value || 0)
-                        }
-                      }))
-                    }
-                    type="number"
-                    value={formState.ai.temperature}
+              <div className="p-5 space-y-5">
+                {/* Welcome */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-[var(--text-secondary)]">Boas-vindas</label>
+                  <textarea
+                    className={[textareaClass, "min-h-[120px]"].join(" ")}
+                    value={formState.welcomeMessage}
+                    onChange={(e) => setFormState((c) => ({ ...c, welcomeMessage: e.target.value }))}
+                    placeholder={`Olá {{nome}}, bem-vindo ao atendimento.`}
                   />
-                </label>
-                <label className="space-y-2 text-sm">
-                  <span className="text-slate-600">Contexto maximo</span>
-                  <Input
-                    onChange={(event) =>
-                      setFormState((current) => ({
-                        ...current,
-                        ai: {
-                          ...current.ai,
-                          maxContextMessages: Number(event.target.value || 1)
-                        }
-                      }))
-                    }
-                    type="number"
-                    value={formState.ai.maxContextMessages}
+                </div>
+
+                {/* Fallback */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-[var(--text-secondary)]">Fallback</label>
+                  <textarea
+                    className={[textareaClass, "min-h-[100px]"].join(" ")}
+                    value={formState.fallbackMessage}
+                    onChange={(e) => setFormState((c) => ({ ...c, fallbackMessage: e.target.value }))}
+                    placeholder="Não encontrei resposta. Digite suporte para falar com o time."
                   />
-                </label>
+                </div>
+
+                {/* Rules */}
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm font-semibold text-[var(--text-primary)]">
+                      Regras <span className="text-[var(--text-tertiary)] font-normal">({formState.rules.length})</span>
+                    </p>
+                    <Button variant="secondary" size="sm" onClick={addRule}>
+                      <Plus aria-hidden="true" className="h-3.5 w-3.5" /> Nova regra
+                    </Button>
+                  </div>
+
+                  {formState.rules.length === 0 ? (
+                    <p className="text-xs text-[var(--text-tertiary)] px-1">Nenhuma regra cadastrada ainda.</p>
+                  ) : (
+                    <div className="grid gap-3">
+                      {formState.rules.map((rule, idx) => (
+                        <div key={rule.id} className="rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--bg-tertiary)] p-4 space-y-3">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-[10px] uppercase tracking-widest text-[var(--text-tertiary)] font-mono">
+                              Regra {idx + 1}
+                            </span>
+                            <div className="flex items-center gap-2">
+                              <label className="flex items-center gap-1.5 text-xs text-[var(--text-secondary)] cursor-pointer">
+                                <input type="checkbox" checked={rule.isActive}
+                                  onChange={(e) => updateRule(rule.id, { isActive: e.target.checked })}
+                                  className="accent-[var(--accent-blue)]" />
+                                Ativa
+                              </label>
+                              <button onClick={() => removeRule(rule.id)} aria-label="Remover regra"
+                                className="text-[var(--text-tertiary)] hover:text-[var(--accent-red)] transition-colors cursor-pointer">
+                                <Trash2 aria-hidden="true" className="h-3.5 w-3.5" />
+                              </button>
+                            </div>
+                          </div>
+
+                          <div className="grid gap-3 sm:grid-cols-2">
+                            <div>
+                              <label className="text-xs text-[var(--text-secondary)] mb-1 block">Nome</label>
+                              <input type="text" className={[fieldClass, "h-9"].join(" ")} value={rule.name}
+                                onChange={(e) => updateRule(rule.id, { name: e.target.value })} />
+                            </div>
+                            <div>
+                              <label className="text-xs text-[var(--text-secondary)] mb-1 block">Trigger</label>
+                              <select className={[selectClass, "h-9"].join(" ")} value={rule.triggerType}
+                                onChange={(e) => updateRule(rule.id, {
+                                  triggerType: e.target.value as ChatbotTriggerType,
+                                  matchValue: e.target.value === "FIRST_CONTACT" ? null : rule.matchValue ?? ""
+                                })}>
+                                {Object.entries(triggerTypeLabels).map(([v, l]) => (
+                                  <option key={v} value={v}>{l}</option>
+                                ))}
+                              </select>
+                            </div>
+                          </div>
+
+                          {rule.triggerType !== "FIRST_CONTACT" && (
+                            <div>
+                              <label className="text-xs text-[var(--text-secondary)] mb-1 block">Match</label>
+                              <input type="text" className={[fieldClass, "h-9"].join(" ")} value={rule.matchValue ?? ""}
+                                placeholder={rule.triggerType === "REGEX" ? "^preco|valor$" : "preco"}
+                                onChange={(e) => updateRule(rule.id, { matchValue: e.target.value })} />
+                            </div>
+                          )}
+
+                          <div>
+                            <label className="text-xs text-[var(--text-secondary)] mb-1 block">Resposta</label>
+                            <textarea className={[textareaClass, "min-h-[80px]"].join(" ")} value={rule.responseText}
+                              placeholder="Nosso plano parte de R$ 99/mês."
+                              onChange={(e) => updateRule(rule.id, { responseText: e.target.value })} />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
 
-              <label className="space-y-2 text-sm">
-                <span className="text-slate-600">Prompt do sistema</span>
-                <textarea
-                  className="min-h-[140px] w-full rounded-[24px] border border-slate-200/80 bg-white/92 px-4 py-3 text-sm text-slate-950 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
-                  onChange={(event) =>
-                    setFormState((current) => ({
-                      ...current,
-                      ai: {
-                        ...current.ai,
-                        systemPrompt: event.target.value
-                      }
-                    }))
-                  }
-                  placeholder="Voce e um assistente comercial..."
-                  value={formState.ai.systemPrompt}
-                />
-              </label>
-            </div>
-
-            <div className="space-y-4">
-              <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                <div>
-                  <p className="text-lg font-semibold text-slate-950">Regras ativas</p>
-                  <p className="text-sm text-slate-600">Cada regra responde em cima do texto recebido pela instancia selecionada.</p>
-                </div>
-                <Button className="rounded-2xl" onClick={addRule} variant="secondary">
-                  Nova regra
+              {/* Sticky save bar */}
+              <div className="sticky bottom-0 px-5 py-3 border-t border-[var(--border-subtle)] bg-[var(--bg-secondary)] flex items-center gap-3">
+                <Button variant="primary" size="md" loading={pendingAction === "save"} disabled={pendingAction !== null || !selectedInstance} onClick={() => void saveConfig()}>
+                  <Save aria-hidden="true" className="h-3.5 w-3.5" /> Salvar chatbot
+                </Button>
+                <Button variant="ghost" size="md" disabled={pendingAction !== null}
+                  onClick={() => { setFormState(lastSavedConfig ? mapConfigToFormState(lastSavedConfig) : buildDefaultFormState()); setError(null); setSuccess(null); }}>
+                  <RotateCcw aria-hidden="true" className="h-3.5 w-3.5" /> Reverter
                 </Button>
               </div>
+            </div>
 
-              {formState.rules.length === 0 ? (
-                <div className="list-row-light rounded-[24px] p-4 text-sm text-slate-600">
-                  Nenhuma regra cadastrada ainda. Use a mensagem de boas-vindas e o fallback ou adicione regras especificas para preco,
-                  suporte e cancelamento.
+            {/* Simulation card */}
+            <div className="rounded-[var(--radius-lg)] border border-[var(--border-subtle)] bg-[var(--bg-secondary)] overflow-hidden">
+              <div className="px-5 py-4 border-b border-[var(--border-subtle)]">
+                <p className="text-[10px] font-mono uppercase tracking-widest text-[var(--text-tertiary)] mb-1">Simulação</p>
+                <h2 className="text-base font-semibold text-[var(--text-primary)]">Teste antes de ativar</h2>
+              </div>
+              <div className="p-5 space-y-4">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-[var(--text-secondary)]">Texto de entrada</label>
+                  <textarea
+                    className={[textareaClass, "min-h-[100px]"].join(" ")}
+                    value={simulationForm.text}
+                    onChange={(e) => setSimulationForm((c) => ({ ...c, text: e.target.value }))}
+                    placeholder="Quero saber o preço do plano"
+                  />
                 </div>
-              ) : null}
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div>
+                    <label className="text-xs font-medium text-[var(--text-secondary)] mb-1.5 block">Nome</label>
+                    <input type="text" className={[fieldClass, "h-9"].join(" ")} value={simulationForm.contactName}
+                      onChange={(e) => setSimulationForm((c) => ({ ...c, contactName: e.target.value }))} />
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-[var(--text-secondary)] mb-1.5 block">Número</label>
+                    <input type="text" className={[fieldClass, "h-9"].join(" ")} value={simulationForm.phoneNumber}
+                      onChange={(e) => setSimulationForm((c) => ({ ...c, phoneNumber: e.target.value }))} />
+                  </div>
+                </div>
+                <label className="flex items-center gap-2.5 text-xs text-[var(--text-secondary)] cursor-pointer">
+                  <input type="checkbox" className="accent-[var(--accent-blue)]" checked={simulationForm.isFirstContact}
+                    onChange={(e) => setSimulationForm((c) => ({ ...c, isFirstContact: e.target.checked }))} />
+                  Simular como primeiro contato
+                </label>
+                <Button variant="secondary" size="md" loading={pendingAction === "simulate"}
+                  disabled={pendingAction !== null || !selectedInstance} onClick={() => void runSimulation()}>
+                  <Play aria-hidden="true" className="h-3.5 w-3.5" /> Executar simulação
+                </Button>
 
-              <div className="grid gap-4">
-                {formState.rules.map((rule, index) => (
-                  <div className="list-row-light rounded-[24px] p-4" key={rule.id}>
-                    <div className="flex flex-col gap-4">
-                      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                        <div>
-                          <p className="control-kicker text-slate-400">Regra {index + 1}</p>
-                          <p className="mt-2 text-lg font-semibold text-slate-950">{rule.name || "Sem nome"}</p>
-                        </div>
-                        <div className="flex flex-wrap gap-2">
-                          <label className="flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600">
-                            <input
-                              checked={rule.isActive}
-                              onChange={(event) => updateRule(rule.id, { isActive: event.target.checked })}
-                              type="checkbox"
-                            />
-                            Ativa
-                          </label>
-                          <Button className="rounded-2xl" onClick={() => removeRule(rule.id)} variant="ghost">
-                            Remover
-                          </Button>
-                        </div>
-                      </div>
+                {/* Variables */}
+                <div className="rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--bg-tertiary)] px-4 py-3">
+                  <p className="text-[10px] uppercase tracking-widest text-[var(--text-tertiary)] font-mono mb-2">Variáveis</p>
+                  <p className="font-mono text-xs text-[var(--text-secondary)]">{`{{nome}} {{numero}} {{data}} {{hora}} {{input}}`}</p>
+                </div>
 
-                      <div className="grid gap-4 lg:grid-cols-2">
-                        <label className="space-y-2 text-sm">
-                          <span className="text-slate-600">Nome</span>
-                          <Input onChange={(event) => updateRule(rule.id, { name: event.target.value })} value={rule.name} />
-                        </label>
-                        <label className="space-y-2 text-sm">
-                          <span className="text-slate-600">Trigger</span>
-                          <select
-                            className={selectClassName}
-                            onChange={(event) =>
-                              updateRule(rule.id, {
-                                triggerType: event.target.value as ChatbotTriggerType,
-                                matchValue: event.target.value === "FIRST_CONTACT" ? null : rule.matchValue ?? ""
-                              })
-                            }
-                            value={rule.triggerType}
-                          >
-                            {Object.entries(triggerTypeLabels).map(([value, label]) => (
-                              <option key={value} value={value}>
-                                {label}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                      </div>
-
-                      {rule.triggerType !== "FIRST_CONTACT" ? (
-                        <label className="space-y-2 text-sm">
-                          <span className="text-slate-600">Valor de match</span>
-                          <Input
-                            onChange={(event) => updateRule(rule.id, { matchValue: event.target.value })}
-                            placeholder={rule.triggerType === "REGEX" ? "^preco|valor$" : "preco"}
-                            value={rule.matchValue ?? ""}
-                          />
-                        </label>
-                      ) : (
-                        <div className="rounded-[20px] border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
-                          Esta regra dispara no primeiro contato, sem depender de match textual.
-                        </div>
-                      )}
-
-                      <label className="space-y-2 text-sm">
-                        <span className="text-slate-600">Resposta</span>
-                        <textarea
-                          className="min-h-[120px] w-full rounded-[24px] border border-slate-200/80 bg-white/92 px-4 py-3 text-sm text-slate-950 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
-                          onChange={(event) => updateRule(rule.id, { responseText: event.target.value })}
-                          placeholder="Nosso plano de entrada custa a partir de R$ 99 por mes."
-                          value={rule.responseText}
-                        />
-                      </label>
+                {/* Result */}
+                <div className="rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--bg-tertiary)] px-4 py-3">
+                  <p className="text-[10px] uppercase tracking-widest text-[var(--text-tertiary)] font-mono mb-2">Resultado</p>
+                  {simulationResult ? (
+                    <div className="space-y-2 text-xs">
+                      <p className="text-[var(--text-secondary)]">Ação: <span className="text-[var(--text-primary)]">{simulationResult.action}</span></p>
+                      <p className="text-[var(--text-secondary)]">Regra: <span className="text-[var(--text-primary)]">{simulationResult.matchedRuleName ?? "Nenhuma"}</span></p>
+                      <pre className="mt-2 whitespace-pre-wrap rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[#0d1117] p-3 text-xs text-[var(--text-primary)] font-mono leading-relaxed overflow-auto">
+                        {simulationResult.responseText ?? "Sem resposta"}
+                      </pre>
                     </div>
+                  ) : (
+                    <p className="text-xs text-[var(--text-tertiary)]">Execute a simulação para ver o resultado.</p>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── PROMPT IA ─────────────────────────────────────────────────── */}
+        {activeTab === "prompt" && (
+          <div className="rounded-[var(--radius-lg)] border border-[var(--border-subtle)] bg-[var(--bg-secondary)] overflow-hidden max-w-3xl">
+            <div className="px-5 py-4 border-b border-[var(--border-subtle)]">
+              <p className="text-[10px] font-mono uppercase tracking-widest text-[var(--text-tertiary)] mb-1">IA gerenciada</p>
+              <h2 className="text-base font-semibold text-[var(--text-primary)]">Prompt do sistema</h2>
+            </div>
+            <div className="p-5 space-y-5">
+              {/* AI status info row */}
+              <div className="grid grid-cols-3 gap-3">
+                {[
+                  { label: "Provedor", value: formState.ai.provider ?? "Não configurado" },
+                  { label: "Modelo",   value: formState.ai.model   || "Gerenciado pelo admin" },
+                  { label: "Status",   value: formState.ai.isProviderConfigured ? (formState.ai.isProviderActive ? "Ativo" : "Inativo") : "Aguardando admin" }
+                ].map(({ label, value }) => (
+                  <div key={label} className="rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--bg-tertiary)] px-4 py-3">
+                    <p className="text-[10px] uppercase tracking-widest text-[var(--text-tertiary)] font-mono">{label}</p>
+                    <p className="text-sm font-semibold text-[var(--text-primary)] mt-1 truncate">{value}</p>
                   </div>
                 ))}
               </div>
-            </div>
 
-            <div className="flex flex-wrap gap-3">
-              <Button disabled={pendingAction !== null || !selectedInstance} onClick={() => void saveConfig()}>
-                {pendingAction === "save" ? "Salvando..." : "Salvar chatbot"}
-              </Button>
-              <Button
-                className="rounded-2xl"
-                disabled={pendingAction !== null}
-                onClick={() => {
-                  setFormState(lastSavedConfig ? mapConfigToFormState(lastSavedConfig) : buildDefaultFormState());
-                  setSuccess(null);
-                  setError(null);
-                }}
-                variant="ghost"
-              >
-                Reverter para a ultima versao salva
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-
-        <div className="grid gap-5">
-          <Card className="surface-card-dark text-white">
-            <CardHeader className="border-b border-white/8">
-              <CardDescription className="font-[var(--font-mono)] uppercase tracking-[0.24em] text-slate-400">Simulacao</CardDescription>
-              <CardTitle className="text-2xl text-white">Teste antes de ativar</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <label className="space-y-2 text-sm">
-                <span className="text-slate-300">Texto de entrada</span>
-                <textarea
-                  className="min-h-[130px] w-full rounded-[24px] border border-white/10 bg-white/5 px-4 py-3 text-sm text-white outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-400/20"
-                  onChange={(event) => setSimulationForm((current) => ({ ...current, text: event.target.value }))}
-                  placeholder="Quero saber o preco do plano"
-                  value={simulationForm.text}
-                />
-              </label>
-              <label className="space-y-2 text-sm">
-                <span className="text-slate-300">Nome do contato</span>
-                <Input
-                  className="border-white/10 bg-white/5 text-white placeholder:text-slate-500"
-                  onChange={(event) => setSimulationForm((current) => ({ ...current, contactName: event.target.value }))}
-                  value={simulationForm.contactName}
-                />
-              </label>
-              <label className="space-y-2 text-sm">
-                <span className="text-slate-300">Numero</span>
-                <Input
-                  className="border-white/10 bg-white/5 text-white placeholder:text-slate-500"
-                  onChange={(event) => setSimulationForm((current) => ({ ...current, phoneNumber: event.target.value }))}
-                  value={simulationForm.phoneNumber}
-                />
-              </label>
-              <label className="flex items-center gap-3 rounded-[20px] border border-white/8 bg-white/5 px-4 py-3 text-sm text-slate-300">
-                <input
-                  checked={simulationForm.isFirstContact}
-                  onChange={(event) => setSimulationForm((current) => ({ ...current, isFirstContact: event.target.checked }))}
-                  type="checkbox"
-                />
-                Simular como primeiro contato
-              </label>
-
-              <Button disabled={pendingAction !== null || !selectedInstance} onClick={() => void runSimulation()} variant="secondary">
-                {pendingAction === "simulate" ? "Simulando..." : "Executar simulacao"}
-              </Button>
-
-              <div className="list-row-dark rounded-[24px] p-4 text-sm leading-7 text-slate-300">
-                <p className="control-kicker text-slate-400">Variaveis disponiveis</p>
-                <p className="mt-3">{`{{nome}} {{numero}} {{data}} {{hora}} {{input}}`}</p>
-              </div>
-
-              <div className="list-row-dark rounded-[24px] p-4 text-sm leading-7 text-slate-300">
-                <p className="control-kicker text-slate-400">Resultado</p>
-                {simulationResult ? (
-                  <>
-                    <p className="mt-3 text-white">Acao: {simulationResult.action}</p>
-                    <p className="mt-2">Regra: {simulationResult.matchedRuleName ?? "Nenhuma regra"}</p>
-                    <p className="mt-3 whitespace-pre-wrap rounded-[20px] border border-white/8 bg-black/20 px-4 py-3 text-slate-100">
-                      {simulationResult.responseText ?? "Sem resposta"}
-                    </p>
-                  </>
-                ) : (
-                  <p className="mt-3">Rode a simulacao para validar a resposta atual da instancia.</p>
-                )}
-              </div>
-          </CardContent>
-        </Card>
-
-        <Card className="surface-card">
-          <CardHeader>
-            <CardDescription className="font-[var(--font-mono)] uppercase tracking-[0.24em] text-slate-500">
-              Leads & Fiado
-            </CardDescription>
-            <CardTitle className="text-2xl text-slate-950">Configuração de notificações</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <label className="space-y-2 text-sm">
-              <span className="text-slate-600">Número para receber alertas de lead</span>
-              <Input
-                placeholder="5511999999999"
-                value={formState.leadsPhoneNumber}
-                onChange={(event) => setFormState((current) => ({ ...current, leadsPhoneNumber: event.target.value }))}
-              />
-            </label>
-
-            <label className="flex items-center gap-3 rounded-[20px] border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
-              <input
-                type="checkbox"
-                checked={formState.leadsEnabled}
-                onChange={(event) => setFormState((current) => ({ ...current, leadsEnabled: event.target.checked }))}
-              />
-              Enviar resumo de leads para esse número
-            </label>
-
-            <label className="flex items-center gap-3 rounded-[20px] border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
-              <input
-                type="checkbox"
-                checked={formState.fiadoEnabled}
-                onChange={(event) => setFormState((current) => ({ ...current, fiadoEnabled: event.target.checked }))}
-              />
-              Ativar controle de fiado para esta instância
-            </label>
-
-            <Button
-              disabled={pendingAction !== null || !selectedInstance}
-              onClick={() => void saveLeadsPhone()}
-              variant="secondary"
-              className="rounded-2xl"
-            >
-              {pendingAction === "save-leads-phone" ? "Salvando..." : "Salvar configuração de leads"}
-            </Button>
-          </CardContent>
-        </Card>
-
-        <Card className="surface-card">
-          <CardHeader>
-            <CardDescription className="font-[var(--font-mono)] uppercase tracking-[0.24em] text-slate-500">Resumo</CardDescription>
-            <CardTitle className="text-2xl text-slate-950">Estado publicado</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4 text-sm leading-7 text-slate-600">
-            <div className="list-row-light rounded-[22px] p-4">
-              <p className="control-kicker text-slate-400">Instancia</p>
-              <p className="mt-2 text-lg font-semibold text-slate-950">
-                {selectedInstance ? `${selectedInstance.name} / ${selectedInstance.status}` : "Nenhuma instancia selecionada"}
-              </p>
-            </div>
-            <div className="grid gap-3">
-              <div className="list-row-light rounded-[22px] p-4">Ultima gravacao: {formatDateTime(lastSavedConfig?.updatedAt)}</div>
-              <div className="list-row-light rounded-[22px] p-4">Regras cadastradas: {formState.rules.length}</div>
-              <div className="list-row-light rounded-[22px] p-4">
-                Chatbot: {formState.isEnabled ? "habilitado e pronto para responder" : "desabilitado"}
-              </div>
-              <div className="list-row-light rounded-[22px] p-4">
-                IA:{" "}
-                {formState.ai.isEnabled
-                  ? `${formState.ai.mode} / ${formState.ai.provider ?? "aguardando admin"} / ${formState.ai.model || "modelo nao definido"}`
-                  : "desabilitada"}
-              </div>
-              <div className="list-row-light rounded-[22px] p-4">
-                Alertas de lead: {lastSavedConfig?.leadsPhoneNumber || "número não configurado"}
-              </div>
-              <div className="list-row-light rounded-[22px] p-4">
-                Resumo de leads: {lastSavedConfig?.leadsEnabled !== false ? "ativo" : "inativo"}
-              </div>
-              <div className="list-row-light rounded-[22px] p-4">
-                Controle de fiado: {lastSavedConfig?.fiadoEnabled ? "ativo" : "inativo"}
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-        {formState.fiadoEnabled && selectedInstance ? (
-          <Card className="surface-card">
-            <CardHeader>
-              <CardDescription className="font-[var(--font-mono)] uppercase tracking-[0.24em] text-slate-500">
-                Fiado
-              </CardDescription>
-              <CardTitle className="text-2xl text-slate-950">Contas em aberto</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              {fiadoTabs.length === 0 ? (
-                <div className="list-row-light rounded-[22px] p-4 text-sm text-slate-600">
-                  Nenhuma conta em aberto.
+              {!formState.ai.isProviderConfigured && (
+                <div className="rounded-[var(--radius-md)] border border-[var(--accent-yellow)]/20 bg-[var(--accent-yellow)]/8 px-4 py-3 text-sm text-[var(--accent-yellow)]">
+                  A InfraCode ainda não vinculou um provedor de IA. Salve o prompt para quando ficar disponível.
                 </div>
+              )}
+
+              {/* Enable AI toggle */}
+              <label className="flex items-center gap-3 cursor-pointer">
+                <span className="relative inline-flex h-6 w-11 items-center rounded-full cursor-pointer transition-colors duration-200"
+                    style={{ background: formState.ai.isEnabled ? "var(--accent-green)" : "var(--bg-active)" }}>
+                  <input type="checkbox" className="sr-only" checked={formState.ai.isEnabled}
+                    onChange={(e) => setFormState((c) => ({ ...c, ai: { ...c.ai, isEnabled: e.target.checked } }))} />
+                  <span className={["inline-block h-4 w-4 rounded-full bg-white shadow-sm transition-transform duration-200",
+                    formState.ai.isEnabled ? "translate-x-6" : "translate-x-1"].join(" ")} />
+                </span>
+                <span className="text-sm text-[var(--text-secondary)] select-none">Responder com IA</span>
+              </label>
+
+              {/* Mode + params */}
+              <div className="grid gap-4 sm:grid-cols-3">
+                <div>
+                  <label className="text-xs font-medium text-[var(--text-secondary)] mb-1.5 block">Modo</label>
+                  <select className={selectClass} value={formState.ai.mode}
+                    onChange={(e) => setFormState((c) => ({ ...c, ai: { ...c.ai, mode: e.target.value as ChatbotAiMode } }))}>
+                    <option value="RULES_ONLY">Somente regras</option>
+                    <option value="RULES_THEN_AI">Regras → IA</option>
+                    <option value="AI_ONLY">Somente IA</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-[var(--text-secondary)] mb-1.5 block">Temperatura</label>
+                  <input type="number" step="0.1" min="0" max="2" className={[fieldClass, "h-11"].join(" ")}
+                    value={formState.ai.temperature}
+                    onChange={(e) => setFormState((c) => ({ ...c, ai: { ...c.ai, temperature: Number(e.target.value || 0) } }))} />
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-[var(--text-secondary)] mb-1.5 block">Contexto máx.</label>
+                  <input type="number" min="1" className={[fieldClass, "h-11"].join(" ")}
+                    value={formState.ai.maxContextMessages}
+                    onChange={(e) => setFormState((c) => ({ ...c, ai: { ...c.ai, maxContextMessages: Number(e.target.value || 1) } }))} />
+                </div>
+              </div>
+
+              {/* System prompt */}
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-medium text-[var(--text-secondary)]">System prompt</label>
+                  <span className="text-[10px] font-mono text-[var(--text-tertiary)]">{formState.ai.systemPrompt.length} chars</span>
+                </div>
+                <textarea
+                  className={[textareaClass, "min-h-[200px]"].join(" ")}
+                  value={formState.ai.systemPrompt}
+                  placeholder="Você é um assistente virtual comercial..."
+                  onChange={(e) => setFormState((c) => ({ ...c, ai: { ...c.ai, systemPrompt: e.target.value } }))}
+                />
+              </div>
+
+              <div className="flex gap-3 pt-1">
+                <Button variant="primary" size="md" loading={pendingAction === "save"}
+                  disabled={pendingAction !== null || !selectedInstance} onClick={() => void saveConfig()}>
+                  <Save aria-hidden="true" className="h-3.5 w-3.5" /> Salvar
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── LEADS ─────────────────────────────────────────────────────── */}
+        {activeTab === "leads" && (
+          <div className="rounded-[var(--radius-lg)] border border-[var(--border-subtle)] bg-[var(--bg-secondary)] overflow-hidden max-w-xl">
+            <div className="px-5 py-4 border-b border-[var(--border-subtle)]">
+              <p className="text-[10px] font-mono uppercase tracking-widest text-[var(--text-tertiary)] mb-1">Leads</p>
+              <h2 className="text-base font-semibold text-[var(--text-primary)]">Notificações de lead</h2>
+            </div>
+            <div className="p-5 space-y-4">
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium text-[var(--text-secondary)]">Número para alertas</label>
+                <input type="text" className={[fieldClass, "h-11"].join(" ")} placeholder="5511999999999"
+                  value={formState.leadsPhoneNumber}
+                  onChange={(e) => setFormState((c) => ({ ...c, leadsPhoneNumber: e.target.value }))} />
+              </div>
+
+              <label className="flex items-center gap-2.5 cursor-pointer">
+                <span className="relative inline-flex h-6 w-11 items-center rounded-full cursor-pointer transition-colors duration-200"
+                    style={{ background: formState.leadsEnabled ? "var(--accent-green)" : "var(--bg-active)" }}>
+                  <input type="checkbox" className="sr-only" checked={formState.leadsEnabled}
+                    onChange={(e) => setFormState((c) => ({ ...c, leadsEnabled: e.target.checked }))} />
+                  <span className={["inline-block h-4 w-4 rounded-full bg-white shadow-sm transition-transform duration-200",
+                    formState.leadsEnabled ? "translate-x-6" : "translate-x-1"].join(" ")} />
+                </span>
+                <span className="text-sm text-[var(--text-secondary)] select-none">Enviar resumo de leads</span>
+              </label>
+
+              <label className="flex items-center gap-2.5 cursor-pointer">
+                <span className="relative inline-flex h-6 w-11 items-center rounded-full cursor-pointer transition-colors duration-200"
+                    style={{ background: formState.fiadoEnabled ? "var(--accent-green)" : "var(--bg-active)" }}>
+                  <input type="checkbox" className="sr-only" checked={formState.fiadoEnabled}
+                    onChange={(e) => setFormState((c) => ({ ...c, fiadoEnabled: e.target.checked }))} />
+                  <span className={["inline-block h-4 w-4 rounded-full bg-white shadow-sm transition-transform duration-200",
+                    formState.fiadoEnabled ? "translate-x-6" : "translate-x-1"].join(" ")} />
+                </span>
+                <span className="text-sm text-[var(--text-secondary)] select-none">Ativar controle de fiado</span>
+              </label>
+
+              <Button variant="primary" size="md" loading={pendingAction === "save-leads-phone"}
+                disabled={pendingAction !== null || !selectedInstance} onClick={() => void saveLeadsPhone()}>
+                <Save aria-hidden="true" className="h-3.5 w-3.5" /> Salvar configuração de leads
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {/* ── FIADO ─────────────────────────────────────────────────────── */}
+        {activeTab === "fiado" && (
+          <div className="rounded-[var(--radius-lg)] border border-[var(--border-subtle)] bg-[var(--bg-secondary)] overflow-hidden max-w-xl">
+            <div className="px-5 py-4 border-b border-[var(--border-subtle)]">
+              <p className="text-[10px] font-mono uppercase tracking-widest text-[var(--text-tertiary)] mb-1">Fiado</p>
+              <h2 className="text-base font-semibold text-[var(--text-primary)]">Contas em aberto</h2>
+            </div>
+            <div className="p-5 space-y-3">
+              {!formState.fiadoEnabled ? (
+                <p className="text-sm text-[var(--text-tertiary)]">Ative o controle de fiado na aba Leads para ver as contas.</p>
+              ) : fiadoTabs.length === 0 ? (
+                <p className="text-sm text-[var(--text-tertiary)]">Nenhuma conta em aberto.</p>
               ) : (
                 fiadoTabs.map((tab) => (
-                  <div className="list-row-light rounded-[24px] p-4" key={tab.phoneNumber}>
-                    <div className="flex items-center justify-between gap-4">
-                      <div>
-                        <p className="text-sm font-semibold text-slate-950">
-                          {tab.displayName ?? tab.phoneNumber}
-                        </p>
-                        <p className="text-xs text-slate-500">{tab.phoneNumber}</p>
-                      </div>
-                      <p className="font-[var(--font-mono)] text-sm font-semibold text-slate-950">
-                        R$ {tab.total.toFixed(2).replace(".", ",")}
-                      </p>
+                  <div key={tab.phoneNumber}
+                    className="flex items-center justify-between gap-4 px-4 py-3 rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--bg-tertiary)] hover:border-[var(--border-default)] transition-colors">
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-[var(--text-primary)] truncate">{tab.displayName ?? tab.phoneNumber}</p>
+                      <p className="text-xs text-[var(--text-tertiary)] font-mono">{tab.phoneNumber} · {tab.items.length} item(s)</p>
                     </div>
-                    <div className="mt-3 flex items-center justify-between">
-                      <p className="text-xs text-slate-400">{tab.items.length} item(s)</p>
-                      <Button
-                        className="rounded-2xl"
-                        variant="ghost"
-                        onClick={() => void clearFiado(tab.phoneNumber)}
-                      >
-                        Marcar como pago
+                    <div className="flex items-center gap-3 flex-shrink-0">
+                      <span className="font-mono text-sm font-semibold text-[var(--text-primary)]">
+                        R$ {tab.total.toFixed(2).replace(".", ",")}
+                      </span>
+                      <Button variant="ghost" size="sm" onClick={() => void clearFiado(tab.phoneNumber)}>
+                        Pago
                       </Button>
                     </div>
                   </div>
                 ))
               )}
-            </CardContent>
-          </Card>
-        ) : null}
+            </div>
+          </div>
+        )}
+
+        {/* ── ESTADO ────────────────────────────────────────────────────── */}
+        {activeTab === "estado" && (
+          <div className="rounded-[var(--radius-lg)] border border-[var(--border-subtle)] bg-[var(--bg-secondary)] overflow-hidden max-w-xl">
+            <div className="px-5 py-4 border-b border-[var(--border-subtle)]">
+              <p className="text-[10px] font-mono uppercase tracking-widest text-[var(--text-tertiary)] mb-1">Estado publicado</p>
+              <h2 className="text-base font-semibold text-[var(--text-primary)]">Configuração salva</h2>
+            </div>
+            <div className="p-5 space-y-2 text-sm">
+              {[
+                { label: "Instância",       value: selectedInstance ? `${selectedInstance.name} — ${selectedInstance.status}` : "—" },
+                { label: "Última gravação", value: formatDateTime(lastSavedConfig?.updatedAt) },
+                { label: "Regras",          value: String(formState.rules.length) },
+                { label: "Chatbot",         value: formState.isEnabled ? "Habilitado" : "Desabilitado" },
+                { label: "IA",              value: formState.ai.isEnabled ? `${formState.ai.mode} · ${formState.ai.provider ?? "aguardando admin"}` : "Desabilitada" },
+                { label: "Alertas lead",    value: lastSavedConfig?.leadsPhoneNumber || "Não configurado" },
+                { label: "Resumo leads",    value: lastSavedConfig?.leadsEnabled !== false ? "Ativo" : "Inativo" },
+                { label: "Fiado",           value: lastSavedConfig?.fiadoEnabled ? "Ativo" : "Inativo" }
+              ].map(({ label, value }) => (
+                <div key={label} className="flex justify-between px-4 py-2.5 rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--bg-tertiary)]">
+                  <span className="text-[var(--text-tertiary)] text-xs font-mono uppercase tracking-wide">{label}</span>
+                  <span className="text-[var(--text-primary)] text-xs font-semibold text-right truncate ml-4 max-w-[60%]">{value}</span>
+                </div>
+              ))}
+
+              {/* Badge summary */}
+              <div className="flex flex-wrap gap-2 mt-3">
+                <Badge variant={formState.isEnabled ? "success" : "neutral"}>
+                  {formState.isEnabled ? "Chatbot ON" : "Chatbot OFF"}
+                </Badge>
+                <Badge variant={formState.ai.isEnabled ? "info" : "neutral"}>
+                  {formState.ai.isEnabled ? "IA ON" : "IA OFF"}
+                </Badge>
+                <Badge variant={formState.leadsEnabled ? "success" : "neutral"}>
+                  {formState.leadsEnabled ? "Leads ON" : "Leads OFF"}
+                </Badge>
+                <Badge variant={formState.fiadoEnabled ? "warning" : "neutral"}>
+                  {formState.fiadoEnabled ? "Fiado ON" : "Fiado OFF"}
+                </Badge>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
-      </div>
-    </section>
+    </div>
   );
 };

@@ -1,70 +1,146 @@
-import { InfraCodeMark } from "../../../components/branding/infracode-mark";
-import { PanelNav } from "../../../components/navigation/panel-nav";
+"use client";
+
+import React, { useState } from "react";
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import {
+  LayoutDashboard,
+  Users,
+  CreditCard,
+  Settings,
+  X
+} from "lucide-react";
+import { Topbar } from "../../../components/layout/Topbar";
 
 export const dynamic = "force-dynamic";
 
-const navigation = [
-  { href: "/admin", label: "Overview", meta: "Saude global, consumo e sinais da plataforma." },
-  { href: "/admin/tenants", label: "Tenants", meta: "Clientes, limites, status e contexto operacional." },
-  { href: "/admin/billing", label: "Billing", meta: "Ciclos, vencimentos e risco financeiro por conta." },
-  { href: "/admin/settings", label: "Settings", meta: "Guardrails globais, manutencao e defaults." }
+const navItems = [
+  { href: "/admin",          label: "Overview",  icon: LayoutDashboard },
+  { href: "/admin/tenants",  label: "Tenants",   icon: Users },
+  { href: "/admin/billing",  label: "Billing",   icon: CreditCard },
+  { href: "/admin/settings", label: "Settings",  icon: Settings }
 ];
+
+function AdminSidebar({ onClose }: { onClose?: () => void }) {
+  const pathname = usePathname();
+  return (
+    <aside className="flex h-full flex-col bg-[var(--bg-secondary)] border-r border-[var(--border-subtle)] pt-4 pb-4 px-3 w-[220px]">
+      {/* Logo row */}
+      <div className="flex items-center justify-between px-2 mb-6">
+        <div className="brand-chip">
+          <div className="brand-mark">
+            <span className="brand-mark__glyph">ADM</span>
+            <span className="brand-mark__text text-base font-semibold text-[var(--text-primary)]">
+              <strong>Infra</strong><strong>Code</strong>
+            </span>
+          </div>
+        </div>
+        {onClose && (
+          <button
+            onClick={onClose}
+            aria-label="Fechar menu"
+            className="md:hidden h-7 w-7 flex items-center justify-center rounded-md text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors cursor-pointer"
+          >
+            <X className="h-4 w-4" aria-hidden="true" />
+          </button>
+        )}
+      </div>
+
+      {/* Navigation */}
+      <nav className="flex-1 flex flex-col gap-0.5" aria-label="Navegação admin">
+        {navItems.map((item, i) => {
+          const isActive =
+            pathname === item.href ||
+            (item.href !== "/admin" && pathname.startsWith(item.href));
+          const Icon = item.icon;
+          return (
+            <Link
+              key={item.href}
+              href={item.href}
+              onClick={onClose}
+              style={{ animationDelay: `${i * 50}ms` }}
+              className={[
+                "flex items-center gap-2.5 rounded-[var(--radius-md)] px-3 py-2.5 text-sm font-medium",
+                "transition-colors duration-150 cursor-pointer animate-slide-in stagger-item",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-blue)]",
+                isActive
+                  ? "bg-[var(--bg-active)] text-[var(--text-primary)] border-l-2 border-[var(--accent-blue)] pl-[10px]"
+                  : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+              ].join(" ")}
+              aria-current={isActive ? "page" : undefined}
+            >
+              <Icon aria-hidden="true" className="h-4 w-4 flex-shrink-0" strokeWidth={isActive ? 2 : 1.5} />
+              <span className="truncate">{item.label}</span>
+            </Link>
+          );
+        })}
+      </nav>
+
+      {/* Super badge */}
+      <div className="mt-4 px-2 border-t border-[var(--border-subtle)] pt-4">
+        <div className="flex items-center gap-2 px-1">
+          <div className="h-1.5 w-1.5 rounded-full bg-[var(--accent-blue)] pulse-dot flex-shrink-0" aria-hidden="true" />
+          <span className="text-xs text-[var(--text-tertiary)] font-mono tracking-wide uppercase">
+            Super Admin
+          </span>
+        </div>
+      </div>
+    </aside>
+  );
+}
+
+function AdminLayoutClient({ children }: { children: React.ReactNode }) {
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const pathname = usePathname();
+
+  const breadcrumb = (() => {
+    const segments = pathname.replace("/admin", "").split("/").filter(Boolean);
+    if (segments.length === 0) return ["Overview"];
+    return segments.map((s) => s.charAt(0).toUpperCase() + s.slice(1));
+  })();
+
+  return (
+    <div className="min-h-screen bg-[var(--bg-primary)] flex">
+      {/* Desktop sidebar */}
+      <div className="hidden md:block h-screen sticky top-0 flex-shrink-0">
+        <AdminSidebar />
+      </div>
+
+      {/* Mobile overlay + drawer */}
+      {drawerOpen && (
+        <div
+          className="fixed inset-0 bg-black/60 z-[25]"
+          onClick={() => setDrawerOpen(false)}
+          aria-hidden="true"
+        />
+      )}
+      <div
+        className={[
+          "fixed inset-y-0 left-0 z-30 transition-transform duration-[var(--transition-slow)] md:hidden",
+          drawerOpen ? "translate-x-0" : "-translate-x-full"
+        ].join(" ")}
+      >
+        <AdminSidebar onClose={() => setDrawerOpen(false)} />
+      </div>
+
+      {/* Main content */}
+      <div className="flex-1 flex flex-col min-w-0">
+        <Topbar
+          breadcrumb={["Admin", ...breadcrumb]}
+          onMenuClick={() => setDrawerOpen(true)}
+        />
+        <main className="flex-1 p-5 sm:p-6 animate-fade-in">
+          {children}
+        </main>
+      </div>
+    </div>
+  );
+}
 
 export default function SuperAdminLayout({
   children
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  return (
-    <main className="theme-super min-h-screen px-4 py-6 sm:px-6 lg:px-8">
-      <div className="mx-auto grid max-w-[1700px] gap-6 xl:grid-cols-[320px_minmax(0,1fr)]">
-        <aside className="control-sidebar control-sidebar--super text-white">
-          <InfraCodeMark className="auth-brand-chip" subtitle="InfraCode control plane" tone="super" />
-
-          <div className="mt-8 space-y-4">
-            <p className="control-kicker text-sky-300">Super admin</p>
-            <h1 className="text-4xl font-semibold leading-tight text-white">A plataforma inteira sob uma unica camada de controle.</h1>
-            <p className="text-sm leading-7 text-slate-300">
-              Operacao global da InfraCode com separacao clara entre clientes, billing, limites, observabilidade e suporte por impersonation.
-            </p>
-          </div>
-
-          <div className="mt-8">
-            <PanelNav items={navigation} tone="super" />
-          </div>
-
-          <div className="mt-8 grid gap-3">
-            <div className="rounded-[26px] border border-white/8 bg-white/5 p-4">
-              <p className="control-kicker text-slate-400">Controlos ativos</p>
-              <p className="mt-3 text-lg font-semibold">Rate limit por tenant e por IP interno</p>
-            </div>
-            <div className="rounded-[26px] border border-white/8 bg-white/5 p-4">
-              <p className="control-kicker text-slate-400">Infra</p>
-              <p className="mt-3 text-lg font-semibold">PgBouncer, Redis, Prometheus e Grafana integrados</p>
-            </div>
-          </div>
-        </aside>
-
-        <section className="control-main control-main--super min-h-[calc(100vh-3rem)]">
-          <div className="relative z-10">
-            <header className="mb-8 flex flex-col gap-6 border-b border-white/8 pb-6 xl:flex-row xl:items-end xl:justify-between">
-              <div className="max-w-4xl space-y-3">
-                <p className="control-kicker text-slate-400">InfraCode hosted SaaS</p>
-                <h2 className="text-4xl font-semibold tracking-tight text-white sm:text-5xl">Visao global de clientes, receita e saude operacional.</h2>
-                <p className="text-sm leading-7 text-slate-300">
-                  Cada tenant opera isolado, enquanto a InfraCode enxerga consumo, risco, billing e suporte em um control plane visualmente distinto.
-                </p>
-              </div>
-
-              <div className="flex flex-wrap gap-3">
-                <span className="rounded-full border border-white/8 bg-white/5 px-4 py-2 text-sm text-slate-300">JWT + API Key tenant-scoped</span>
-                <span className="rounded-full border border-sky-300/18 bg-sky-400/10 px-4 py-2 text-sm text-sky-100">Schema per tenant</span>
-              </div>
-            </header>
-            {children}
-          </div>
-        </section>
-      </div>
-    </main>
-  );
+  return <AdminLayoutClient>{children}</AdminLayoutClient>;
 }

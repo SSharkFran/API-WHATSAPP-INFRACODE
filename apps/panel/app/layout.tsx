@@ -1,10 +1,12 @@
 import type { Metadata } from "next";
 import { IBM_Plex_Mono, Space_Grotesk } from "next/font/google";
+import { ToastProvider } from "../components/ui/Toast";
 import "./globals.css";
 
 const displayFont = Space_Grotesk({
   subsets: ["latin"],
-  variable: "--font-display"
+  variable: "--font-display",
+  weight: ["300", "400", "500", "600", "700"]
 });
 
 const monoFont = IBM_Plex_Mono({
@@ -14,8 +16,8 @@ const monoFont = IBM_Plex_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "InfraCode WhatsApp Panel",
-  description: "Painel enterprise para operacao multi-instancia do WhatsApp"
+  title: "InfraCode Panel",
+  description: "Painel enterprise para operação multi-instância do WhatsApp"
 };
 
 export default function RootLayout({
@@ -25,8 +27,13 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="pt-BR">
-      <body className={`${displayFont.variable} ${monoFont.variable} bg-surface font-[var(--font-display)] text-ink antialiased`}>
-        {children}
+      <body
+        className={`${displayFont.variable} ${monoFont.variable} antialiased`}
+        style={{ fontFamily: "var(--font-display)", background: "var(--bg-primary)", color: "var(--text-primary)" }}
+      >
+        <ToastProvider>
+          {children}
+        </ToastProvider>
       </body>
     </html>
   );

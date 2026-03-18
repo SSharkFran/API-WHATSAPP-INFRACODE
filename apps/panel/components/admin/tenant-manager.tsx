@@ -3,9 +3,12 @@
 import { startTransition, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { ChatbotAiProvider } from "@infracode/types";
-import { Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Dialog, Input } from "@infracode/ui";
+import { Dialog } from "@infracode/ui";
 import type { AdminPlanSummary, AdminTenantAiConfig, AdminTenantSummary } from "../../lib/api";
 import { requestClientApi } from "../../lib/client-api";
+import { Button } from "../ui/Button";
+import { Badge } from "../ui/Badge";
+import { Search, Plus, Pencil, Bot, Trash2 } from "lucide-react";
 
 interface TenantManagerProps {
   initialPlans: AdminPlanSummary[];
@@ -49,71 +52,57 @@ interface TenantCreateResponse {
   tenant: AdminTenantSummary;
 }
 
-const selectClassName =
-  "h-12 w-full rounded-2xl border border-slate-200/80 bg-white/92 px-4 text-sm text-slate-950 outline-none ring-0 shadow-[inset_0_1px_0_rgba(255,255,255,0.45)] transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100";
+/* ─── Shared field styles ───────────────────────────────────────────── */
+const fieldClass = [
+  "w-full rounded-[var(--radius-md)] border border-[var(--border-default)] bg-[var(--bg-tertiary)]",
+  "px-3 h-11 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)]",
+  "transition-[border-color] duration-150",
+  "focus:outline-none focus:border-[var(--accent-blue)]"
+].join(" ");
+
+const selectClass = [fieldClass, "cursor-pointer"].join(" ");
 
 const formatNumber = (value: number): string => new Intl.NumberFormat("pt-BR").format(value);
 const formatCurrency = (priceCents: number, currency: string): string =>
-  new Intl.NumberFormat("pt-BR", {
-    style: "currency",
-    currency
-  }).format(priceCents / 100);
+  new Intl.NumberFormat("pt-BR", { style: "currency", currency }).format(priceCents / 100);
 
 const slugify = (value: string): string =>
-  value
-    .normalize("NFKD")
-    .replace(/[^\w\s-]/g, "")
-    .trim()
-    .toLowerCase()
-    .replace(/\s+/g, "-")
-    .replace(/-+/g, "-");
+  value.normalize("NFKD").replace(/[^\w\s-]/g, "").trim().toLowerCase()
+    .replace(/\s+/g, "-").replace(/-+/g, "-");
 
 const buildCreateForm = (plans: AdminPlanSummary[]): TenantCreateFormState => ({
-  name: "",
-  slug: "",
-  billingEmail: "",
-  firstAdminEmail: "",
-  planId: plans[0]?.id ?? "",
-  firstAdminRole: "ADMIN",
-  nextDueAt: ""
+  name: "", slug: "", billingEmail: "", firstAdminEmail: "",
+  planId: plans[0]?.id ?? "", firstAdminRole: "ADMIN", nextDueAt: ""
 });
 
 const buildEditForm = (tenant: AdminTenantSummary): TenantEditFormState => ({
-  name: tenant.name,
-  billingEmail: tenant.billingEmail ?? "",
-  planId: tenant.plan?.id ?? "",
-  status: tenant.status,
-  instanceLimit: String(tenant.instanceLimit),
-  messagesPerMonth: String(tenant.messagesPerMonth),
-  usersLimit: String(tenant.usersLimit),
-  rateLimitPerMinute: String(tenant.rateLimitPerMinute)
+  name: tenant.name, billingEmail: tenant.billingEmail ?? "",
+  planId: tenant.plan?.id ?? "", status: tenant.status,
+  instanceLimit: String(tenant.instanceLimit), messagesPerMonth: String(tenant.messagesPerMonth),
+  usersLimit: String(tenant.usersLimit), rateLimitPerMinute: String(tenant.rateLimitPerMinute)
 });
 
 const aiProviderDefaults: Record<ChatbotAiProvider, { baseUrl: string; model: string }> = {
-  GROQ: {
-    baseUrl: "https://api.groq.com/openai/v1",
-    model: "llama-3.1-8b-instant"
-  },
-  ANTHROPIC: {
-    baseUrl: "https://api.anthropic.com",
-    model: "claude-sonnet-4-20250514"
-  },
-  OPENAI_COMPATIBLE: {
-    baseUrl: "https://api.openai.com/v1",
-    model: "gpt-4.1-mini"
-  }
+  GROQ:             { baseUrl: "https://api.groq.com/openai/v1",    model: "llama-3.1-8b-instant" },
+  ANTHROPIC:        { baseUrl: "https://api.anthropic.com",          model: "claude-sonnet-4-20250514" },
+  OPENAI_COMPATIBLE: { baseUrl: "https://api.openai.com/v1",         model: "gpt-4.1-mini" }
 };
 
 const buildAiForm = (config?: AdminTenantAiConfig | null): TenantAiFormState => ({
   provider: config?.provider ?? "GROQ",
   baseUrl: config?.baseUrl ?? aiProviderDefaults.GROQ.baseUrl,
   model: config?.model ?? aiProviderDefaults.GROQ.model,
-  apiKey: "",
-  hasApiKey: config?.hasApiKey ?? false,
-  isConfigured: config?.isConfigured ?? false,
-  isActive: config?.isActive ?? false,
+  apiKey: "", hasApiKey: config?.hasApiKey ?? false,
+  isConfigured: config?.isConfigured ?? false, isActive: config?.isActive ?? false,
   updatedAt: config?.updatedAt ?? null
 });
+
+type BadgeVariant = "success" | "error" | "warning" | "neutral";
+const statusVariant: Record<string, BadgeVariant> = {
+  ACTIVE: "success", SUSPENDED: "error", CANCELED: "neutral"
+};
+
+const PAGE_SIZE = 10;
 
 export const TenantManager = ({ initialPlans, initialTenants }: TenantManagerProps) => {
   const router = useRouter();
@@ -124,579 +113,471 @@ export const TenantManager = ({ initialPlans, initialTenants }: TenantManagerPro
   const [aiTenantId, setAiTenantId] = useState<string | null>(null);
   const [createForm, setCreateForm] = useState<TenantCreateFormState>(() => buildCreateForm(initialPlans));
   const [editForm, setEditForm] = useState<TenantEditFormState>(() =>
-    initialTenants[0]
-      ? buildEditForm(initialTenants[0])
-      : {
-          name: "",
-          billingEmail: "",
-          planId: initialPlans[0]?.id ?? "",
-          status: "ACTIVE",
-          instanceLimit: "1",
-          messagesPerMonth: "10000",
-          usersLimit: "1",
-          rateLimitPerMinute: "20"
-        }
+    initialTenants[0] ? buildEditForm(initialTenants[0]) : {
+      name: "", billingEmail: "", planId: initialPlans[0]?.id ?? "",
+      status: "ACTIVE", instanceLimit: "1", messagesPerMonth: "10000",
+      usersLimit: "1", rateLimitPerMinute: "20"
+    }
   );
   const [aiForm, setAiForm] = useState<TenantAiFormState>(() => buildAiForm());
   const [pendingAction, setPendingAction] = useState<"create" | "update" | "delete" | "load-ai" | "save-ai" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [successLink, setSuccessLink] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
+  const [page, setPage] = useState(0);
 
   const sortedTenants = useMemo(
-    () =>
-      [...tenants].sort((left, right) => {
-        if (left.status === right.status) {
-          return left.name.localeCompare(right.name, "pt-BR");
-        }
-
-        return left.status.localeCompare(right.status, "pt-BR");
-      }),
+    () => [...tenants].sort((a, b) =>
+      a.status === b.status ? a.name.localeCompare(b.name, "pt-BR") : a.status.localeCompare(b.status, "pt-BR")
+    ),
     [tenants]
   );
 
+  const filteredTenants = useMemo(
+    () => search.trim()
+      ? sortedTenants.filter((t) => t.name.toLowerCase().includes(search.toLowerCase()) || t.slug.includes(search.toLowerCase()))
+      : sortedTenants,
+    [sortedTenants, search]
+  );
+
+  const totalPages = Math.ceil(filteredTenants.length / PAGE_SIZE);
+  const pagedTenants = filteredTenants.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+
   const editingTenant = useMemo(
-    () => (editTenantId ? tenants.find((tenant) => tenant.id === editTenantId) ?? null : null),
+    () => editTenantId ? tenants.find((t) => t.id === editTenantId) ?? null : null,
     [editTenantId, tenants]
   );
-  const aiTenant = useMemo(() => (aiTenantId ? tenants.find((tenant) => tenant.id === aiTenantId) ?? null : null), [aiTenantId, tenants]);
+  const aiTenant = useMemo(
+    () => aiTenantId ? tenants.find((t) => t.id === aiTenantId) ?? null : null,
+    [aiTenantId, tenants]
+  );
 
-  const resetCreate = () => {
-    setCreateForm(buildCreateForm(plans));
-    setCreateOpen(false);
-  };
-
-  const openEdit = (tenant: AdminTenantSummary) => {
-    setError(null);
-    setEditTenantId(tenant.id);
-    setEditForm(buildEditForm(tenant));
-  };
+  const resetCreate = () => { setCreateForm(buildCreateForm(plans)); setCreateOpen(false); };
+  const openEdit = (tenant: AdminTenantSummary) => { setError(null); setEditTenantId(tenant.id); setEditForm(buildEditForm(tenant)); };
 
   const openAiManager = async (tenant: AdminTenantSummary) => {
-    setPendingAction("load-ai");
-    setError(null);
-
+    setPendingAction("load-ai"); setError(null);
     try {
       const config = await requestClientApi<AdminTenantAiConfig>(`/admin/tenants/${tenant.id}/ai`);
-      setAiTenantId(tenant.id);
-      setAiForm(buildAiForm(config));
+      setAiTenantId(tenant.id); setAiForm(buildAiForm(config));
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Falha ao carregar a configuracao de IA do tenant");
-    } finally {
-      setPendingAction(null);
-    }
+      setError(caught instanceof Error ? caught.message : "Falha ao carregar IA do tenant");
+    } finally { setPendingAction(null); }
   };
 
   const submitCreate = async () => {
-    setPendingAction("create");
-    setError(null);
-    setSuccessLink(null);
-
+    setPendingAction("create"); setError(null); setSuccessLink(null);
     try {
       const response = await requestClientApi<TenantCreateResponse>("/admin/tenants", {
         method: "POST",
         body: {
-          name: createForm.name,
-          slug: createForm.slug,
+          name: createForm.name, slug: createForm.slug,
           billingEmail: createForm.billingEmail || undefined,
-          firstAdminEmail: createForm.firstAdminEmail,
-          firstAdminRole: createForm.firstAdminRole,
+          firstAdminEmail: createForm.firstAdminEmail, firstAdminRole: createForm.firstAdminRole,
           nextDueAt: createForm.nextDueAt ? new Date(createForm.nextDueAt).toISOString() : undefined,
           planId: createForm.planId
         }
       });
-
-      setTenants((current) => [response.tenant, ...current]);
+      setTenants((c) => [response.tenant, ...c]);
       setSuccessLink(response.firstAccessUrl);
       resetCreate();
-      startTransition(() => {
-        router.refresh();
-      });
+      startTransition(() => { router.refresh(); });
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Falha ao criar tenant");
-    } finally {
-      setPendingAction(null);
-    }
+    } finally { setPendingAction(null); }
   };
 
   const submitUpdate = async () => {
-    if (!editingTenant) {
-      return;
-    }
-
-    setPendingAction("update");
-    setError(null);
-
+    if (!editingTenant) return;
+    setPendingAction("update"); setError(null);
     try {
       const updated = await requestClientApi<AdminTenantSummary>(`/admin/tenants/${editingTenant.id}`, {
         method: "PATCH",
         body: {
-          name: editForm.name,
-          billingEmail: editForm.billingEmail || null,
-          planId: editForm.planId || undefined,
-          status: editForm.status,
-          instanceLimit: Number(editForm.instanceLimit),
-          messagesPerMonth: Number(editForm.messagesPerMonth),
-          usersLimit: Number(editForm.usersLimit),
-          rateLimitPerMinute: Number(editForm.rateLimitPerMinute)
+          name: editForm.name, billingEmail: editForm.billingEmail || null,
+          planId: editForm.planId || undefined, status: editForm.status,
+          instanceLimit: Number(editForm.instanceLimit), messagesPerMonth: Number(editForm.messagesPerMonth),
+          usersLimit: Number(editForm.usersLimit), rateLimitPerMinute: Number(editForm.rateLimitPerMinute)
         }
       });
-
-      setTenants((current) => current.map((tenant) => (tenant.id === updated.id ? updated : tenant)));
+      setTenants((c) => c.map((t) => (t.id === updated.id ? updated : t)));
       setEditTenantId(null);
-      startTransition(() => {
-        router.refresh();
-      });
+      startTransition(() => { router.refresh(); });
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Falha ao atualizar tenant");
-    } finally {
-      setPendingAction(null);
-    }
+    } finally { setPendingAction(null); }
   };
 
   const submitAiConfig = async () => {
-    if (!aiTenant) {
-      return;
-    }
-
-    setPendingAction("save-ai");
-    setError(null);
-
+    if (!aiTenant) return;
+    setPendingAction("save-ai"); setError(null);
     try {
       const saved = await requestClientApi<AdminTenantAiConfig>(`/admin/tenants/${aiTenant.id}/ai`, {
         method: "PUT",
         body: {
-          provider: aiForm.provider,
-          baseUrl: aiForm.baseUrl.trim(),
-          model: aiForm.model.trim(),
-          apiKey: aiForm.apiKey.trim() || undefined,
+          provider: aiForm.provider, baseUrl: aiForm.baseUrl.trim(),
+          model: aiForm.model.trim(), apiKey: aiForm.apiKey.trim() || undefined,
           isActive: aiForm.isActive
         }
       });
-
       setAiForm(buildAiForm(saved));
-      setTenants((current) =>
-        current.map((tenant) =>
-          tenant.id === aiTenant.id
-            ? {
-                ...tenant,
-                aiConfigured: saved.isConfigured,
-                aiProvider: saved.provider,
-                aiModel: saved.model
-              }
-            : tenant
-        )
-      );
-      startTransition(() => {
-        router.refresh();
-      });
+      setTenants((c) => c.map((t) =>
+        t.id === aiTenant.id
+          ? { ...t, aiConfigured: saved.isConfigured, aiProvider: saved.provider, aiModel: saved.model }
+          : t
+      ));
+      startTransition(() => { router.refresh(); });
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Falha ao salvar a configuracao de IA");
-    } finally {
-      setPendingAction(null);
-    }
+      setError(caught instanceof Error ? caught.message : "Falha ao salvar IA");
+    } finally { setPendingAction(null); }
   };
 
   const removeTenant = async (tenant: AdminTenantSummary) => {
-    if (!window.confirm(`Excluir o tenant ${tenant.name}? Essa acao remove o schema dedicado.`)) {
-      return;
-    }
-
-    setPendingAction("delete");
-    setError(null);
-
+    if (!window.confirm(`Excluir o tenant ${tenant.name}? Essa ação remove o schema dedicado.`)) return;
+    setPendingAction("delete"); setError(null);
     try {
-      await requestClientApi(`/admin/tenants/${tenant.id}`, {
-        method: "DELETE"
-      });
-      setTenants((current) => current.filter((currentTenant) => currentTenant.id !== tenant.id));
-      startTransition(() => {
-        router.refresh();
-      });
+      await requestClientApi(`/admin/tenants/${tenant.id}`, { method: "DELETE" });
+      setTenants((c) => c.filter((t) => t.id !== tenant.id));
+      startTransition(() => { router.refresh(); });
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Falha ao excluir tenant");
-    } finally {
-      setPendingAction(null);
-    }
+    } finally { setPendingAction(null); }
   };
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-        <div className="max-w-3xl space-y-2">
-          <p className="control-kicker text-slate-400">Tenants</p>
-          <h2 className="text-3xl font-semibold text-white">Cadastro operacional pronto para venda</h2>
-          <p className="text-sm leading-7 text-slate-300">
-            Crie clientes, escolha o plano, ajuste limites e entregue o link de primeiro acesso sem sair do control plane.
-          </p>
+    <div className="space-y-5 animate-fade-in">
+      {/* Toolbar */}
+      <div className="flex flex-wrap items-center gap-3 justify-between">
+        <div className="relative flex-1 max-w-sm">
+          <Search aria-hidden="true" className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[var(--text-tertiary)]" />
+          <input
+            type="search"
+            placeholder="Buscar tenant…"
+            value={search}
+            onChange={(e) => { setSearch(e.target.value); setPage(0); }}
+            className={[
+              "h-11 w-full rounded-[var(--radius-md)] border border-[var(--border-default)] bg-[var(--bg-tertiary)]",
+              "pl-9 pr-3 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)]",
+              "transition-[border-color] duration-150 focus:outline-none focus:border-[var(--accent-blue)]"
+            ].join(" ")}
+          />
         </div>
-        <Button className="rounded-2xl" onClick={() => setCreateOpen(true)}>
-          Novo tenant
+        <Button variant="primary" size="md" onClick={() => setCreateOpen(true)}>
+          <Plus aria-hidden="true" className="h-4 w-4" /> Novo tenant
         </Button>
       </div>
 
-      {successLink ? (
-        <Card className="surface-card">
-          <CardHeader>
-            <CardDescription className="font-[var(--font-mono)] uppercase tracking-[0.24em] text-slate-500">Primeiro acesso</CardDescription>
-            <CardTitle className="text-2xl text-slate-950">Link gerado para o cliente</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3 text-sm leading-7 text-slate-600">
-            <div className="list-row-light rounded-[22px] p-4">
-              <p className="control-kicker text-slate-400">URL</p>
-              <p className="mt-2 break-all text-slate-950">{successLink}</p>
-            </div>
-            <div className="flex flex-wrap gap-3">
-              <Button className="rounded-2xl" onClick={() => void navigator.clipboard.writeText(successLink)} variant="secondary">
-                Copiar link
-              </Button>
-              <Button className="rounded-2xl" onClick={() => setSuccessLink(null)} variant="ghost">
-                Fechar aviso
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      ) : null}
+      {/* Error */}
+      {error && (
+        <div className="rounded-[var(--radius-md)] border border-[var(--accent-red)]/20 bg-[var(--accent-red)]/8 px-4 py-3 text-sm text-[var(--accent-red)]" role="alert">
+          {error}
+        </div>
+      )}
 
-      {error ? <p className="rounded-[20px] border border-rose-400/25 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">{error}</p> : null}
+      {/* Success link */}
+      {successLink && (
+        <div className="rounded-[var(--radius-lg)] border border-[var(--accent-green)]/20 bg-[var(--accent-green)]/8 p-5 space-y-3">
+          <p className="text-[10px] font-mono uppercase tracking-widest text-[var(--accent-green)]">Link de primeiro acesso</p>
+          <p className="text-sm text-[var(--text-primary)] break-all font-mono">{successLink}</p>
+          <div className="flex gap-3">
+            <Button variant="secondary" size="sm" onClick={() => void navigator.clipboard.writeText(successLink)}>
+              Copiar link
+            </Button>
+            <Button variant="ghost" size="sm" onClick={() => setSuccessLink(null)}>
+              Fechar
+            </Button>
+          </div>
+        </div>
+      )}
 
-      <div className="grid gap-5 xl:grid-cols-2">
-        {sortedTenants.map((tenant) => {
-          const usage = Math.round((tenant.messagesThisMonth / Math.max(tenant.messagesPerMonth, 1)) * 100);
-          const plan = plans.find((item) => item.id === tenant.plan?.id) ?? null;
+      {/* Table */}
+      <div className="rounded-[var(--radius-lg)] border border-[var(--border-subtle)] bg-[var(--bg-secondary)] overflow-hidden">
+        {/* Table head */}
+        <div className="grid grid-cols-[1fr_auto_auto_auto_auto] gap-4 px-5 py-3 border-b border-[var(--border-subtle)] text-[10px] font-mono uppercase tracking-widest text-[var(--text-tertiary)]">
+          <span>Tenant</span>
+          <span className="hidden sm:block text-right">Instâncias</span>
+          <span className="hidden md:block text-right">Uso/mês</span>
+          <span className="text-right">Status</span>
+          <span className="text-right">Ações</span>
+        </div>
 
-          return (
-            <Card className="surface-card-dark text-white" key={tenant.id}>
-              <CardHeader className="border-b border-white/8">
-                <div className="flex items-start justify-between gap-4">
-                  <div>
-                    <CardTitle className="text-2xl text-white">{tenant.name}</CardTitle>
-                    <CardDescription className="mt-2 font-[var(--font-mono)] uppercase tracking-[0.24em] text-slate-400">
-                      {tenant.slug}
-                    </CardDescription>
+        {/* Rows */}
+        {pagedTenants.length === 0 ? (
+          <div className="px-5 py-12 text-center text-sm text-[var(--text-tertiary)]">
+            {search ? "Nenhum tenant encontrado para esse filtro." : "Nenhum tenant cadastrado ainda."}
+          </div>
+        ) : (
+          <div className="divide-y divide-[var(--border-subtle)]">
+            {pagedTenants.map((tenant, idx) => {
+              const usage = Math.round((tenant.messagesThisMonth / Math.max(tenant.messagesPerMonth, 1)) * 100);
+              return (
+                <div
+                  key={tenant.id}
+                  className="grid grid-cols-[1fr_auto_auto_auto_auto] gap-4 items-center px-5 py-4 hover:bg-[var(--bg-hover)] transition-colors duration-150 animate-fade-in stagger-item cursor-pointer"
+                  style={{ animationDelay: `${idx * 30}ms` }}
+                >
+                  {/* Name + slug */}
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-[var(--text-primary)] truncate">{tenant.name}</p>
+                    <p className="text-xs text-[var(--text-tertiary)] font-mono truncate">{tenant.slug}</p>
+                    {tenant.aiConfigured && (
+                      <span className="text-[10px] text-[var(--accent-blue)] font-mono mt-0.5 block">
+                        IA: {tenant.aiProvider} · {tenant.aiModel ?? "—"}
+                      </span>
+                    )}
                   </div>
-                  <span className="status-pill bg-white/10 text-slate-200">{tenant.status}</span>
+
+                  {/* Active instances */}
+                  <div className="hidden sm:flex flex-col items-end">
+                    <span className="text-sm font-semibold text-[var(--text-primary)]">{tenant.activeInstances}</span>
+                    <span className="text-[10px] text-[var(--text-tertiary)] font-mono">instâncias</span>
+                  </div>
+
+                  {/* Usage */}
+                  <div className="hidden md:flex flex-col items-end gap-1.5 min-w-[80px]">
+                    <span className="text-xs font-mono text-[var(--text-secondary)]">{usage}%</span>
+                    <div className="progress-track w-20">
+                      <div className="progress-fill" style={{ width: `${Math.max(2, Math.min(100, usage))}%` }} />
+                    </div>
+                  </div>
+
+                  {/* Status badge */}
+                  <Badge variant={statusVariant[tenant.status] ?? "neutral"} pulse={tenant.status === "ACTIVE"}>
+                    {tenant.status}
+                  </Badge>
+
+                  {/* Actions */}
+                  <div className="flex items-center gap-1.5 flex-shrink-0">
+                    <button
+                      onClick={() => openEdit(tenant)}
+                      aria-label={`Editar ${tenant.name}`}
+                      className="h-8 w-8 flex items-center justify-center rounded-[var(--radius-md)] text-[var(--text-tertiary)] hover:bg-[var(--bg-active)] hover:text-[var(--text-primary)] transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-blue)]"
+                    >
+                      <Pencil aria-hidden="true" className="h-3.5 w-3.5" />
+                    </button>
+                    <button
+                      onClick={() => void openAiManager(tenant)}
+                      aria-label={`IA de ${tenant.name}`}
+                      disabled={pendingAction === "load-ai"}
+                      className="h-8 w-8 flex items-center justify-center rounded-[var(--radius-md)] text-[var(--text-tertiary)] hover:bg-[var(--bg-active)] hover:text-[var(--accent-blue)] transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-blue)]"
+                    >
+                      <Bot aria-hidden="true" className="h-3.5 w-3.5" />
+                    </button>
+                    <button
+                      onClick={() => void removeTenant(tenant)}
+                      aria-label={`Excluir ${tenant.name}`}
+                      className="h-8 w-8 flex items-center justify-center rounded-[var(--radius-md)] text-[var(--text-tertiary)] hover:bg-[var(--accent-red)]/10 hover:text-[var(--accent-red)] transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-red)]"
+                    >
+                      <Trash2 aria-hidden="true" className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
                 </div>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="grid gap-4 md:grid-cols-2">
-                  <div className="list-row-dark rounded-[22px] p-4">
-                    <p className="control-kicker text-slate-400">Plano</p>
-                    <p className="mt-3 text-lg font-semibold text-white">{plan?.name ?? tenant.plan?.name ?? "Sem plano"}</p>
-                    <p className="mt-2 text-sm text-slate-300">
-                      {plan ? formatCurrency(plan.priceCents, plan.currency) : "Sem valor configurado"}
-                    </p>
-                  </div>
-                  <div className="list-row-dark rounded-[22px] p-4">
-                    <p className="control-kicker text-slate-400">Capacidade</p>
-                    <p className="mt-3 text-lg font-semibold text-white">{formatNumber(tenant.messagesPerMonth)} mensagens/mes</p>
-                    <p className="mt-2 text-sm text-slate-300">{tenant.usersLimit} usuarios internos</p>
-                  </div>
-                </div>
+              );
+            })}
+          </div>
+        )}
 
-                <div>
-                  <div className="flex items-center justify-between text-sm text-slate-300">
-                    <span>{formatNumber(tenant.messagesThisMonth)} usadas no mes</span>
-                    <span className="font-[var(--font-mono)]">{usage}% do plano</span>
-                  </div>
-                  <div className="progress-track mt-3">
-                    <div className="progress-fill" style={{ width: `${Math.max(8, Math.min(100, usage))}%` }} />
-                  </div>
-                </div>
-
-                <div className="grid gap-3 text-sm text-slate-300 md:grid-cols-2">
-                  <div className="list-row-dark rounded-[20px] px-4 py-3">Instancias ativas: {tenant.activeInstances}</div>
-                  <div className="list-row-dark rounded-[20px] px-4 py-3">Billing: {tenant.billingEmail ?? "nao informado"}</div>
-                  <div className="list-row-dark rounded-[20px] px-4 py-3">
-                    IA: {tenant.aiConfigured ? `${tenant.aiProvider} / ${tenant.aiModel ?? "modelo nao informado"}` : "nao configurada"}
-                  </div>
-                  <div className="list-row-dark rounded-[20px] px-4 py-3">Rate limit: {tenant.rateLimitPerMinute}/min</div>
-                </div>
-
-                <div className="flex flex-wrap gap-3">
-                  <Button className="rounded-2xl" onClick={() => openEdit(tenant)} variant="secondary">
-                    Editar
-                  </Button>
-                  <Button className="rounded-2xl" onClick={() => void openAiManager(tenant)} variant="secondary">
-                    IA
-                  </Button>
-                  <Button className="rounded-2xl" onClick={() => void removeTenant(tenant)} variant="destructive">
-                    Excluir
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          );
-        })}
+        {/* Pagination */}
+        {totalPages > 1 && (
+          <div className="flex items-center justify-between px-5 py-3 border-t border-[var(--border-subtle)]">
+            <Button variant="ghost" size="sm" disabled={page === 0} onClick={() => setPage((p) => p - 1)}>
+              ← Anterior
+            </Button>
+            <span className="text-xs text-[var(--text-tertiary)] font-mono">
+              {page + 1} de {totalPages}
+            </span>
+            <Button variant="ghost" size="sm" disabled={page >= totalPages - 1} onClick={() => setPage((p) => p + 1)}>
+              Próxima →
+            </Button>
+          </div>
+        )}
       </div>
 
+      {/* ── CREATE DIALOG ─────────────────────────────────────────────── */}
       <Dialog
-        description="Provisiona schema, convite inicial e limites do plano para o novo cliente."
+        title="Novo tenant"
+        description="Provisiona schema, convite inicial e limites do plano."
+        open={createOpen}
+        onClose={resetCreate}
         footer={
           <>
-            <Button onClick={resetCreate} variant="ghost">
-              Cancelar
-            </Button>
-            <Button disabled={pendingAction !== null} onClick={() => void submitCreate()}>
-              {pendingAction === "create" ? "Criando..." : "Criar tenant"}
+            <Button variant="ghost" size="md" onClick={resetCreate}>Cancelar</Button>
+            <Button variant="primary" size="md" loading={pendingAction === "create"} disabled={pendingAction !== null} onClick={() => void submitCreate()}>
+              Criar tenant
             </Button>
           </>
         }
-        onClose={resetCreate}
-        open={createOpen}
-        title="Novo tenant"
       >
         <div className="grid gap-4">
-          <label className="space-y-2 text-sm">
-            <span className="text-slate-300">Nome do cliente</span>
-            <Input
-              onChange={(event) => {
-                const nextName = event.target.value;
-                setCreateForm((current) => ({
-                  ...current,
-                  name: nextName,
-                  slug: current.slug ? current.slug : slugify(nextName)
-                }));
-              }}
-              placeholder="Acme Commerce"
-              value={createForm.name}
-            />
-          </label>
-          <label className="space-y-2 text-sm">
-            <span className="text-slate-300">Slug</span>
-            <Input
-              onChange={(event) => setCreateForm((current) => ({ ...current, slug: slugify(event.target.value) }))}
-              placeholder="acme-commerce"
-              value={createForm.slug}
-            />
-          </label>
-          <label className="space-y-2 text-sm">
-            <span className="text-slate-300">Plano</span>
-            <select
-              className={selectClassName}
-              onChange={(event) => setCreateForm((current) => ({ ...current, planId: event.target.value }))}
-              value={createForm.planId}
-            >
+          {[
+            { label: "Nome do cliente",      type: "text",           placeholder: "Acme Commerce",      field: "name",              transform: (v: string) => v },
+            { label: "Slug",                 type: "text",           placeholder: "acme-commerce",       field: "slug",              transform: slugify },
+            { label: "Email do primeiro admin", type: "email",       placeholder: "admin@cliente.com",  field: "firstAdminEmail",   transform: (v: string) => v },
+            { label: "Email de billing",     type: "email",          placeholder: "fin@cliente.com",    field: "billingEmail",      transform: (v: string) => v },
+            { label: "Próximo vencimento",   type: "datetime-local", placeholder: "",                   field: "nextDueAt",         transform: (v: string) => v }
+          ].map(({ label, type, placeholder, field, transform }) => (
+            <div key={field}>
+              <label className="text-xs font-medium text-[var(--text-secondary)] mb-1.5 block">{label}</label>
+              <input
+                type={type}
+                placeholder={placeholder}
+                className={fieldClass}
+                value={String(createForm[field as keyof TenantCreateFormState] ?? "")}
+                onChange={(e) => {
+                  const val = transform(e.target.value);
+                  setCreateForm((c) => {
+                    const next = { ...c, [field]: val };
+                    if (field === "name" && !c.slug) next.slug = slugify(val);
+                    return next;
+                  });
+                }}
+              />
+            </div>
+          ))}
+          <div>
+            <label className="text-xs font-medium text-[var(--text-secondary)] mb-1.5 block">Plano</label>
+            <select className={selectClass} value={createForm.planId}
+              onChange={(e) => setCreateForm((c) => ({ ...c, planId: e.target.value }))}>
               {plans.map((plan) => (
-                <option key={plan.id} value={plan.id}>
-                  {plan.name} · {formatCurrency(plan.priceCents, plan.currency)}
-                </option>
+                <option key={plan.id} value={plan.id}>{plan.name} · {formatCurrency(plan.priceCents, plan.currency)}</option>
               ))}
             </select>
-          </label>
-          <label className="space-y-2 text-sm">
-            <span className="text-slate-300">Email do primeiro admin</span>
-            <Input
-              onChange={(event) => setCreateForm((current) => ({ ...current, firstAdminEmail: event.target.value }))}
-              placeholder="admin@cliente.com"
-              type="email"
-              value={createForm.firstAdminEmail}
-            />
-          </label>
-          <label className="space-y-2 text-sm">
-            <span className="text-slate-300">Email de billing</span>
-            <Input
-              onChange={(event) => setCreateForm((current) => ({ ...current, billingEmail: event.target.value }))}
-              placeholder="financeiro@cliente.com"
-              type="email"
-              value={createForm.billingEmail}
-            />
-          </label>
-          <label className="space-y-2 text-sm">
-            <span className="text-slate-300">Próximo vencimento</span>
-            <Input
-              onChange={(event) => setCreateForm((current) => ({ ...current, nextDueAt: event.target.value }))}
-              type="datetime-local"
-              value={createForm.nextDueAt}
-            />
-          </label>
+          </div>
         </div>
       </Dialog>
 
+      {/* ── EDIT DIALOG ───────────────────────────────────────────────── */}
       <Dialog
-        description="Ajuste status, plano e limites sem sair do control plane."
+        title={editingTenant ? `Editar ${editingTenant.name}` : "Editar tenant"}
+        description="Ajuste status, plano e limites."
+        open={Boolean(editingTenant)}
+        onClose={() => setEditTenantId(null)}
         footer={
           <>
-            <Button onClick={() => setEditTenantId(null)} variant="ghost">
-              Cancelar
-            </Button>
-            <Button disabled={pendingAction !== null || !editingTenant} onClick={() => void submitUpdate()}>
-              {pendingAction === "update" ? "Salvando..." : "Salvar alteracoes"}
+            <Button variant="ghost" size="md" onClick={() => setEditTenantId(null)}>Cancelar</Button>
+            <Button variant="primary" size="md" loading={pendingAction === "update"} disabled={pendingAction !== null || !editingTenant} onClick={() => void submitUpdate()}>
+              Salvar
             </Button>
           </>
         }
-        onClose={() => setEditTenantId(null)}
-        open={Boolean(editingTenant)}
-        title={editingTenant ? `Editar ${editingTenant.name}` : "Editar tenant"}
       >
         <div className="grid gap-4">
-          <label className="space-y-2 text-sm">
-            <span className="text-slate-300">Nome</span>
-            <Input onChange={(event) => setEditForm((current) => ({ ...current, name: event.target.value }))} value={editForm.name} />
-          </label>
-          <label className="space-y-2 text-sm">
-            <span className="text-slate-300">Status</span>
-            <select
-              className={selectClassName}
-              onChange={(event) => setEditForm((current) => ({ ...current, status: event.target.value }))}
-              value={editForm.status}
-            >
+          <div>
+            <label className="text-xs font-medium text-[var(--text-secondary)] mb-1.5 block">Nome</label>
+            <input type="text" className={fieldClass} value={editForm.name}
+              onChange={(e) => setEditForm((c) => ({ ...c, name: e.target.value }))} />
+          </div>
+          <div>
+            <label className="text-xs font-medium text-[var(--text-secondary)] mb-1.5 block">Status</label>
+            <select className={selectClass} value={editForm.status}
+              onChange={(e) => setEditForm((c) => ({ ...c, status: e.target.value }))}>
               <option value="ACTIVE">ACTIVE</option>
               <option value="SUSPENDED">SUSPENDED</option>
               <option value="CANCELED">CANCELED</option>
             </select>
-          </label>
-          <label className="space-y-2 text-sm">
-            <span className="text-slate-300">Plano</span>
-            <select
-              className={selectClassName}
-              onChange={(event) => setEditForm((current) => ({ ...current, planId: event.target.value }))}
-              value={editForm.planId}
-            >
+          </div>
+          <div>
+            <label className="text-xs font-medium text-[var(--text-secondary)] mb-1.5 block">Plano</label>
+            <select className={selectClass} value={editForm.planId}
+              onChange={(e) => setEditForm((c) => ({ ...c, planId: e.target.value }))}>
               <option value="">Manter atual</option>
               {plans.map((plan) => (
-                <option key={plan.id} value={plan.id}>
-                  {plan.name}
-                </option>
+                <option key={plan.id} value={plan.id}>{plan.name}</option>
               ))}
             </select>
-          </label>
-          <label className="space-y-2 text-sm">
-            <span className="text-slate-300">Billing email</span>
-            <Input
-              onChange={(event) => setEditForm((current) => ({ ...current, billingEmail: event.target.value }))}
-              type="email"
-              value={editForm.billingEmail}
-            />
-          </label>
-          <div className="grid gap-4 sm:grid-cols-2">
-            <label className="space-y-2 text-sm">
-              <span className="text-slate-300">Limite de instancias</span>
-              <Input
-                min={1}
-                onChange={(event) => setEditForm((current) => ({ ...current, instanceLimit: event.target.value }))}
-                type="number"
-                value={editForm.instanceLimit}
-              />
-            </label>
-            <label className="space-y-2 text-sm">
-              <span className="text-slate-300">Usuarios</span>
-              <Input
-                min={1}
-                onChange={(event) => setEditForm((current) => ({ ...current, usersLimit: event.target.value }))}
-                type="number"
-                value={editForm.usersLimit}
-              />
-            </label>
-            <label className="space-y-2 text-sm">
-              <span className="text-slate-300">Mensagens/mes</span>
-              <Input
-                min={1}
-                onChange={(event) => setEditForm((current) => ({ ...current, messagesPerMonth: event.target.value }))}
-                type="number"
-                value={editForm.messagesPerMonth}
-              />
-            </label>
-            <label className="space-y-2 text-sm">
-              <span className="text-slate-300">Rate limit/min</span>
-              <Input
-                min={1}
-                onChange={(event) => setEditForm((current) => ({ ...current, rateLimitPerMinute: event.target.value }))}
-                type="number"
-                value={editForm.rateLimitPerMinute}
-              />
-            </label>
+          </div>
+          <div>
+            <label className="text-xs font-medium text-[var(--text-secondary)] mb-1.5 block">Billing email</label>
+            <input type="email" className={fieldClass} value={editForm.billingEmail}
+              onChange={(e) => setEditForm((c) => ({ ...c, billingEmail: e.target.value }))} />
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            {[
+              { label: "Limite instâncias",  field: "instanceLimit" },
+              { label: "Usuários",          field: "usersLimit" },
+              { label: "Mensagens/mês",     field: "messagesPerMonth" },
+              { label: "Rate limit/min",    field: "rateLimitPerMinute" }
+            ].map(({ label, field }) => (
+              <div key={field}>
+                <label className="text-xs font-medium text-[var(--text-secondary)] mb-1.5 block">{label}</label>
+                <input type="number" min={1} className={fieldClass}
+                  value={String(editForm[field as keyof TenantEditFormState] ?? "")}
+                  onChange={(e) => setEditForm((c) => ({ ...c, [field]: e.target.value }))} />
+              </div>
+            ))}
           </div>
         </div>
       </Dialog>
 
+      {/* ── AI CONFIG DIALOG ──────────────────────────────────────────── */}
       <Dialog
-        description="Defina a conta de IA do tenant no control plane. O cliente so recebe o modo do bot e as regras."
+        title={aiTenant ? `IA — ${aiTenant.name}` : "IA do tenant"}
+        description="Provedor, modelo e chave ficam no control plane. O cliente só vê o modo do bot."
+        open={Boolean(aiTenant)}
+        onClose={() => { setAiTenantId(null); setAiForm(buildAiForm()); }}
         footer={
           <>
-            <Button
-              onClick={() => {
-                setAiTenantId(null);
-                setAiForm(buildAiForm());
-              }}
-              variant="ghost"
-            >
-              Cancelar
-            </Button>
-            <Button disabled={pendingAction !== null || !aiTenant} onClick={() => void submitAiConfig()}>
-              {pendingAction === "save-ai" ? "Salvando..." : "Salvar IA"}
+            <Button variant="ghost" size="md" onClick={() => { setAiTenantId(null); setAiForm(buildAiForm()); }}>Cancelar</Button>
+            <Button variant="primary" size="md" loading={pendingAction === "save-ai"} disabled={pendingAction !== null || !aiTenant} onClick={() => void submitAiConfig()}>
+              Salvar IA
             </Button>
           </>
         }
-        onClose={() => {
-          setAiTenantId(null);
-          setAiForm(buildAiForm());
-        }}
-        open={Boolean(aiTenant)}
-        title={aiTenant ? `IA do tenant ${aiTenant.name}` : "IA do tenant"}
       >
         <div className="grid gap-4">
-          <div className="rounded-[20px] border border-slate-700 bg-slate-900/70 px-4 py-3 text-sm text-slate-300">
-            O tenant vai ver apenas o modo de uso da IA no chatbot. Provedor, modelo e chave ficam sob controle da InfraCode.
+          <div className="rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--bg-tertiary)] px-4 py-3 text-xs text-[var(--text-secondary)]">
+            O tenant vê apenas o modo de uso da IA no chatbot. Credenciais ficam sob controle da InfraCode.
           </div>
-
-          <label className="space-y-2 text-sm">
-            <span className="text-slate-300">Provedor</span>
-            <select
-              className={selectClassName}
-              onChange={(event) => {
-                const provider = event.target.value as ChatbotAiProvider;
+          <div>
+            <label className="text-xs font-medium text-[var(--text-secondary)] mb-1.5 block">Provedor</label>
+            <select className={selectClass} value={aiForm.provider}
+              onChange={(e) => {
+                const provider = e.target.value as ChatbotAiProvider;
                 const defaults = aiProviderDefaults[provider];
-                setAiForm((current) => ({
-                  ...current,
-                  provider,
-                  baseUrl: defaults.baseUrl,
-                  model: defaults.model
-                }));
-              }}
-              value={aiForm.provider}
-            >
+                setAiForm((c) => ({ ...c, provider, baseUrl: defaults.baseUrl, model: defaults.model }));
+              }}>
               <option value="ANTHROPIC">Anthropic</option>
               <option value="GROQ">Groq</option>
-              <option value="OPENAI_COMPATIBLE">OpenAI compativel</option>
+              <option value="OPENAI_COMPATIBLE">OpenAI compatível</option>
             </select>
-          </label>
-
-          <div className="grid gap-4 sm:grid-cols-2">
-            <label className="space-y-2 text-sm">
-              <span className="text-slate-300">Base URL</span>
-              <Input onChange={(event) => setAiForm((current) => ({ ...current, baseUrl: event.target.value }))} value={aiForm.baseUrl} />
-            </label>
-            <label className="space-y-2 text-sm">
-              <span className="text-slate-300">Modelo</span>
-              <Input onChange={(event) => setAiForm((current) => ({ ...current, model: event.target.value }))} value={aiForm.model} />
-            </label>
           </div>
-
-          <label className="space-y-2 text-sm">
-            <span className="text-slate-300">API key {aiForm.hasApiKey ? "(ja cadastrada)" : ""}</span>
-            <Input
-              onChange={(event) => setAiForm((current) => ({ ...current, apiKey: event.target.value }))}
-              placeholder={aiForm.hasApiKey ? "Preencha apenas se quiser trocar a chave" : "gsk_..."}
-              type="password"
-              value={aiForm.apiKey}
-            />
-          </label>
-
-          <label className="flex items-center gap-3 rounded-[20px] border border-slate-700 bg-slate-900/70 px-4 py-3 text-sm text-slate-300">
-            <input
-              checked={aiForm.isActive}
-              onChange={(event) => setAiForm((current) => ({ ...current, isActive: event.target.checked }))}
-              type="checkbox"
-            />
-            Provedor ativo para o tenant
-          </label>
-
-          <div className="grid gap-3 text-sm text-slate-300 sm:grid-cols-2">
-            <div className="rounded-[20px] border border-slate-700 bg-slate-900/70 px-4 py-3">
-              Status: {aiForm.isConfigured ? "configurado" : "pendente de chave"}
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div>
+              <label className="text-xs font-medium text-[var(--text-secondary)] mb-1.5 block">Base URL</label>
+              <input type="text" className={fieldClass} value={aiForm.baseUrl}
+                onChange={(e) => setAiForm((c) => ({ ...c, baseUrl: e.target.value }))} />
             </div>
-            <div className="rounded-[20px] border border-slate-700 bg-slate-900/70 px-4 py-3">
-              Ultima atualizacao: {aiForm.updatedAt ? new Date(aiForm.updatedAt).toLocaleString("pt-BR") : "nunca"}
+            <div>
+              <label className="text-xs font-medium text-[var(--text-secondary)] mb-1.5 block">Modelo</label>
+              <input type="text" className={fieldClass} value={aiForm.model}
+                onChange={(e) => setAiForm((c) => ({ ...c, model: e.target.value }))} />
+            </div>
+          </div>
+          <div>
+            <label className="text-xs font-medium text-[var(--text-secondary)] mb-1.5 block">
+              API Key {aiForm.hasApiKey ? "(já cadastrada)" : ""}
+            </label>
+            <input type="password" className={fieldClass}
+              placeholder={aiForm.hasApiKey ? "Preencha apenas se quiser trocar" : "gsk_..."}
+              value={aiForm.apiKey}
+              onChange={(e) => setAiForm((c) => ({ ...c, apiKey: e.target.value }))} />
+          </div>
+          <label className="flex items-center gap-2.5 cursor-pointer">
+            <span className="relative inline-flex h-6 w-11 items-center rounded-full cursor-pointer transition-colors duration-200"
+                style={{ background: aiForm.isActive ? "var(--accent-green)" : "var(--bg-active)" }}>
+              <input type="checkbox" className="sr-only" checked={aiForm.isActive}
+                onChange={(e) => setAiForm((c) => ({ ...c, isActive: e.target.checked }))} />
+              <span className={["inline-block h-4 w-4 rounded-full bg-white shadow-sm transition-transform duration-200",
+                aiForm.isActive ? "translate-x-6" : "translate-x-1"].join(" ")} />
+            </span>
+            <span className="text-sm text-[var(--text-secondary)] select-none">Provedor ativo para o tenant</span>
+          </label>
+          <div className="grid gap-2 sm:grid-cols-2 text-xs font-mono">
+            <div className="px-3 py-2 rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--bg-tertiary)] text-[var(--text-secondary)]">
+              Status: <span className="text-[var(--text-primary)]">{aiForm.isConfigured ? "configurado" : "pendente"}</span>
+            </div>
+            <div className="px-3 py-2 rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--bg-tertiary)] text-[var(--text-secondary)]">
+              Atualizado: <span className="text-[var(--text-primary)]">{aiForm.updatedAt ? new Date(aiForm.updatedAt).toLocaleString("pt-BR") : "nunca"}</span>
             </div>
           </div>
         </div>

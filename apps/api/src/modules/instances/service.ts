@@ -708,27 +708,55 @@ export class InstanceOrchestrator {
       return;
     }
 
+    const existingContactByRemoteJid = await prisma.contact.findFirst({
+      where: {
+        instanceId: instance.id,
+        fields: {
+          path: ["lastRemoteJid"],
+          equals: event.remoteJid
+        }
+      }
+    });
+    const storedContactPhoneNumber = existingContactByRemoteJid?.phoneNumber ?? remoteNumber;
+    const existingContactByPhoneNumber =
+      existingContactByRemoteJid ??
+      (await prisma.contact.findUnique({
+        where: {
+          instanceId_phoneNumber: {
+            instanceId: instance.id,
+            phoneNumber: storedContactPhoneNumber
+          }
+        }
+      }));
+    const nextContactFields = {
+      ...(existingContactByPhoneNumber?.fields && typeof existingContactByPhoneNumber.fields === "object"
+        ? (existingContactByPhoneNumber.fields as Record<string, unknown>)
+        : {}),
+      lastRemoteJid: event.remoteJid
+    } as Prisma.InputJsonValue;
     const contact = await prisma.contact.upsert({
       where: {
         instanceId_phoneNumber: {
           instanceId: instance.id,
-          phoneNumber: remoteNumber
+          phoneNumber: storedContactPhoneNumber
         }
       },
       update: {
-        displayName: (event.payload.pushName as string | undefined) ?? undefined
+        displayName: (event.payload.pushName as string | undefined) ?? undefined,
+        fields: nextContactFields
       },
       create: {
         instanceId: instance.id,
-        phoneNumber: remoteNumber,
-        displayName: (event.payload.pushName as string | undefined) ?? null
+        phoneNumber: storedContactPhoneNumber,
+        displayName: (event.payload.pushName as string | undefined) ?? null,
+        fields: nextContactFields
       }
     });
-    const resolvedContactNumber = contact.phoneNumber || remoteNumber;
-    let clientMemory = await this.clientMemoryService.findByPhone(tenantId, contact.phoneNumber);
+    const resolvedContactNumber = contact.phoneNumber;
+    let clientMemory = await this.clientMemoryService.findByPhone(tenantId, resolvedContactNumber);
 
     try {
-      await this.clientMemoryService.upsert(tenantId, contact.phoneNumber, {
+      await this.clientMemoryService.upsert(tenantId, resolvedContactNumber, {
         name: contact.displayName?.trim() || undefined,
         lastContactAt: new Date()
       });
@@ -868,7 +896,7 @@ export class InstanceOrchestrator {
 
       if (this.isFollowUpCandidateMessage(normalizedInputText)) {
         try {
-          clientMemory = await this.clientMemoryService.upsert(tenantId, contact.phoneNumber, {
+          clientMemory = await this.clientMemoryService.upsert(tenantId, resolvedContactNumber, {
             status: "lead_frio",
             tags: ["follow_up"]
           });
@@ -987,10 +1015,11 @@ export class InstanceOrchestrator {
 
       if (parsedLeadSummary) {
         try {
-          clientMemory = await this.clientMemoryService.upsert(tenantId, contact.phoneNumber, {
+          clientMemory = await this.clientMemoryService.upsert(tenantId, resolvedContactNumber, {
             name: parsedLeadSummary.name ?? undefined,
             projectDescription: parsedLeadSummary.problemDescription ?? undefined,
             serviceInterest: parsedLeadSummary.serviceInterest ?? undefined,
+            notes: this.mergeClientMemoryNotes(clientMemory?.notes, parsedLeadSummary),
             scheduledAt: parsedLeadSummary.scheduledAt,
             ...(resumoCompleto
               ? {
@@ -1134,6 +1163,8 @@ export class InstanceOrchestrator {
   private parseLeadSummary(resumoLead: string): {
     name: string | null;
     contact: string | null;
+    email: string | null;
+    companyName: string | null;
     problemDescription: string | null;
     serviceInterest: string | null;
     scheduledAt: Date | null;
@@ -1143,6 +1174,8 @@ export class InstanceOrchestrator {
     return {
       name: this.sanitizeLeadField(this.extractLeadField(resumoLead, /^Nome:\s*(.+)$/im)),
       contact: this.sanitizeLeadField(this.extractLeadField(resumoLead, /^Contato:\s*(.+)$/im)),
+      email: this.sanitizeLeadField(this.extractLeadField(resumoLead, /^E-?mail:\s*(.+)$/im)),
+      companyName: this.sanitizeLeadField(this.extractLeadField(resumoLead, /^Empresa:\s*(.+)$/im)),
       problemDescription: this.sanitizeLeadField(this.extractLeadField(resumoLead, /^Problema:\s*(.+)$/im)),
       serviceInterest: this.sanitizeLeadField(this.extractLeadField(resumoLead, /^Servi(?:Ã§|ç|c)o de interesse:\s*(.+)$/im)),
       scheduledAt: this.parseLeadScheduledAt(scheduledLabel)
@@ -1151,6 +1184,37 @@ export class InstanceOrchestrator {
 
   private extractLeadField(summary: string, pattern: RegExp): string | null {
     return summary.match(pattern)?.[1]?.trim() ?? null;
+  }
+
+  private mergeClientMemoryNotes(
+    existingNotes: string | null | undefined,
+    parsedLeadSummary: {
+      email: string | null;
+      companyName: string | null;
+    }
+  ): string | undefined {
+    const noteLines = [
+      parsedLeadSummary.companyName ? `Empresa: ${parsedLeadSummary.companyName}` : null,
+      parsedLeadSummary.email ? `E-mail: ${parsedLeadSummary.email}` : null
+    ].filter((line): line is string => Boolean(line));
+
+    if (noteLines.length === 0) {
+      return undefined;
+    }
+
+    const existing = existingNotes?.trim();
+
+    if (!existing) {
+      return noteLines.join("\n");
+    }
+
+    const missingLines = noteLines.filter((line) => !existing.includes(line));
+
+    if (missingLines.length === 0) {
+      return existing;
+    }
+
+    return `${existing}\n${missingLines.join("\n")}`;
   }
 
   private sanitizeLeadField(value: string | null): string | null {

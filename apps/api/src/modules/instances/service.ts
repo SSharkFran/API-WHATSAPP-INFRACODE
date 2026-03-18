@@ -3,6 +3,7 @@ import { mkdir, rm } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { Worker } from "node:worker_threads";
 import type {
+  ClientMemory,
   InstanceHealthReport,
   InstanceLogEvent,
   InstanceSummary,
@@ -17,6 +18,7 @@ import type { PlatformPrisma, TenantPrismaRegistry } from "../../lib/database.js
 import { ApiError } from "../../lib/errors.js";
 import type { MetricsService } from "../../lib/metrics.js";
 import { normalizePhoneNumber, toJid } from "../../lib/phone.js";
+import type { ClientMemoryService } from "../chatbot/memory.service.js";
 import type { ChatbotService } from "../chatbot/service.js";
 import type { PlanEnforcementService } from "../platform/plan-enforcement.service.js";
 import type { WebhookService } from "../webhooks/service.js";
@@ -31,6 +33,7 @@ interface InstanceOrchestratorDeps {
   webhookService: WebhookService;
   planEnforcementService: PlanEnforcementService;
   chatbotService: ChatbotService;
+  clientMemoryService: ClientMemoryService;
   fiadoService: FiadoService;
 }
 
@@ -126,6 +129,7 @@ export class InstanceOrchestrator {
   private readonly webhookService: WebhookService;
   private readonly planEnforcementService: PlanEnforcementService;
   private readonly chatbotService: ChatbotService;
+  private readonly clientMemoryService: ClientMemoryService;
   private readonly fiadoService: FiadoService;
   private readonly logEmitter = new EventEmitter();
   private readonly qrEmitter = new EventEmitter();
@@ -141,6 +145,7 @@ export class InstanceOrchestrator {
     this.webhookService = deps.webhookService;
     this.planEnforcementService = deps.planEnforcementService;
     this.chatbotService = deps.chatbotService;
+    this.clientMemoryService = deps.clientMemoryService;
     this.fiadoService = deps.fiadoService;
   }
 
@@ -673,6 +678,7 @@ export class InstanceOrchestrator {
     instance: Instance,
     event: InboundMessageWorkerEvent
   ): Promise<void> {
+    await this.tenantPrismaRegistry.ensureSchema(this.platformPrisma, tenantId);
     const prisma = await this.tenantPrismaRegistry.getClient(tenantId);
     const remoteNumber = normalizePhoneNumber(event.remoteJid.split("@")[0] ?? "");
     const msgText = typeof event.payload.text === "string" ? event.payload.text.trim().toLowerCase() : "";
@@ -716,6 +722,16 @@ export class InstanceOrchestrator {
         displayName: (event.payload.pushName as string | undefined) ?? null
       }
     });
+    let clientMemory = await this.clientMemoryService.findByPhone(tenantId, contact.phoneNumber);
+
+    try {
+      await this.clientMemoryService.upsert(tenantId, contact.phoneNumber, {
+        name: contact.displayName?.trim() || undefined,
+        lastContactAt: new Date()
+      });
+    } catch (memoryError) {
+      console.error("[memory] erro ao atualizar ultimo contato:", memoryError);
+    }
 
     const conversation = await prisma.conversation.findFirst({
       where: {
@@ -847,6 +863,17 @@ export class InstanceOrchestrator {
         return;
       }
 
+      if (this.isFollowUpCandidateMessage(normalizedInputText)) {
+        try {
+          clientMemory = await this.clientMemoryService.upsert(tenantId, contact.phoneNumber, {
+            status: "lead_frio",
+            tags: ["follow_up"]
+          });
+        } catch (memoryError) {
+          console.error("[memory] erro ao marcar lead para follow-up:", memoryError);
+        }
+      }
+
       const chatbotConfig = await prisma.chatbotConfig.findUnique({
         where: {
           instanceId: instance.id
@@ -857,7 +884,8 @@ export class InstanceOrchestrator {
         isFirstContact,
         contactName: contact.displayName,
         phoneNumber: contact.phoneNumber,
-        remoteJid: event.remoteJid
+        remoteJid: event.remoteJid,
+        clientContext: this.buildClientMemoryContext(clientMemory)
       });
 
       console.log("[leads] responseText:", chatbotResult?.responseText?.slice(0, 500));
@@ -880,6 +908,7 @@ export class InstanceOrchestrator {
         matchedRuleId: chatbotResult.matchedRuleId ?? null,
         matchedRuleName: chatbotResult.matchedRuleName ?? null
       };
+      const parsedLeadSummary = resumoLead ? this.parseLeadSummary(resumoLead) : null;
 
       const fiadoEnabled = chatbotConfig?.fiadoEnabled ?? false;
       if (fiadoEnabled && inputText) {
@@ -946,6 +975,25 @@ export class InstanceOrchestrator {
       ];
       const resumoCompleto = camposObrigatorios.every((regex) => regex.test(resumoLead ?? ""));
 
+      if (parsedLeadSummary) {
+        try {
+          clientMemory = await this.clientMemoryService.upsert(tenantId, contact.phoneNumber, {
+            name: parsedLeadSummary.name ?? undefined,
+            projectDescription: parsedLeadSummary.problemDescription ?? undefined,
+            serviceInterest: parsedLeadSummary.serviceInterest ?? undefined,
+            scheduledAt: parsedLeadSummary.scheduledAt,
+            ...(resumoCompleto
+              ? {
+                  status: "lead_quente",
+                  tags: ["follow_up"]
+                }
+              : {})
+          });
+        } catch (memoryError) {
+          console.error("[memory] erro ao atualizar memoria pelo resumo:", memoryError);
+        }
+      }
+
       if (!resumoCompleto) {
         console.log("[leads] resumo incompleto, aguardando mais informações");
       } else {
@@ -990,6 +1038,9 @@ export class InstanceOrchestrator {
         return;
       }
 
+      const delayLeitura = Math.floor(Math.random() * 1000) + 1500;
+      await new Promise((resolve) => setTimeout(resolve, delayLeitura));
+
       if (clientResponseText.includes("|||")) {
         const responseParts = clientResponseText
           .split("|||")
@@ -997,11 +1048,11 @@ export class InstanceOrchestrator {
           .filter(Boolean);
 
         for (const responsePart of responseParts) {
-          await new Promise((resolve) => setTimeout(resolve, Math.floor(Math.random() * 500) + 1000));
           await this.sendAutomatedTextMessage(tenantId, instance.id, remoteNumber, event.remoteJid, responsePart, automationMetadata);
+          const delayDigitacao = Math.floor(Math.random() * 1000) + 1500;
+          await new Promise((resolve) => setTimeout(resolve, delayDigitacao));
         }
       } else {
-        await new Promise((resolve) => setTimeout(resolve, 1000));
         await this.sendAutomatedTextMessage(tenantId, instance.id, remoteNumber, event.remoteJid, clientResponseText, automationMetadata);
       }
     } catch (error) {
@@ -1015,6 +1066,111 @@ export class InstanceOrchestrator {
         timestamp: new Date().toISOString()
       });
     }
+  }
+
+  private buildClientMemoryContext(clientMemory: ClientMemory | null): string {
+    if (!clientMemory) {
+      return "";
+    }
+
+    return [
+      "CONTEXTO DO CLIENTE (use para personalizar o atendimento, mas nao mencione que tem esses dados):",
+      `- Nome registrado: ${clientMemory.name ?? "nao informado"}`,
+      `- E cliente existente: ${clientMemory.isExistingClient ? "SIM" : "NAO ou desconhecido"}`,
+      `- Projeto anterior: ${clientMemory.projectDescription ?? "nenhum registrado"}`,
+      `- Interesse anterior: ${clientMemory.serviceInterest ?? "nenhum registrado"}`,
+      `- Status: ${clientMemory.status}`,
+      `- Tags: ${clientMemory.tags.join(", ") || "nenhuma"}`,
+      `- Observacoes: ${clientMemory.notes ?? "nenhuma"}`
+    ].join("\n");
+  }
+
+  private isFollowUpCandidateMessage(input: string): boolean {
+    if (!input) {
+      return false;
+    }
+
+    return [
+      /\b(?:nao|não)\s+(?:tenho\s+)?interesse\b/i,
+      /\b(?:nao|não)\s+agora\b/i,
+      /\bvou\s+pensar\b/i,
+      /\bdepois\s+eu\s+(?:vejo|falo|retorno)\b/i,
+      /\bte\s+aviso\b/i
+    ].some((pattern) => pattern.test(input));
+  }
+
+  private parseLeadSummary(resumoLead: string): {
+    name: string | null;
+    contact: string | null;
+    problemDescription: string | null;
+    serviceInterest: string | null;
+    scheduledAt: Date | null;
+  } {
+    const scheduledLabel = this.extractLeadField(resumoLead, /^Hor(?:Ã¡|á|a)rio agendado:\s*(.+)$/im);
+
+    return {
+      name: this.sanitizeLeadField(this.extractLeadField(resumoLead, /^Nome:\s*(.+)$/im)),
+      contact: this.sanitizeLeadField(this.extractLeadField(resumoLead, /^Contato:\s*(.+)$/im)),
+      problemDescription: this.sanitizeLeadField(this.extractLeadField(resumoLead, /^Problema:\s*(.+)$/im)),
+      serviceInterest: this.sanitizeLeadField(this.extractLeadField(resumoLead, /^Servi(?:Ã§|ç|c)o de interesse:\s*(.+)$/im)),
+      scheduledAt: this.parseLeadScheduledAt(scheduledLabel)
+    };
+  }
+
+  private extractLeadField(summary: string, pattern: RegExp): string | null {
+    return summary.match(pattern)?.[1]?.trim() ?? null;
+  }
+
+  private sanitizeLeadField(value: string | null): string | null {
+    if (!value) {
+      return null;
+    }
+
+    const normalized = value.normalize("NFKC").trim();
+
+    if (!normalized) {
+      return null;
+    }
+
+    if (
+      ["nao informado", "não informado", "(nome)", "(número)", "(numero)", "(celular)"].includes(
+        normalized.toLowerCase()
+      )
+    ) {
+      return null;
+    }
+
+    return normalized;
+  }
+
+  private parseLeadScheduledAt(value: string | null): Date | null {
+    const sanitized = this.sanitizeLeadField(value);
+
+    if (!sanitized) {
+      return null;
+    }
+
+    const directDate = new Date(sanitized);
+
+    if (!Number.isNaN(directDate.getTime())) {
+      return directDate;
+    }
+
+    const match = sanitized.match(/(\d{1,2})[\/-](\d{1,2})[\/-](\d{2,4})(?:\s*(?:as|às)?\s*(\d{1,2})(?::|h)?(\d{2})?)?/i);
+
+    if (!match) {
+      return null;
+    }
+
+    const day = Number(match[1]);
+    const month = Number(match[2]);
+    const rawYear = Number(match[3]);
+    const year = rawYear < 100 ? 2000 + rawYear : rawYear;
+    const hour = match[4] ? Number(match[4]) : 0;
+    const minute = match[5] ? Number(match[5]) : 0;
+    const parsed = new Date(year, month - 1, day, hour, minute);
+
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
   }
 
   private async sendAutomatedTextMessage(

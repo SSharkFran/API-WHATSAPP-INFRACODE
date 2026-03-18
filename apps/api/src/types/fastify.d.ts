@@ -13,6 +13,7 @@ import type { AuthContext, ApiScope, AuthMode, PlatformRole, TenantRole } from "
 import type { EmailService } from "../lib/mail.js";
 import type { AuthService } from "../modules/auth/service.js";
 import type { PlatformAdminService } from "../modules/admin/service.js";
+import type { ClientMemoryService } from "../modules/chatbot/memory.service.js";
 import type { ChatbotService } from "../modules/chatbot/service.js";
 import type { TenantManagementService } from "../modules/tenant/service.js";
 import type { FiadoService } from "../modules/chatbot/fiado.service.js";
@@ -46,6 +47,7 @@ declare module "fastify" {
     authService: AuthService;
     platformAdminService: PlatformAdminService;
     chatbotService: ChatbotService;
+    clientMemoryService: ClientMemoryService;
     fiadoService: FiadoService;
     tenantManagementService: TenantManagementService;
     planEnforcementService: PlanEnforcementService;

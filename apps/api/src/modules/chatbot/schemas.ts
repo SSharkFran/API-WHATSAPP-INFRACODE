@@ -3,6 +3,20 @@ import { z } from "zod";
 export const chatbotTriggerTypeSchema = z.enum(["EXACT", "CONTAINS", "REGEX", "FIRST_CONTACT"]);
 export const chatbotAiModeSchema = z.enum(["RULES_ONLY", "RULES_THEN_AI", "AI_ONLY"]);
 export const chatbotAiProviderSchema = z.enum(["GROQ", "OPENAI_COMPATIBLE", "ANTHROPIC"]);
+export const clientMemoryStatusSchema = z.enum([
+  "lead_frio",
+  "lead_quente",
+  "cliente_ativo",
+  "projeto_encerrado",
+  "sem_interesse"
+]);
+export const clientMemoryTagSchema = z.enum([
+  "follow_up",
+  "cliente_antigo",
+  "sem_resposta",
+  "orcamento_enviado",
+  "fechado"
+]);
 
 export const chatbotRuleSchema = z.object({
   id: z.string().min(1),
@@ -65,6 +79,38 @@ export const upsertChatbotBodySchema = z.object({
 export const upsertLeadsPhoneBodySchema = z.object({
   leadsPhoneNumber: z.string().min(10).max(20).nullable().optional(),
   leadsEnabled: z.boolean().default(true)
+});
+
+export const clientMemorySchema = z.object({
+  id: z.string(),
+  phoneNumber: z.string(),
+  name: z.string().nullable().optional(),
+  isExistingClient: z.boolean(),
+  projectDescription: z.string().nullable().optional(),
+  serviceInterest: z.string().nullable().optional(),
+  status: clientMemoryStatusSchema,
+  tags: z.array(clientMemoryTagSchema),
+  notes: z.string().nullable().optional(),
+  lastContactAt: z.string(),
+  scheduledAt: z.string().nullable().optional(),
+  createdAt: z.string(),
+  updatedAt: z.string()
+});
+
+export const clientMemoryListQuerySchema = z.object({
+  status: clientMemoryStatusSchema.optional(),
+  tag: clientMemoryTagSchema.optional()
+});
+
+export const clientMemoryParamsSchema = z.object({
+  id: z.string().min(1),
+  phone: z.string().min(8).max(32)
+});
+
+export const upsertClientMemoryBodySchema = z.object({
+  status: clientMemoryStatusSchema.optional(),
+  tags: z.array(clientMemoryTagSchema).max(20).optional(),
+  notes: z.string().max(4_000).nullable().optional()
 });
 
 export const chatbotSimulationBodySchema = z.object({

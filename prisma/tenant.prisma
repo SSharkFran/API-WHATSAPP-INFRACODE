@@ -179,6 +179,22 @@ model AuditLog {
   @@index([createdAt])
 }
 
+model ClientMemory {
+  id                 String   @id @default(cuid())
+  phoneNumber        String   @unique
+  name               String?
+  isExistingClient   Boolean  @default(false)
+  projectDescription String?
+  serviceInterest    String?
+  status             String   @default("lead_frio")
+  tags               String[] @default([])
+  notes              String?
+  lastContactAt      DateTime @default(now())
+  scheduledAt        DateTime?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+}
+
 model FiadoTab {
   id          String    @id
   instanceId  String

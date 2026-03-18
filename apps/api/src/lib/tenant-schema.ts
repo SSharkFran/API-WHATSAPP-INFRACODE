@@ -156,6 +156,21 @@ export const buildTenantSchemaSql = (schemaName: string): string[] => {
       "signature" TEXT NOT NULL,
       "createdAt" TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );`,
+    `CREATE TABLE IF NOT EXISTS ${schema}."ClientMemory" (
+      "id" TEXT PRIMARY KEY,
+      "phoneNumber" TEXT NOT NULL UNIQUE,
+      "name" TEXT,
+      "isExistingClient" BOOLEAN NOT NULL DEFAULT FALSE,
+      "projectDescription" TEXT,
+      "serviceInterest" TEXT,
+      "status" TEXT NOT NULL DEFAULT 'lead_frio',
+      "tags" TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
+      "notes" TEXT,
+      "lastContactAt" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      "scheduledAt" TIMESTAMPTZ,
+      "createdAt" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      "updatedAt" TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );`,
     `CREATE TABLE IF NOT EXISTS ${schema}."FiadoTab" (
       "id" TEXT PRIMARY KEY,
       "instanceId" TEXT NOT NULL REFERENCES ${schema}."Instance"("id") ON DELETE CASCADE,

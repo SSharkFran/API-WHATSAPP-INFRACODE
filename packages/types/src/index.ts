@@ -319,6 +319,36 @@ export interface FiadoTab {
   updatedAt: string;
 }
 
+export type ClientMemoryStatus =
+  | "lead_frio"
+  | "lead_quente"
+  | "cliente_ativo"
+  | "projeto_encerrado"
+  | "sem_interesse";
+
+export type ClientMemoryTag =
+  | "follow_up"
+  | "cliente_antigo"
+  | "sem_resposta"
+  | "orcamento_enviado"
+  | "fechado";
+
+export interface ClientMemory {
+  id: string;
+  phoneNumber: string;
+  name?: string | null;
+  isExistingClient: boolean;
+  projectDescription?: string | null;
+  serviceInterest?: string | null;
+  status: ClientMemoryStatus;
+  tags: ClientMemoryTag[];
+  notes?: string | null;
+  lastContactAt: string;
+  scheduledAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface ChatbotSimulationResult {
   action: "MATCHED" | "WELCOME" | "FALLBACK" | "AI" | "NO_MATCH";
   matchedRuleId?: string | null;

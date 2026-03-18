@@ -1,11 +1,16 @@
 import type { FastifyInstance } from "fastify";
+import { z } from "zod";
 import { recordPlatformAuditLog, recordTenantAuditLog } from "../../lib/audit.js";
 import { requireTenantId } from "../../lib/request-auth.js";
 import { instanceParamsSchema } from "../instances/schemas.js";
 import {
+  clientMemoryListQuerySchema,
+  clientMemoryParamsSchema,
+  clientMemorySchema,
   chatbotConfigSchema,
   chatbotSimulationBodySchema,
   chatbotSimulationResponseSchema,
+  upsertClientMemoryBodySchema,
   upsertChatbotBodySchema,
   upsertLeadsPhoneBodySchema
 } from "./schemas.js";
@@ -150,6 +155,114 @@ export const registerChatbotRoutes = async (app: FastifyInstance): Promise<void>
       );
 
       return config;
+    }
+  );
+
+  app.get(
+    "/instances/:id/chatbot/clients",
+    {
+      config: {
+        auth: "tenant",
+        allowApiKey: true,
+        requiredScopes: ["read"]
+      },
+      schema: {
+        tags: ["Chatbot"],
+        summary: "Lista memorias de clientes do chatbot",
+        params: instanceParamsSchema,
+        querystring: clientMemoryListQuerySchema,
+        response: {
+          200: z.array(clientMemorySchema)
+        }
+      }
+    },
+    async (request) => {
+      const tenantId = requireTenantId(request);
+      const params = instanceParamsSchema.parse(request.params);
+      const query = clientMemoryListQuerySchema.parse(request.query);
+
+      await app.chatbotService.getConfig(tenantId, params.id);
+      return app.clientMemoryService.list(tenantId, query);
+    }
+  );
+
+  app.get(
+    "/instances/:id/chatbot/clients/:phone",
+    {
+      config: {
+        auth: "tenant",
+        allowApiKey: true,
+        requiredScopes: ["read"]
+      },
+      schema: {
+        tags: ["Chatbot"],
+        summary: "Consulta a memoria de um cliente especifico",
+        params: clientMemoryParamsSchema,
+        response: {
+          200: clientMemorySchema
+        }
+      }
+    },
+    async (request) => {
+      const tenantId = requireTenantId(request);
+      const params = clientMemoryParamsSchema.parse(request.params);
+
+      await app.chatbotService.getConfig(tenantId, params.id);
+      return app.clientMemoryService.requireByPhone(tenantId, params.phone);
+    }
+  );
+
+  app.patch(
+    "/instances/:id/chatbot/clients/:phone",
+    {
+      config: {
+        auth: "tenant",
+        allowApiKey: true,
+        requiredScopes: ["write"]
+      },
+      schema: {
+        tags: ["Chatbot"],
+        summary: "Atualiza manualmente a memoria de um cliente",
+        params: clientMemoryParamsSchema,
+        body: upsertClientMemoryBodySchema,
+        response: {
+          200: clientMemorySchema
+        }
+      }
+    },
+    async (request) => {
+      const tenantId = requireTenantId(request);
+      const params = clientMemoryParamsSchema.parse(request.params);
+      const body = upsertClientMemoryBodySchema.parse(request.body);
+      const tenantPrisma = await app.tenantPrismaRegistry.getClient(tenantId);
+
+      await app.chatbotService.getConfig(tenantId, params.id);
+      const memory = await app.clientMemoryService.upsert(tenantId, params.phone, {
+        status: body.status,
+        tags: body.tags,
+        notes: body.notes
+      });
+
+      await recordPlatformAuditLog(
+        app.platformPrisma,
+        request,
+        "chatbot.client-memory.update",
+        "Instance",
+        params.id,
+        body,
+        app.config.JWT_SECRET
+      );
+      await recordTenantAuditLog(
+        tenantPrisma,
+        request,
+        "chatbot.client-memory.update",
+        "Instance",
+        params.id,
+        body,
+        app.config.JWT_SECRET
+      );
+
+      return memory;
     }
   );
 

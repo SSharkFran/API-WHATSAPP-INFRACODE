@@ -20,6 +20,7 @@ interface ChatbotRuntimeInput {
   contactName?: string | null;
   phoneNumber: string;
   remoteJid?: string | null;
+  clientContext?: string | null;
 }
 
 interface ManagedAiProviderRuntime {
@@ -519,7 +520,7 @@ export class ChatbotService {
     system: string;
     messages: Array<{ role: "user" | "assistant"; content: string }>;
   }> {
-    const system = [
+    const systemParts = [
       systemPrompt.trim() || defaultAiSettings.systemPrompt,
       `Data atual: ${formatDate(new Date())} ${formatTime(new Date())}.`,
       `Nome do contato: ${input.contactName?.trim() || "cliente"}.`,
@@ -545,7 +546,13 @@ export class ChatbotService {
         "[/RESUMO_LEAD]",
       `REGRA OBRIGATÓRIA: No campo "Contato" do bloco [RESUMO_LEAD], use SEMPRE o número real do cliente: ${normalizePhoneNumber(input.phoneNumber)}. NUNCA escreva "(número)", "(celular)" ou deixe em branco. O número já está disponível e deve ser copiado exatamente.`,
       "REGRA CRÍTICA: Só inclua o bloco [RESUMO_LEAD] quando o agendamento estiver 100% confirmado, com nome completo do cliente, data E horário definidos e serviço de interesse identificado. Se qualquer um desses campos estiver faltando, PERGUNTE ao cliente antes de gerar o bloco. NUNCA gere [RESUMO_LEAD] com campos 'não informado' nos campos Nome, Horário agendado ou Serviço de interesse."
-    ].join("\n");
+    ];
+
+    if (input.clientContext?.trim()) {
+      systemParts.push(input.clientContext.trim());
+    }
+
+    const system = systemParts.join("\n");
 
     const messages: Array<{ role: "user" | "assistant"; content: string }> = [];
 

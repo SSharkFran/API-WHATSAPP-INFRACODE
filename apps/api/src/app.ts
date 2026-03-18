@@ -20,6 +20,7 @@ import { authPlugin } from "./plugins/auth.js";
 import { swaggerPlugin } from "./plugins/swagger.js";
 import { PlatformAdminService } from "./modules/admin/service.js";
 import { AuthService } from "./modules/auth/service.js";
+import { ClientMemoryService } from "./modules/chatbot/memory.service.js";
 import { ChatbotService } from "./modules/chatbot/service.js";
 import { FiadoService } from "./modules/chatbot/fiado.service.js";
 import { InstanceOrchestrator } from "./modules/instances/service.js";
@@ -64,6 +65,9 @@ export const buildApp = async () => {
     platformPrisma,
     tenantPrismaRegistry
   });
+  const clientMemoryService = new ClientMemoryService({
+    tenantPrismaRegistry
+  });
   const fiadoService = new FiadoService({
     tenantPrismaRegistry
   });
@@ -98,6 +102,7 @@ export const buildApp = async () => {
     redis,
     webhookService,
     chatbotService,
+    clientMemoryService,
     fiadoService
   });
   const platformAdminService = new PlatformAdminService({
@@ -129,6 +134,7 @@ export const buildApp = async () => {
   app.decorate("authService", authService);
   app.decorate("platformAdminService", platformAdminService);
   app.decorate("chatbotService", chatbotService);
+  app.decorate("clientMemoryService", clientMemoryService);
   app.decorate("fiadoService", fiadoService);
   app.decorate("tenantManagementService", tenantManagementService);
   app.decorate("planEnforcementService", planEnforcementService);

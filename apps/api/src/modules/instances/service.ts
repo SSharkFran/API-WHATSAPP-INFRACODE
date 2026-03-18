@@ -681,6 +681,7 @@ export class InstanceOrchestrator {
     await this.tenantPrismaRegistry.ensureSchema(this.platformPrisma, tenantId);
     const prisma = await this.tenantPrismaRegistry.getClient(tenantId);
     const remoteNumber = normalizePhoneNumber(event.remoteJid.split("@")[0] ?? "");
+    const leadAlreadySentKey = this.buildLeadAlreadySentKey(instance.id, event.remoteJid);
     const msgText = typeof event.payload.text === "string" ? event.payload.text.trim().toLowerCase() : "";
 
     if (msgText === "/reset") {
@@ -690,6 +691,7 @@ export class InstanceOrchestrator {
           remoteJid: event.remoteJid
         }
       });
+      await this.redis.del(leadAlreadySentKey);
 
       await this.sendAutomatedTextMessage(
         tenantId,
@@ -722,6 +724,7 @@ export class InstanceOrchestrator {
         displayName: (event.payload.pushName as string | undefined) ?? null
       }
     });
+    const resolvedContactNumber = contact.phoneNumber || remoteNumber;
     let clientMemory = await this.clientMemoryService.findByPhone(tenantId, contact.phoneNumber);
 
     try {
@@ -883,7 +886,7 @@ export class InstanceOrchestrator {
         text: inputText,
         isFirstContact,
         contactName: contact.displayName,
-        phoneNumber: contact.phoneNumber,
+        phoneNumber: resolvedContactNumber,
         remoteJid: event.remoteJid,
         clientContext: this.buildClientMemoryContext(clientMemory)
       });
@@ -901,8 +904,15 @@ export class InstanceOrchestrator {
       console.log("[leads] extraindo resumo...");
       const resumoMatch = responseText.match(resumoRegex);
       console.log("[leads] resumoMatch:", resumoMatch ? "encontrado" : "nao encontrado");
-      const resumoLead = resumoMatch?.[1]?.trim() ?? null;
+      let resumoLead = this.normalizeLeadSummaryContact(resumoMatch?.[1]?.trim() ?? null, resolvedContactNumber);
       const clientResponseText = responseText.replace(resumoRegex, "").trim();
+      const leadAlreadySent = resumoLead ? (await this.redis.get(leadAlreadySentKey)) === "1" : false;
+
+      if (leadAlreadySent) {
+        console.log("[leads] resumo ignorado porque o lead ja foi enviado nesta conversa");
+        resumoLead = null;
+      }
+
       const automationMetadata = {
         action: chatbotResult.action,
         matchedRuleId: chatbotResult.matchedRuleId ?? null,
@@ -973,7 +983,7 @@ export class InstanceOrchestrator {
         /Horário agendado:\s*(?!não informado|nao informado)/i,
         /Serviço de interesse:\s*(?!não informado|nao informado)/i
       ];
-      const resumoCompleto = camposObrigatorios.every((regex) => regex.test(resumoLead ?? ""));
+      const resumoCompleto = !leadAlreadySent && camposObrigatorios.every((regex) => regex.test(resumoLead ?? ""));
 
       if (parsedLeadSummary) {
         try {
@@ -994,7 +1004,9 @@ export class InstanceOrchestrator {
         }
       }
 
-      if (!resumoCompleto) {
+      if (leadAlreadySent) {
+        // Ja houve um lead enviado nesta conversa; ignora novos blocos.
+      } else if (!resumoCompleto) {
         console.log("[leads] resumo incompleto, aguardando mais informações");
       } else {
         const resumoDedupeKey = `leads:sent:${instance.id}:${remoteNumber}:${Date.now().toString().slice(0, -3)}`;
@@ -1018,6 +1030,7 @@ export class InstanceOrchestrator {
             );
             console.log("[leads] enviado com sucesso!");
             await this.redis.set(resumoDedupeKey, "1", "EX", 30);
+            await this.redis.set(leadAlreadySentKey, "1");
           } catch (err) {
             console.error("[leads] erro ao enviar:", err);
           }
@@ -1083,6 +1096,25 @@ export class InstanceOrchestrator {
       `- Tags: ${clientMemory.tags.join(", ") || "nenhuma"}`,
       `- Observacoes: ${clientMemory.notes ?? "nenhuma"}`
     ].join("\n");
+  }
+
+  private buildLeadAlreadySentKey(instanceId: string, remoteJid: string): string {
+    return `chatbot:lead-sent:${instanceId}:${remoteJid}`;
+  }
+
+  private normalizeLeadSummaryContact(summary: string | null, phoneNumber: string): string | null {
+    if (!summary) {
+      return null;
+    }
+
+    const normalizedPhoneNumber = normalizePhoneNumber(phoneNumber);
+    const contactLine = `Contato: ${normalizedPhoneNumber}`;
+
+    if (/^Contato:\s*.+$/im.test(summary)) {
+      return summary.replace(/^Contato:\s*.+$/im, contactLine);
+    }
+
+    return `${summary}\n${contactLine}`;
   }
 
   private isFollowUpCandidateMessage(input: string): boolean {

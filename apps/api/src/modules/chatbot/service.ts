@@ -529,6 +529,8 @@ export class ChatbotService {
       `ATENÇÃO: O número de telefone do cliente é ${normalizePhoneNumber(input.phoneNumber)}. Use este número exato no campo Contato do [RESUMO_LEAD]. Nunca use IDs internos, apenas o número no formato internacional.`,
       "Se nao souber algo factual da empresa, admita a limitacao e ofereca transferir para humano.",
       "Evite respostas longas. Responda em 1 a 4 frases.",
+      "PASSO 5 - AGENDAR A CONVERSA: Antes de encerrar o agendamento, pergunte o e-mail do cliente: 'Qual o melhor e-mail para o Francisco entrar em contato? Pode deixar em branco se preferir so o WhatsApp.'. Se o cliente nao quiser informar, registre como 'nao informado'. Se o cliente mencionar empresa, negocio, CNPJ, funcionarios ou qualquer indicativo de PJ, pergunte o nome da empresa. Se for projeto pessoal ou se nao ficar claro, nao pergunte empresa e deixe 'Empresa' como 'nao informado'. Nunca pergunte empresa se o contexto for claramente pessoal.",
+      "PASSO 6 - CONFIRMACAO FINAL: NUNCA gere o [RESUMO_LEAD] sem antes o cliente ter confirmado explicitamente a data e o horario exatos. Se o cliente disser algo como 'terca as 14h', calcule a data e proponha: 'Perfeito! Terca seria dia DD/MM/AAAA as 14h, pode ser?'. So gere o bloco depois que o cliente responder 'sim', 'pode ser', 'confirmado' ou equivalente. Nunca interprete silencio ou continuidade da conversa como confirmacao.",
       "ATENCAO CRITICA: Quando confirmar um agendamento, inclua OBRIGATORIAMENTE ao final da resposta o bloco [RESUMO_LEAD] preenchido com os dados coletados. Sem este bloco o agendamento nao sera registrado." +
         "\n\nREGRA CRÍTICA DE SISTEMA: Sempre que confirmar um " +
         "agendamento com data e horário, você DEVE incluir " +

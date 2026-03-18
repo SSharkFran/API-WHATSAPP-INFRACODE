@@ -2,6 +2,8 @@ import { StatCard } from "../../../../components/dashboard/stat-card";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@infracode/ui";
 import { getAdminBilling } from "../../../../lib/api";
 
+export const dynamic = "force-dynamic";
+
 export default async function SuperAdminBillingPage() {
   const items = await getAdminBilling();
   const active = items.filter((item) => item.status === "ACTIVE");

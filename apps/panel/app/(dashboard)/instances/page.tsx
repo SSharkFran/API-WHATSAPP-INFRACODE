@@ -1,6 +1,8 @@
 import { InstanceGrid } from "../../../components/instances/instance-grid";
 import { getInstances } from "../../../lib/api";
 
+export const dynamic = "force-dynamic";
+
 export default async function InstancesPage() {
   const instances = await getInstances();
 

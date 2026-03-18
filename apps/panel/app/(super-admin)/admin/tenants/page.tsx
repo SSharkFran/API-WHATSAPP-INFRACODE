@@ -1,6 +1,8 @@
 import { TenantManager } from "../../../../components/admin/tenant-manager";
 import { getAdminPlans, getAdminTenants } from "../../../../lib/api";
 
+export const dynamic = "force-dynamic";
+
 export default async function SuperAdminTenantsPage() {
   const [tenants, plans] = await Promise.all([getAdminTenants(), getAdminPlans()]);
 

@@ -3,6 +3,8 @@ import { StatCard } from "../../../components/dashboard/stat-card";
 import { getAdminBilling, getAdminTenants } from "../../../lib/api";
 import { Badge } from "../../../components/ui/Badge";
 
+export const dynamic = "force-dynamic";
+
 const formatNumber = (value: number) => new Intl.NumberFormat("pt-BR").format(value);
 
 export default async function SuperAdminOverviewPage() {

@@ -124,16 +124,23 @@ export const registerChatbotRoutes = async (app: FastifyInstance): Promise<void>
       const params = instanceParamsSchema.parse(request.params);
       const body = upsertLeadsPhoneBodySchema.parse(request.body);
       const tenantPrisma = await app.tenantPrismaRegistry.getClient(tenantId);
-
-      await tenantPrisma.chatbotConfig.updateMany({
-        where: { instanceId: params.id },
-        data: {
-          leadsPhoneNumber: body.leadsPhoneNumber ?? null,
-          leadsEnabled: body.leadsEnabled
-        }
+      const currentConfig = await app.chatbotService.getConfig(tenantId, params.id);
+      const config = await app.chatbotService.upsertConfig(tenantId, params.id, {
+        isEnabled: currentConfig.isEnabled,
+        welcomeMessage: currentConfig.welcomeMessage ?? null,
+        fallbackMessage: currentConfig.fallbackMessage ?? null,
+        rules: currentConfig.rules,
+        ai: {
+          isEnabled: currentConfig.ai.isEnabled,
+          mode: currentConfig.ai.mode,
+          systemPrompt: currentConfig.ai.systemPrompt,
+          temperature: currentConfig.ai.temperature,
+          maxContextMessages: currentConfig.ai.maxContextMessages
+        },
+        leadsPhoneNumber: body.leadsPhoneNumber ?? null,
+        leadsEnabled: body.leadsEnabled,
+        fiadoEnabled: currentConfig.fiadoEnabled ?? false
       });
-
-      const config = await app.chatbotService.getConfig(tenantId, params.id);
 
       await recordPlatformAuditLog(
         app.platformPrisma,

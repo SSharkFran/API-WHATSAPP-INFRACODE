@@ -147,7 +147,9 @@ const resolveMediaBuffer = async (media: { base64?: string; url?: string }): Pro
   }
 
   if (media.url) {
-    const response = await fetch(media.url);
+    const response = await fetch(media.url, {
+      signal: AbortSignal.timeout(20_000)
+    });
 
     if (!response.ok) {
       throw new Error(`Falha ao baixar midia: ${response.status}`);
@@ -326,6 +328,9 @@ const disconnectSocket = async (): Promise<void> => {
   }
 
   try {
+    socket.ev.removeAllListeners("connection.update");
+    socket.ev.removeAllListeners("creds.update");
+    socket.ev.removeAllListeners("messages.upsert");
     socket.ws.close();
   } catch {
     // noop
@@ -356,6 +361,8 @@ const startSocket = async (): Promise<void> => {
     emitStatus("INITIALIZING");
     await disconnectSocket();
     closeAuthStore?.();
+    closeAuthStore = null;
+    saveCreds = null;
 
     const authState = await useSqliteAuthState(init.sessionDbPath);
     saveCreds = authState.saveCreds;
@@ -382,53 +389,71 @@ const startSocket = async (): Promise<void> => {
     store.bind(nextSocket.ev);
 
     nextSocket.ev.on("creds.update", async () => {
-      await saveCreds?.();
+      try {
+        await saveCreds?.();
+      } catch (error) {
+        log("error", "Falha ao salvar credenciais do Baileys", {
+          error: error instanceof Error ? error.message : "unknown"
+        });
+      }
     });
 
     nextSocket.ev.on("connection.update", async (update: unknown) => {
-      const event = update as ConnectionUpdateEvent;
-      if (event.qr) {
-        const qrCodeBase64 = await QRCode.toDataURL(event.qr);
-        emitStatus("QR_PENDING");
-        parentPort?.postMessage({
-          type: "qr",
-          qrCodeBase64,
-          expiresInSeconds: 60
-        });
-      }
+      try {
+        const event = update as ConnectionUpdateEvent;
+        if (event.qr) {
+          const qrCodeBase64 = await QRCode.toDataURL(event.qr);
+          emitStatus("QR_PENDING");
+          parentPort?.postMessage({
+            type: "qr",
+            qrCodeBase64,
+            expiresInSeconds: 60
+          });
+        }
 
-      if (event.connection === "open") {
-        reconnectAttempts = 0;
-        emitStatus("CONNECTED");
-        log("info", "Instancia conectada com sucesso");
-        parentPort?.postMessage({
-          type: "profile",
-          phoneNumber: socket?.user?.id?.split(":")[0]?.split("@")[0] ?? null,
-          avatarUrl: null
-        });
-      }
+        if (event.connection === "open") {
+          reconnectAttempts = 0;
+          emitStatus("CONNECTED");
+          log("info", "Instancia conectada com sucesso");
+          parentPort?.postMessage({
+            type: "profile",
+            phoneNumber: socket?.user?.id?.split(":")[0]?.split("@")[0] ?? null,
+            avatarUrl: null
+          });
+        }
 
-      if (event.connection === "close") {
-        await handleConnectionClose(event.lastDisconnect?.error as Error | undefined);
+        if (event.connection === "close") {
+          await handleConnectionClose(event.lastDisconnect?.error as Error | undefined);
+        }
+      } catch (error) {
+        log("error", "Falha ao processar evento de conexao do Baileys", {
+          error: error instanceof Error ? error.message : "unknown"
+        });
       }
     });
 
     nextSocket.ev.on("messages.upsert", async (payload: unknown) => {
-      const { messages } = payload as UpsertMessageEvent;
-      for (const message of messages) {
-        if (message.key.fromMe || !message.key.remoteJid || !message.message) {
-          continue;
-        }
+      try {
+        const { messages } = payload as UpsertMessageEvent;
+        for (const message of messages) {
+          if (message.key.fromMe || !message.key.remoteJid || !message.message) {
+            continue;
+          }
 
-        parentPort?.postMessage({
-          type: "inbound-message",
-          remoteJid: message.key.remoteJid,
-          externalMessageId: message.key.id,
-          payload: {
-            ...serializeIncomingPayload(message.message as Record<string, unknown>),
-            pushName: message.pushName ?? null
-          },
-          messageType: detectMessageType(message.message as Record<string, unknown>)
+          parentPort?.postMessage({
+            type: "inbound-message",
+            remoteJid: message.key.remoteJid,
+            externalMessageId: message.key.id,
+            payload: {
+              ...serializeIncomingPayload(message.message as Record<string, unknown>),
+              pushName: message.pushName ?? null
+            },
+            messageType: detectMessageType(message.message as Record<string, unknown>)
+          });
+        }
+      } catch (error) {
+        log("error", "Falha ao processar mensagem recebida no worker", {
+          error: error instanceof Error ? error.message : "unknown"
         });
       }
     });
@@ -461,7 +486,7 @@ const handleSendMessage = async (command: RpcCommand): Promise<void> => {
           log("info", `JID resolvido via onWhatsApp: ${resolvedJid}`);
         }
       } catch {
-        log("warn", "Falha ao resolver JID via onWhatsApp, usando JID padrão");
+        log("warn", "Falha ao resolver JID via onWhatsApp, usando JID padrao");
       }
     }
     const mentionJids = payload.mentionNumbers?.map((number) => toJid(number)) ?? [];
@@ -496,8 +521,11 @@ const handleSendMessage = async (command: RpcCommand): Promise<void> => {
     if (resolvedJid.endsWith("@g.us")) {
       try {
         await activeSocket.groupMetadata(resolvedJid);
-      } catch (e) {
-        console.warn("[baileys] groupMetadata fetch failed:", e);
+      } catch (error) {
+        log("warn", "Falha ao sincronizar metadados do grupo antes do envio", {
+          error: error instanceof Error ? error.message : "unknown",
+          jid: resolvedJid
+        });
       }
     }
 

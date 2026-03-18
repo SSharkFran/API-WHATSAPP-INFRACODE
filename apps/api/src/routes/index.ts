@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
+import { requireTenantId } from "../lib/request-auth.js";
 import { registerAdminRoutes } from "../modules/admin/routes.js";
 import { registerAuthRoutes } from "../modules/auth/routes.js";
 import { registerChatbotRoutes } from "../modules/chatbot/routes.js";
@@ -14,10 +15,6 @@ import { registerWebhookRoutes } from "../modules/webhooks/routes.js";
  * Registra o conjunto principal de rotas da API.
  */
 export const registerRoutes = async (app: FastifyInstance): Promise<void> => {
-  const debugGroupJidsQuerySchema = z.object({
-    tenantId: z.string().min(1)
-  });
-
   app.get(
     "/health",
     {
@@ -62,17 +59,19 @@ export const registerRoutes = async (app: FastifyInstance): Promise<void> => {
     "/debug/group-jids",
     {
       config: {
-        auth: false
+        auth: "tenant",
+        allowApiKey: true,
+        requiredScopes: ["read"]
       },
       schema: {
-        querystring: debugGroupJidsQuerySchema,
+        hide: true,
         response: {
           200: z.array(z.string())
         }
       }
     },
     async (request) => {
-      const { tenantId } = debugGroupJidsQuerySchema.parse(request.query);
+      const tenantId = requireTenantId(request);
       await app.tenantPrismaRegistry.ensureSchema(app.platformPrisma, tenantId);
       const tenantPrisma = await app.tenantPrismaRegistry.getClient(tenantId);
       const messages = await tenantPrisma.message.findMany({

@@ -299,19 +299,11 @@ export class ChatbotService {
   }
 
   private async getManagedAiProvider(tenantId: string): Promise<ManagedAiProviderRuntime> {
-    const record = (await (this.platformPrisma as any).tenantAiProvider.findUnique({
+    const record = await this.platformPrisma.tenantAiProvider.findUnique({
       where: {
         tenantId
       }
-    })) as
-      | {
-          provider: ChatbotAiProvider;
-          baseUrl: string;
-          model: string;
-          isActive: boolean;
-          apiKeyEncrypted: string;
-        }
-      | null;
+    });
 
     if (!record) {
       return {
@@ -520,34 +512,34 @@ export class ChatbotService {
     system: string;
     messages: Array<{ role: "user" | "assistant"; content: string }>;
   }> {
+    const normalizedPhoneNumber = normalizePhoneNumber(input.phoneNumber);
     const systemParts = [
       systemPrompt.trim() || defaultAiSettings.systemPrompt,
       `Data atual: ${formatDate(new Date())} ${formatTime(new Date())}.`,
       `Nome do contato: ${input.contactName?.trim() || "cliente"}.`,
-      `Se o nome do contato for "cliente" ou estiver vazio, pergunte o nome do cliente antes de prosseguir com o atendimento. Nunca assuma um nome que não foi informado.`,
-      `Numero: ${normalizePhoneNumber(input.phoneNumber)}.`,
-      `ATENÇÃO: O número de telefone do cliente é ${normalizePhoneNumber(input.phoneNumber)}. Use este número exato no campo Contato do [RESUMO_LEAD]. Nunca use IDs internos, apenas o número no formato internacional.`,
-      "Se nao souber algo factual da empresa, admita a limitacao e ofereca transferir para humano.",
-      "Evite respostas longas. Responda em 1 a 4 frases.",
+      'Se o nome do contato for "cliente" ou estiver vazio, pergunte o nome do cliente antes de prosseguir com o atendimento. Nunca assuma um nome que nao foi informado.',
+      `Numero do cliente: ${normalizedPhoneNumber}.`,
+      `ATENCAO: O numero de telefone do cliente e ${normalizedPhoneNumber}. Use este numero exato no campo Contato do [RESUMO_LEAD]. Nunca use IDs internos, apenas o numero no formato internacional.`,
+      'Se nao souber algo factual da empresa, admita a limitacao e ofereca transferir para humano.',
+      'Evite respostas longas. Responda em 1 a 4 frases.',
       "PASSO 5 - AGENDAR A CONVERSA: Antes de encerrar o agendamento, pergunte o e-mail do cliente: 'Qual o melhor e-mail para o Francisco entrar em contato? Pode deixar em branco se preferir so o WhatsApp.'. Se o cliente nao quiser informar, registre como 'nao informado'. Se o cliente mencionar empresa, negocio, CNPJ, funcionarios ou qualquer indicativo de PJ, pergunte o nome da empresa. Se for projeto pessoal ou se nao ficar claro, nao pergunte empresa e deixe 'Empresa' como 'nao informado'. Nunca pergunte empresa se o contexto for claramente pessoal.",
-      "PASSO 6 - CONFIRMACAO FINAL: NUNCA gere o [RESUMO_LEAD] sem antes o cliente ter confirmado explicitamente a data e o horario exatos. Se o cliente disser algo como 'terca as 14h', calcule a data e proponha: 'Perfeito! Terca seria dia DD/MM/AAAA as 14h, pode ser?'. So gere o bloco depois que o cliente responder 'sim', 'pode ser', 'confirmado' ou equivalente. Nunca interprete silencio ou continuidade da conversa como confirmacao.",
-      "ATENCAO CRITICA: Quando confirmar um agendamento, inclua OBRIGATORIAMENTE ao final da resposta o bloco [RESUMO_LEAD] preenchido com os dados coletados. Sem este bloco o agendamento nao sera registrado." +
-        "\n\nREGRA CRÍTICA DE SISTEMA: Sempre que confirmar um " +
-        "agendamento com data e horário, você DEVE incluir " +
-        "OBRIGATORIAMENTE ao final da sua resposta o bloco abaixo " +
-        "preenchido. Sem ele o agendamento não será registrado " +
-        "e o lead será perdido:\n\n" +
-        "[RESUMO_LEAD]\n" +
-        "Nome: {nome completo do cliente}\n" +
-        "Contato: {número do WhatsApp}\n" +
-        "E-mail: {e-mail ou 'não informado'}\n" +
-        "Empresa: {empresa ou 'não informado'}\n" +
-        "Problema: {problema relatado}\n" +
-        "Serviço de interesse: {serviço}\n" +
-        "Horário agendado: {data e hora}\n" +
-        "[/RESUMO_LEAD]",
-      `REGRA OBRIGATÓRIA: No campo "Contato" do bloco [RESUMO_LEAD], use SEMPRE o número real do cliente: ${normalizePhoneNumber(input.phoneNumber)}. NUNCA escreva "(número)", "(celular)" ou deixe em branco. O número já está disponível e deve ser copiado exatamente.`,
-      "REGRA CRÍTICA: Só inclua o bloco [RESUMO_LEAD] quando o agendamento estiver 100% confirmado, com nome completo do cliente, data E horário definidos e serviço de interesse identificado. Se qualquer um desses campos estiver faltando, PERGUNTE ao cliente antes de gerar o bloco. NUNCA gere [RESUMO_LEAD] com campos 'não informado' nos campos Nome, Horário agendado ou Serviço de interesse."
+      'PASSO 6 - CONFIRMACAO FINAL: NUNCA gere [RESUMO_LEAD] sem o cliente confirmar explicitamente a data e o horario exatos no formato DD/MM/AAAA.',
+      "Calcule a data e proponha: 'Terca seria dia DD/MM/AAAA as 14h, certo?'",
+      "So gere o bloco depois que o cliente responder 'sim', 'pode ser', 'confirmado' ou equivalente.",
+      'Nunca interprete silencio ou continuidade da conversa como confirmacao.',
+      'ATENCAO CRITICA: Quando confirmar um agendamento, inclua OBRIGATORIAMENTE ao final da resposta o bloco [RESUMO_LEAD] preenchido com os dados coletados. Sem este bloco o agendamento nao sera registrado.' +
+        '\n\nREGRA CRITICA DE SISTEMA: Sempre que confirmar um agendamento com data e horario, voce DEVE incluir OBRIGATORIAMENTE ao final da sua resposta o bloco abaixo preenchido. Sem ele o agendamento nao sera registrado e o lead sera perdido:\n\n' +
+        '[RESUMO_LEAD]\n' +
+        'Nome: {nome completo do cliente}\n' +
+        'Contato: {numero do WhatsApp}\n' +
+        "E-mail: {e-mail ou 'nao informado'}\n" +
+        "Empresa: {empresa ou 'nao informado'}\n" +
+        'Problema: {problema relatado}\n' +
+        'Servico de interesse: {servico}\n' +
+        'Horario agendado: {data e hora}\n' +
+        '[/RESUMO_LEAD]',
+      `REGRA OBRIGATORIA: No campo "Contato" do bloco [RESUMO_LEAD], use SEMPRE o numero real do cliente: ${normalizedPhoneNumber}. NUNCA escreva "(numero)", "(celular)" ou deixe em branco. O numero ja esta disponivel e deve ser copiado exatamente.`,
+      "REGRA CRITICA: So inclua o bloco [RESUMO_LEAD] quando o agendamento estiver 100% confirmado, com nome completo do cliente, data e horario definidos e servico de interesse identificado. Se qualquer um desses campos estiver faltando, pergunte ao cliente antes de gerar o bloco. NUNCA gere [RESUMO_LEAD] com campos 'nao informado' nos campos Nome, Horario agendado ou Servico de interesse."
     ];
 
     if (input.clientContext?.trim()) {
@@ -555,7 +547,6 @@ export class ChatbotService {
     }
 
     const system = systemParts.join("\n");
-
     const messages: Array<{ role: "user" | "assistant"; content: string }> = [];
 
     if (input.remoteJid) {
@@ -567,7 +558,11 @@ export class ChatbotService {
         orderBy: {
           createdAt: "desc"
         },
-        take: maxContextMessages
+        take: maxContextMessages,
+        select: {
+          direction: true,
+          payload: true
+        }
       });
 
       for (const item of [...history].reverse()) {
@@ -593,11 +588,7 @@ export class ChatbotService {
       while (messages.length > 0) {
         const lastMessage = messages.at(-1);
 
-        if (
-          !lastMessage ||
-          lastMessage.role !== "user" ||
-          normalizeText(lastMessage.content) !== normalizedCurrentInput
-        ) {
+        if (!lastMessage || lastMessage.role !== "user" || normalizeText(lastMessage.content) !== normalizedCurrentInput) {
           break;
         }
 
@@ -613,13 +604,11 @@ export class ChatbotService {
     messages.unshift(
       {
         role: "user",
-        content: "Quero agendar uma reunião, pode ser quinta às 10h?"
+        content: "Quero agendar uma reuniao, pode ser quinta as 10h?"
       },
       {
         role: "assistant",
-        content:
-          "Claro! Antes de confirmar, pode me dizer seu nome completo?\n\n" +
-          "Assim consigo registrar o agendamento direitinho para você."
+        content: "Claro! Antes de confirmar, pode me dizer seu nome completo?\n\nAssim consigo registrar o agendamento direitinho para voce."
       }
     );
 
@@ -651,6 +640,7 @@ export class ChatbotService {
     const url = isAnthropic ? "https://api.anthropic.com/v1/messages" : new URL("chat/completions", baseUrl).toString();
     const response = await fetch(url, {
       method: "POST",
+      signal: AbortSignal.timeout(30_000),
       headers: isAnthropic
         ? {
             "Content-Type": "application/json",
@@ -724,3 +714,4 @@ export class ChatbotService {
     return null;
   }
 }
+

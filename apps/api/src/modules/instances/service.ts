@@ -1,9 +1,8 @@
-import { EventEmitter } from "node:events";
+﻿import { EventEmitter } from "node:events";
 import { mkdir, rm } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { Worker } from "node:worker_threads";
 import type {
-  ClientMemory,
   InstanceHealthReport,
   InstanceLogEvent,
   InstanceSummary,
@@ -18,6 +17,11 @@ import type { PlatformPrisma, TenantPrismaRegistry } from "../../lib/database.js
 import { ApiError } from "../../lib/errors.js";
 import type { MetricsService } from "../../lib/metrics.js";
 import { normalizePhoneNumber, toJid } from "../../lib/phone.js";
+import { ConversationAgent } from "../chatbot/agents/conversation.agent.js";
+import { FiadoAgent } from "../chatbot/agents/fiado.agent.js";
+import { LeadAgent } from "../chatbot/agents/lead.agent.js";
+import { MemoryAgent } from "../chatbot/agents/memory.agent.js";
+import type { ChatMessage, ConversationSession } from "../chatbot/agents/types.js";
 import type { ClientMemoryService } from "../chatbot/memory.service.js";
 import type { ChatbotService } from "../chatbot/service.js";
 import type { PlanEnforcementService } from "../platform/plan-enforcement.service.js";
@@ -128,12 +132,14 @@ export class InstanceOrchestrator {
   private readonly redis: IORedis;
   private readonly webhookService: WebhookService;
   private readonly planEnforcementService: PlanEnforcementService;
-  private readonly chatbotService: ChatbotService;
-  private readonly clientMemoryService: ClientMemoryService;
-  private readonly fiadoService: FiadoService;
+  private readonly memoryAgent: MemoryAgent;
+  private readonly leadAgent: LeadAgent;
+  private readonly conversationAgent: ConversationAgent;
+  private readonly fiadoAgent: FiadoAgent;
   private readonly logEmitter = new EventEmitter();
   private readonly qrEmitter = new EventEmitter();
   private readonly latestQrCodes = new Map<string, QrCodeEvent>();
+  private readonly conversationSessions = new Map<string, ConversationSession>();
   private readonly workers = new Map<string, ManagedWorker>();
 
   public constructor(deps: InstanceOrchestratorDeps) {
@@ -144,9 +150,30 @@ export class InstanceOrchestrator {
     this.redis = deps.redis;
     this.webhookService = deps.webhookService;
     this.planEnforcementService = deps.planEnforcementService;
-    this.chatbotService = deps.chatbotService;
-    this.clientMemoryService = deps.clientMemoryService;
-    this.fiadoService = deps.fiadoService;
+    this.memoryAgent = new MemoryAgent({
+      clientMemoryService: deps.clientMemoryService
+    });
+    this.leadAgent = new LeadAgent({
+      sendLeadAlert: async ({ tenantId, instanceId, phoneNumber, summary }) => {
+        await this.sendAutomatedTextMessage(
+          tenantId,
+          instanceId,
+          phoneNumber,
+          `${phoneNumber}@s.whatsapp.net`,
+          `🔔 Novo lead agendado:\n\n${summary}`,
+          {
+            action: "lead_summary",
+            kind: "chatbot"
+          }
+        );
+      }
+    });
+    this.conversationAgent = new ConversationAgent({
+      chatbotService: deps.chatbotService
+    });
+    this.fiadoAgent = new FiadoAgent({
+      fiadoService: deps.fiadoService
+    });
   }
 
   /**
@@ -681,7 +708,7 @@ export class InstanceOrchestrator {
     await this.tenantPrismaRegistry.ensureSchema(this.platformPrisma, tenantId);
     const prisma = await this.tenantPrismaRegistry.getClient(tenantId);
     const remoteNumber = normalizePhoneNumber(event.remoteJid.split("@")[0] ?? "");
-    const leadAlreadySentKey = this.buildLeadAlreadySentKey(instance.id, event.remoteJid);
+    const sessionKey = this.buildConversationSessionKey(instance.id, event.remoteJid);
     const msgText = typeof event.payload.text === "string" ? event.payload.text.trim().toLowerCase() : "";
 
     if (msgText === "/reset") {
@@ -691,7 +718,7 @@ export class InstanceOrchestrator {
           remoteJid: event.remoteJid
         }
       });
-      await this.redis.del(leadAlreadySentKey);
+      this.conversationSessions.delete(sessionKey);
 
       await this.sendAutomatedTextMessage(
         tenantId,
@@ -753,16 +780,6 @@ export class InstanceOrchestrator {
       }
     });
     const resolvedContactNumber = contact.phoneNumber;
-    let clientMemory = await this.clientMemoryService.findByPhone(tenantId, resolvedContactNumber);
-
-    try {
-      await this.clientMemoryService.upsert(tenantId, resolvedContactNumber, {
-        name: contact.displayName?.trim() || undefined,
-        lastContactAt: new Date()
-      });
-    } catch (memoryError) {
-      console.error("[memory] erro ao atualizar ultimo contato:", memoryError);
-    }
 
     const conversation = await prisma.conversation.findFirst({
       where: {
@@ -792,6 +809,7 @@ export class InstanceOrchestrator {
         }
       });
     }
+    const session = await this.getConversationSession(prisma, sessionKey, instance.id, event.remoteJid);
 
     await prisma.message.create({
       data: {
@@ -840,8 +858,8 @@ export class InstanceOrchestrator {
     }
 
     try {
-      const inputText = typeof event.payload.text === "string" ? event.payload.text : null;
-      const normalizedInputText = (inputText ?? "").normalize("NFKC").trim().toLowerCase();
+      const inputText = typeof event.payload.text === "string" ? event.payload.text.trim() : "";
+      const normalizedInputText = inputText.normalize("NFKC").trim().toLowerCase();
 
       if (event.remoteJid.endsWith("@g.us")) {
         if (normalizedInputText === "conectar") {
@@ -894,209 +912,122 @@ export class InstanceOrchestrator {
         return;
       }
 
-      if (this.isFollowUpCandidateMessage(normalizedInputText)) {
-        try {
-          clientMemory = await this.clientMemoryService.upsert(tenantId, resolvedContactNumber, {
-            status: "lead_frio",
-            tags: ["follow_up"]
-          });
-        } catch (memoryError) {
-          console.error("[memory] erro ao marcar lead para follow-up:", memoryError);
-        }
-      }
-
       const chatbotConfig = await prisma.chatbotConfig.findUnique({
         where: {
           instanceId: instance.id
         }
       });
-      const chatbotResult = await this.chatbotService.evaluateInbound(tenantId, instance.id, {
-        text: inputText,
+      const { contextString } = await this.memoryAgent.getContext({
+        tenantId,
+        phoneNumber: resolvedContactNumber,
+        name: contact.displayName
+      });
+
+      if (!inputText) {
+        return;
+      }
+
+      this.appendConversationHistory(session, "user", inputText);
+
+      const fiadoResponse = await this.fiadoAgent.process({
+        message: inputText,
+        phoneNumber: resolvedContactNumber,
+        tenantId,
+        instanceId: instance.id,
+        displayName: contact.displayName ?? null,
+        fiadoEnabled: chatbotConfig?.fiadoEnabled ?? false
+      });
+
+      if (fiadoResponse) {
+        await this.memoryAgent.update({
+          tenantId,
+          phoneNumber: resolvedContactNumber,
+          clientMessage: inputText,
+          name: contact.displayName
+        });
+        await this.sendConversationWithDelay({
+          tenantId,
+          instanceId: instance.id,
+          remoteNumber: resolvedContactNumber,
+          targetJid: event.remoteJid,
+          text: fiadoResponse,
+          metadata: {
+            action: "fiado_agent",
+            kind: "chatbot"
+          },
+          session
+        });
+        return;
+      }
+
+      const rawResponse = await this.conversationAgent.reply({
+        tenantId,
+        instanceId: instance.id,
+        message: inputText,
+        history: session.history,
+        clientContext: contextString,
         isFirstContact,
         contactName: contact.displayName,
         phoneNumber: resolvedContactNumber,
-        remoteJid: event.remoteJid,
-        clientContext: this.buildClientMemoryContext(clientMemory)
+        remoteJid: event.remoteJid
       });
 
-      console.log("[leads] responseText:", chatbotResult?.responseText?.slice(0, 500));
-      console.log("[leads] temResumo:", chatbotResult?.responseText?.includes("[RESUMO_LEAD]"));
-      console.log("[leads] leadsPhone banco:", chatbotConfig?.leadsPhoneNumber ?? "NAO CONFIGURADO");
-
-      if (!chatbotResult?.responseText) {
+      if (!rawResponse) {
+        await this.memoryAgent.update({
+          tenantId,
+          phoneNumber: resolvedContactNumber,
+          clientMessage: inputText,
+          name: contact.displayName
+        });
         return;
       }
 
-      const responseText = chatbotResult.responseText;
-      const resumoRegex = /\[RESUMO_LEAD\]([\s\S]*?)\[\/RESUMO_LEAD\]/;
-      console.log("[leads] extraindo resumo...");
-      const resumoMatch = responseText.match(resumoRegex);
-      console.log("[leads] resumoMatch:", resumoMatch ? "encontrado" : "nao encontrado");
-      let resumoLead = this.normalizeLeadSummaryContact(resumoMatch?.[1]?.trim() ?? null, resolvedContactNumber);
-      const clientResponseText = responseText.replace(resumoRegex, "").trim();
-      const leadAlreadySent = resumoLead ? (await this.redis.get(leadAlreadySentKey)) === "1" : false;
+      const { cleanedText, leadData } = await this.leadAgent.process({
+        responseText: rawResponse,
+        resolvedContactNumber,
+        session,
+        tenantId,
+        instanceId: instance.id,
+        leadsPhoneNumber: chatbotConfig?.leadsPhoneNumber,
+        leadsEnabled: chatbotConfig?.leadsEnabled ?? true
+      });
 
-      if (leadAlreadySent) {
-        console.log("[leads] resumo ignorado porque o lead ja foi enviado nesta conversa");
-        resumoLead = null;
+      await this.memoryAgent.update({
+        tenantId,
+        phoneNumber: resolvedContactNumber,
+        clientMessage: inputText,
+        leadData,
+        name: contact.displayName
+      });
+
+      if (leadData?.isComplete && (!chatbotConfig?.leadsPhoneNumber || chatbotConfig.leadsEnabled === false)) {
+        this.emitLog(buildWorkerKey(tenantId, instance.id), {
+          context: {
+            instanceId: instance.id
+          },
+          instanceId: instance.id,
+          level: "warn",
+          message: "Resumo de lead gerado, mas leadsPhoneNumber nao configurado ou leadsEnabled=false",
+          timestamp: new Date().toISOString()
+        });
       }
 
-      const automationMetadata = {
-        action: chatbotResult.action,
-        matchedRuleId: chatbotResult.matchedRuleId ?? null,
-        matchedRuleName: chatbotResult.matchedRuleName ?? null
-      };
-      const parsedLeadSummary = resumoLead ? this.parseLeadSummary(resumoLead) : null;
-
-      const fiadoEnabled = chatbotConfig?.fiadoEnabled ?? false;
-      if (fiadoEnabled && inputText) {
-        const fiadoRegex = /(\d+)\s+(.+?)\s+(?:por\s+)?(?:R\$\s*)?(\d+(?:[.,]\d{1,2})?)/i;
-        const match = inputText.match(fiadoRegex);
-        if (match) {
-          const qty = parseInt(match[1]);
-          const desc = `${qty}x ${match[2].trim()}`;
-          const value = parseFloat(match[3].replace(",", "."));
-          if (!isNaN(value) && value > 0) {
-            try {
-              const tab = await this.fiadoService.addItem(
-                tenantId,
-                instance.id,
-                remoteNumber,
-                contact.displayName ?? null,
-                desc,
-                value
-              );
-              const totalFormatted = tab.total.toFixed(2).replace(".", ",");
-              await this.sendAutomatedTextMessage(
-                tenantId,
-                instance.id,
-                remoteNumber,
-                event.remoteJid,
-                `✅ Adicionado: ${desc} — R$${value.toFixed(2).replace(".", ",")}\nSeu total: R$${totalFormatted}`,
-                { action: "fiado_add", kind: "chatbot" }
-              );
-
-              const leadsPhone = chatbotConfig?.leadsPhoneNumber;
-              const leadsEnabled2 = chatbotConfig?.leadsEnabled ?? true;
-              if (leadsPhone && leadsEnabled2) {
-                const name = contact.displayName ?? remoteNumber;
-                await this.sendAutomatedTextMessage(
-                  tenantId,
-                  instance.id,
-                  leadsPhone,
-                  undefined,
-                  `🧾 ${name} adicionou: ${desc} — R$${value.toFixed(2).replace(".", ",")}\nTotal atual: R$${totalFormatted}`,
-                  { action: "fiado_notify", kind: "chatbot" }
-                );
-              }
-              return;
-            } catch (err) {
-              console.error("[fiado] erro:", err);
-            }
-          }
-        }
-      }
-
-      const leadsPhone = chatbotConfig?.leadsPhoneNumber;
-
-      if (resumoLead) {
-        console.log("[leads] conteudo:", resumoLead.slice(0, 100));
-        console.log("[leads] leadsPhone para envio:", leadsPhone ?? "UNDEFINED");
-      }
-
-      const leadsEnabled = chatbotConfig?.leadsEnabled ?? true;
-      const camposObrigatorios = [
-        /Nome:\s*(?!não informado|nao informado|\(nome\))/i,
-        /Contato:\s*\d{8,}/,
-        /Horário agendado:\s*(?!não informado|nao informado)/i,
-        /Serviço de interesse:\s*(?!não informado|nao informado)/i
-      ];
-      const resumoCompleto = !leadAlreadySent && camposObrigatorios.every((regex) => regex.test(resumoLead ?? ""));
-
-      if (parsedLeadSummary) {
-        try {
-          clientMemory = await this.clientMemoryService.upsert(tenantId, resolvedContactNumber, {
-            name: parsedLeadSummary.name ?? undefined,
-            projectDescription: parsedLeadSummary.problemDescription ?? undefined,
-            serviceInterest: parsedLeadSummary.serviceInterest ?? undefined,
-            notes: this.mergeClientMemoryNotes(clientMemory?.notes, parsedLeadSummary),
-            scheduledAt: parsedLeadSummary.scheduledAt,
-            ...(resumoCompleto
-              ? {
-                  status: "lead_quente",
-                  tags: ["follow_up"]
-                }
-              : {})
-          });
-        } catch (memoryError) {
-          console.error("[memory] erro ao atualizar memoria pelo resumo:", memoryError);
-        }
-      }
-
-      if (leadAlreadySent) {
-        // Ja houve um lead enviado nesta conversa; ignora novos blocos.
-      } else if (!resumoCompleto) {
-        console.log("[leads] resumo incompleto, aguardando mais informações");
-      } else {
-        const resumoDedupeKey = `leads:sent:${instance.id}:${remoteNumber}:${Date.now().toString().slice(0, -3)}`;
-        const jaEnviado = resumoLead ? await this.redis.get(resumoDedupeKey) : null;
-
-        if (jaEnviado) {
-          console.log("[leads] resumo duplicado ignorado para:", remoteNumber);
-        } else if (leadsPhone && leadsEnabled && resumoLead) {
-          console.log("[leads] tentando enviar para telefone configurado...");
-          try {
-            await this.sendAutomatedTextMessage(
-              tenantId,
-              instance.id,
-              leadsPhone,
-              `${leadsPhone}@s.whatsapp.net`,
-              `🔔 Novo lead agendado:\n\n${resumoLead}`,
-              {
-                action: "lead_summary",
-                kind: "chatbot"
-              }
-            );
-            console.log("[leads] enviado com sucesso!");
-            await this.redis.set(resumoDedupeKey, "1", "EX", 30);
-            await this.redis.set(leadAlreadySentKey, "1");
-          } catch (err) {
-            console.error("[leads] erro ao enviar:", err);
-          }
-        } else if (resumoLead) {
-          console.log("[leads] leadsPhone nao encontrado, nao enviou");
-          this.emitLog(buildWorkerKey(tenantId, instance.id), {
-            context: {
-              instanceId: instance.id
-            },
-            instanceId: instance.id,
-            level: "warn",
-            message: "Resumo de lead gerado, mas leadsPhoneNumber não configurado ou leadsEnabled=false",
-            timestamp: new Date().toISOString()
-          });
-        }
-      }
-      if (!clientResponseText.trim()) {
+      if (!cleanedText.trim()) {
         return;
       }
 
-      const delayLeitura = Math.floor(Math.random() * 1000) + 1500;
-      await new Promise((resolve) => setTimeout(resolve, delayLeitura));
-
-      if (clientResponseText.includes("|||")) {
-        const responseParts = clientResponseText
-          .split("|||")
-          .map((part) => part.trim())
-          .filter(Boolean);
-
-        for (const responsePart of responseParts) {
-          await this.sendAutomatedTextMessage(tenantId, instance.id, remoteNumber, event.remoteJid, responsePart, automationMetadata);
-          const delayDigitacao = Math.floor(Math.random() * 1000) + 1500;
-          await new Promise((resolve) => setTimeout(resolve, delayDigitacao));
-        }
-      } else {
-        await this.sendAutomatedTextMessage(tenantId, instance.id, remoteNumber, event.remoteJid, clientResponseText, automationMetadata);
-      }
+      await this.sendConversationWithDelay({
+        tenantId,
+        instanceId: instance.id,
+        remoteNumber: resolvedContactNumber,
+        targetJid: event.remoteJid,
+        text: cleanedText,
+        metadata: {
+          action: "conversation_agent",
+          kind: "chatbot"
+        },
+        session
+      });
     } catch (error) {
       this.emitLog(buildWorkerKey(tenantId, instance.id), {
         context: {
@@ -1110,163 +1041,123 @@ export class InstanceOrchestrator {
     }
   }
 
-  private buildClientMemoryContext(clientMemory: ClientMemory | null): string {
-    if (!clientMemory) {
-      return "";
-    }
-
-    return [
-      "CONTEXTO DO CLIENTE (use para personalizar o atendimento, mas nao mencione que tem esses dados):",
-      `- Nome registrado: ${clientMemory.name ?? "nao informado"}`,
-      `- E cliente existente: ${clientMemory.isExistingClient ? "SIM" : "NAO ou desconhecido"}`,
-      `- Projeto anterior: ${clientMemory.projectDescription ?? "nenhum registrado"}`,
-      `- Interesse anterior: ${clientMemory.serviceInterest ?? "nenhum registrado"}`,
-      `- Status: ${clientMemory.status}`,
-      `- Tags: ${clientMemory.tags.join(", ") || "nenhuma"}`,
-      `- Observacoes: ${clientMemory.notes ?? "nenhuma"}`
-    ].join("\n");
+  private buildConversationSessionKey(instanceId: string, remoteJid: string): string {
+    return `${instanceId}:${remoteJid}`;
   }
 
-  private buildLeadAlreadySentKey(instanceId: string, remoteJid: string): string {
-    return `chatbot:lead-sent:${instanceId}:${remoteJid}`;
-  }
+  private async getConversationSession(
+    prisma: Awaited<ReturnType<TenantPrismaRegistry["getClient"]>>,
+    sessionKey: string,
+    instanceId: string,
+    remoteJid: string
+  ): Promise<ConversationSession> {
+    const existingSession = this.conversationSessions.get(sessionKey);
 
-  private normalizeLeadSummaryContact(summary: string | null, phoneNumber: string): string | null {
-    if (!summary) {
-      return null;
+    if (existingSession) {
+      return existingSession;
     }
 
-    const normalizedPhoneNumber = normalizePhoneNumber(phoneNumber);
-    const contactLine = `Contato: ${normalizedPhoneNumber}`;
+    const records = await prisma.message.findMany({
+      where: {
+        instanceId,
+        remoteJid
+      },
+      orderBy: {
+        createdAt: "desc"
+      },
+      take: 20,
+      select: {
+        direction: true,
+        payload: true
+      }
+    });
 
-    if (/^Contato:\s*.+$/im.test(summary)) {
-      return summary.replace(/^Contato:\s*.+$/im, contactLine);
+    const history: ChatMessage[] = [];
+
+    for (const record of [...records].reverse()) {
+      const payload = record.payload as Record<string, unknown> | null;
+      const text = typeof payload?.text === "string" ? payload.text.trim() : "";
+
+      if (!text) {
+        continue;
+      }
+
+      history.push({
+        role: record.direction === "INBOUND" ? "user" : "assistant",
+        content: text
+      });
     }
 
-    return `${summary}\n${contactLine}`;
-  }
-
-  private isFollowUpCandidateMessage(input: string): boolean {
-    if (!input) {
-      return false;
-    }
-
-    return [
-      /\b(?:nao|não)\s+(?:tenho\s+)?interesse\b/i,
-      /\b(?:nao|não)\s+agora\b/i,
-      /\bvou\s+pensar\b/i,
-      /\bdepois\s+eu\s+(?:vejo|falo|retorno)\b/i,
-      /\bte\s+aviso\b/i
-    ].some((pattern) => pattern.test(input));
-  }
-
-  private parseLeadSummary(resumoLead: string): {
-    name: string | null;
-    contact: string | null;
-    email: string | null;
-    companyName: string | null;
-    problemDescription: string | null;
-    serviceInterest: string | null;
-    scheduledAt: Date | null;
-  } {
-    const scheduledLabel = this.extractLeadField(resumoLead, /^Hor(?:Ã¡|á|a)rio agendado:\s*(.+)$/im);
-
-    return {
-      name: this.sanitizeLeadField(this.extractLeadField(resumoLead, /^Nome:\s*(.+)$/im)),
-      contact: this.sanitizeLeadField(this.extractLeadField(resumoLead, /^Contato:\s*(.+)$/im)),
-      email: this.sanitizeLeadField(this.extractLeadField(resumoLead, /^E-?mail:\s*(.+)$/im)),
-      companyName: this.sanitizeLeadField(this.extractLeadField(resumoLead, /^Empresa:\s*(.+)$/im)),
-      problemDescription: this.sanitizeLeadField(this.extractLeadField(resumoLead, /^Problema:\s*(.+)$/im)),
-      serviceInterest: this.sanitizeLeadField(this.extractLeadField(resumoLead, /^Servi(?:Ã§|ç|c)o de interesse:\s*(.+)$/im)),
-      scheduledAt: this.parseLeadScheduledAt(scheduledLabel)
+    const session: ConversationSession = {
+      history: history.slice(-20),
+      leadAlreadySent: false
     };
+
+    this.conversationSessions.set(sessionKey, session);
+
+    return session;
   }
 
-  private extractLeadField(summary: string, pattern: RegExp): string | null {
-    return summary.match(pattern)?.[1]?.trim() ?? null;
+  private appendConversationHistory(session: ConversationSession, role: ChatMessage["role"], content: string): void {
+    const trimmedContent = content.trim();
+
+    if (!trimmedContent) {
+      return;
+    }
+
+    const lastMessage = session.history.at(-1);
+
+    if (lastMessage?.role === role && lastMessage.content.trim() === trimmedContent) {
+      return;
+    }
+
+    session.history.push({
+      role,
+      content: trimmedContent
+    });
+
+    if (session.history.length > 20) {
+      session.history.splice(0, session.history.length - 20);
+    }
   }
 
-  private mergeClientMemoryNotes(
-    existingNotes: string | null | undefined,
-    parsedLeadSummary: {
-      email: string | null;
-      companyName: string | null;
-    }
-  ): string | undefined {
-    const noteLines = [
-      parsedLeadSummary.companyName ? `Empresa: ${parsedLeadSummary.companyName}` : null,
-      parsedLeadSummary.email ? `E-mail: ${parsedLeadSummary.email}` : null
-    ].filter((line): line is string => Boolean(line));
+  private async sendConversationWithDelay(params: {
+    tenantId: string;
+    instanceId: string;
+    remoteNumber: string;
+    targetJid: string;
+    text: string;
+    metadata: Record<string, unknown>;
+    session: ConversationSession;
+  }): Promise<void> {
+    const responseParts = params.text
+      .split("|||")
+      .map((part) => part.trim())
+      .filter(Boolean);
 
-    if (noteLines.length === 0) {
-      return undefined;
-    }
-
-    const existing = existingNotes?.trim();
-
-    if (!existing) {
-      return noteLines.join("\n");
+    if (responseParts.length === 0) {
+      return;
     }
 
-    const missingLines = noteLines.filter((line) => !existing.includes(line));
+    const delayLeitura = Math.floor(Math.random() * 1000) + 1500;
+    await new Promise((resolve) => setTimeout(resolve, delayLeitura));
 
-    if (missingLines.length === 0) {
-      return existing;
+    for (const [index, responsePart] of responseParts.entries()) {
+      await this.sendAutomatedTextMessage(
+        params.tenantId,
+        params.instanceId,
+        params.remoteNumber,
+        params.targetJid,
+        responsePart,
+        params.metadata
+      );
+      this.appendConversationHistory(params.session, "assistant", responsePart);
+
+      if (index < responseParts.length - 1) {
+        const delayDigitacao = Math.floor(Math.random() * 1000) + 1500;
+        await new Promise((resolve) => setTimeout(resolve, delayDigitacao));
+      }
     }
-
-    return `${existing}\n${missingLines.join("\n")}`;
-  }
-
-  private sanitizeLeadField(value: string | null): string | null {
-    if (!value) {
-      return null;
-    }
-
-    const normalized = value.normalize("NFKC").trim();
-
-    if (!normalized) {
-      return null;
-    }
-
-    if (
-      ["nao informado", "não informado", "(nome)", "(número)", "(numero)", "(celular)"].includes(
-        normalized.toLowerCase()
-      )
-    ) {
-      return null;
-    }
-
-    return normalized;
-  }
-
-  private parseLeadScheduledAt(value: string | null): Date | null {
-    const sanitized = this.sanitizeLeadField(value);
-
-    if (!sanitized) {
-      return null;
-    }
-
-    const directDate = new Date(sanitized);
-
-    if (!Number.isNaN(directDate.getTime())) {
-      return directDate;
-    }
-
-    const match = sanitized.match(/(\d{1,2})[\/-](\d{1,2})[\/-](\d{2,4})(?:\s*(?:as|às)?\s*(\d{1,2})(?::|h)?(\d{2})?)?/i);
-
-    if (!match) {
-      return null;
-    }
-
-    const day = Number(match[1]);
-    const month = Number(match[2]);
-    const rawYear = Number(match[3]);
-    const year = rawYear < 100 ? 2000 + rawYear : rawYear;
-    const hour = match[4] ? Number(match[4]) : 0;
-    const minute = match[5] ? Number(match[5]) : 0;
-    const parsed = new Date(year, month - 1, day, hour, minute);
-
-    return Number.isNaN(parsed.getTime()) ? null : parsed;
   }
 
   private async sendAutomatedTextMessage(
@@ -1295,7 +1186,6 @@ export class InstanceOrchestrator {
       targetJid,
       text
     };
-    console.log("[sendAutomatedTextMessage] payload final:", JSON.stringify(payload));
     const rpcResult = await this.sendMessage(tenantId, instanceId, payload);
     const prisma = await this.tenantPrismaRegistry.getClient(tenantId);
     const created = await prisma.message.create({
@@ -1423,3 +1313,4 @@ export class InstanceOrchestrator {
     this.logEmitter.emit(key, event);
   }
 }
+

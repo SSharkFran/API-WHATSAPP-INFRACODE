@@ -26,24 +26,24 @@ export default async function SuperAdminBillingPage() {
       <div className="grid gap-5 xl:grid-cols-2">
         {items.map((item) => (
           <Card className="surface-card" key={item.id}>
-            <CardHeader className="border-b border-slate-200/80">
+            <CardHeader className="border-b border-white/8">
               <div className="flex items-start justify-between gap-4">
                 <div>
-                  <CardDescription className="font-[var(--font-mono)] uppercase tracking-[0.24em] text-slate-500">{item.planName}</CardDescription>
-                  <CardTitle className="mt-2 text-2xl text-slate-950">{item.tenantName}</CardTitle>
+                  <CardDescription className="font-[var(--font-mono)] uppercase tracking-[0.24em] text-slate-400">{item.planName}</CardDescription>
+                  <CardTitle className="mt-2 text-2xl text-white">{item.tenantName}</CardTitle>
                 </div>
-                <span className="status-pill bg-slate-950 text-white">{item.status}</span>
+                <span className="status-pill bg-slate-800 text-slate-100">{item.status}</span>
               </div>
             </CardHeader>
-            <CardContent className="grid gap-4 text-sm leading-7 text-slate-600 md:grid-cols-2">
+            <CardContent className="grid gap-4 text-sm leading-7 text-slate-300 md:grid-cols-2">
               <div className="list-row-light rounded-[22px] p-4">
                 <p className="control-kicker text-slate-400">Ciclo</p>
-                <p className="mt-3 text-slate-950">{new Date(item.currentPeriodStart).toLocaleDateString("pt-BR")}</p>
+                <p className="mt-3 text-white">{new Date(item.currentPeriodStart).toLocaleDateString("pt-BR")}</p>
                 <p className="mt-1">Ate {item.currentPeriodEnd ? new Date(item.currentPeriodEnd).toLocaleDateString("pt-BR") : "aberto"}</p>
               </div>
               <div className="list-row-light rounded-[22px] p-4">
                 <p className="control-kicker text-slate-400">Vencimento</p>
-                <p className="mt-3 text-slate-950">
+                <p className="mt-3 text-white">
                   {item.nextDueAt ? new Date(item.nextDueAt).toLocaleDateString("pt-BR") : "nao informado"}
                 </p>
                 <p className="mt-1">Suspenso em {item.suspendedAt ? new Date(item.suspendedAt).toLocaleDateString("pt-BR") : "n/a"}</p>

@@ -13,8 +13,8 @@ export default async function DashboardPage() {
   return (
     <div className="space-y-8">
       <section className="mb-2 max-w-3xl space-y-2">
-        <p className="control-kicker text-sky-700">Legacy dashboard</p>
-        <h2 className="text-3xl font-semibold text-slate-950">Telemetria e distribuicao da operacao</h2>
+        <p className="control-kicker text-sky-300">Legacy dashboard</p>
+        <h2 className="text-3xl font-semibold text-white">Telemetria e distribuicao da operacao</h2>
       </section>
 
       <section className="grid gap-5 lg:grid-cols-3">
@@ -26,14 +26,14 @@ export default async function DashboardPage() {
       <section className="grid gap-5 xl:grid-cols-[1.6fr_1fr]">
         <Card className="surface-card">
           <CardHeader>
-            <CardDescription className="font-[var(--font-mono)] uppercase tracking-[0.24em] text-slate-500">Volume recente</CardDescription>
-            <CardTitle className="text-2xl text-slate-950">Distribuicao por instancia</CardTitle>
+            <CardDescription className="font-[var(--font-mono)] uppercase tracking-[0.24em] text-slate-400">Volume recente</CardDescription>
+            <CardTitle className="text-2xl text-white">Distribuicao por instancia</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             {instances.map((instance) => (
               <div className="list-row-light rounded-[22px] p-4" key={instance.id}>
-                <div className="flex items-center justify-between text-sm text-slate-700">
-                  <span className="font-semibold text-slate-950">{instance.name}</span>
+                <div className="flex items-center justify-between text-sm text-slate-200">
+                  <span className="font-semibold text-white">{instance.name}</span>
                   <span className="font-[var(--font-mono)]">{instance.usage.messagesSent + instance.usage.messagesReceived}</span>
                 </div>
                 <div className="progress-track mt-3">

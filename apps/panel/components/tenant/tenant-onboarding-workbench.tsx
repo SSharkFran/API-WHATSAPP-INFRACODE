@@ -232,9 +232,9 @@ export const TenantOnboardingWorkbench = ({
     <>
       <section className="space-y-6">
         <div className="max-w-3xl space-y-2">
-          <p className="control-kicker text-sky-700">Onboarding</p>
-          <h2 className="text-3xl font-semibold text-slate-950">Primeira instancia, QR e webhook</h2>
-          <p className="text-sm leading-7 text-slate-600">
+          <p className="control-kicker text-sky-300">Onboarding</p>
+          <h2 className="text-3xl font-semibold text-white">Primeira instancia, QR e webhook</h2>
+          <p className="text-sm leading-7 text-slate-300">
             Fluxo guiado para colocar o tenant em producao sem depender de suporte da InfraCode.
           </p>
         </div>
@@ -245,23 +245,23 @@ export const TenantOnboardingWorkbench = ({
         <div className="grid gap-5 xl:grid-cols-[0.95fr_1.05fr]">
           <Card className="surface-card">
             <CardHeader>
-              <CardDescription className="font-[var(--font-mono)] uppercase tracking-[0.24em] text-slate-500">Checklist</CardDescription>
-              <CardTitle className="text-2xl text-slate-950">Estado atual do tenant</CardTitle>
+              <CardDescription className="font-[var(--font-mono)] uppercase tracking-[0.24em] text-slate-400">Checklist</CardDescription>
+              <CardTitle className="text-2xl text-white">Estado atual do tenant</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
               {onboarding.steps.map((step, index) => (
                 <div className="list-row-light rounded-[24px] p-4" key={step.code}>
                   <div className="flex items-start justify-between gap-4">
                     <div className="flex gap-4">
-                      <div className={`mt-1 flex h-10 w-10 items-center justify-center rounded-2xl ${step.completed ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>
+                      <div className={`mt-1 flex h-10 w-10 items-center justify-center rounded-2xl ${step.completed ? "bg-emerald-100 text-emerald-700" : "bg-slate-800 text-slate-300"}`}>
                         {index + 1}
                       </div>
                       <div>
-                        <p className="text-lg font-semibold text-slate-950">{step.label}</p>
-                        <p className="mt-1 font-[var(--font-mono)] text-[11px] uppercase tracking-[0.24em] text-slate-500">{step.code}</p>
+                        <p className="text-lg font-semibold text-white">{step.label}</p>
+                        <p className="mt-1 font-[var(--font-mono)] text-[11px] uppercase tracking-[0.24em] text-slate-400">{step.code}</p>
                       </div>
                     </div>
-                    <span className={`status-pill ${step.completed ? "bg-emerald-600 text-white" : "bg-slate-200 text-slate-700"}`}>
+                    <span className={`status-pill ${step.completed ? "bg-emerald-600 text-white" : "bg-slate-800 text-slate-200"}`}>
                       {step.completed ? "Concluido" : "Pendente"}
                     </span>
                   </div>
@@ -311,12 +311,12 @@ export const TenantOnboardingWorkbench = ({
 
             <Card className="surface-card">
               <CardHeader>
-                <CardDescription className="font-[var(--font-mono)] uppercase tracking-[0.24em] text-slate-500">Runtime</CardDescription>
-                <CardTitle className="text-2xl text-slate-950">Passo 2 · Conectar e acompanhar</CardTitle>
+                <CardDescription className="font-[var(--font-mono)] uppercase tracking-[0.24em] text-slate-400">Runtime</CardDescription>
+                <CardTitle className="text-2xl text-white">Passo 2 · Conectar e acompanhar</CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
                 <label className="space-y-2 text-sm">
-                  <span className="text-slate-600">Instancia alvo</span>
+                  <span className="text-slate-300">Instancia alvo</span>
                   <select className={selectClassName} onChange={(event) => setSelectedInstanceId(event.target.value)} value={selectedInstanceId}>
                     <option value="">Selecione uma instancia</option>
                     {instances.map((instance) => (
@@ -332,11 +332,11 @@ export const TenantOnboardingWorkbench = ({
                     <div className="grid gap-3 md:grid-cols-2">
                       <div className="list-row-light rounded-[22px] p-4">
                         <p className="control-kicker text-slate-400">Status</p>
-                        <p className="mt-2 text-lg font-semibold text-slate-950">{selectedInstance.status}</p>
+                        <p className="mt-2 text-lg font-semibold text-white">{selectedInstance.status}</p>
                       </div>
                       <div className="list-row-light rounded-[22px] p-4">
                         <p className="control-kicker text-slate-400">Numero</p>
-                        <p className="mt-2 text-lg font-semibold text-slate-950">{selectedInstance.phoneNumber ?? "Aguardando scan"}</p>
+                        <p className="mt-2 text-lg font-semibold text-white">{selectedInstance.phoneNumber ?? "Aguardando scan"}</p>
                       </div>
                     </div>
 
@@ -371,7 +371,7 @@ export const TenantOnboardingWorkbench = ({
                     </div>
                   </>
                 ) : (
-                  <div className="list-row-light rounded-[22px] p-4 text-sm text-slate-600">Crie a primeira instancia para liberar QR, health e webhook.</div>
+                  <div className="list-row-light rounded-[22px] p-4 text-sm text-slate-300">Crie a primeira instancia para liberar QR, health e webhook.</div>
                 )}
               </CardContent>
             </Card>
@@ -380,13 +380,13 @@ export const TenantOnboardingWorkbench = ({
 
         <Card className="surface-card">
           <CardHeader>
-            <CardDescription className="font-[var(--font-mono)] uppercase tracking-[0.24em] text-slate-500">Webhook</CardDescription>
-            <CardTitle className="text-2xl text-slate-950">Passo 3 · Fechar o onboarding</CardTitle>
+            <CardDescription className="font-[var(--font-mono)] uppercase tracking-[0.24em] text-slate-400">Webhook</CardDescription>
+            <CardTitle className="text-2xl text-white">Passo 3 · Fechar o onboarding</CardTitle>
           </CardHeader>
           <CardContent className="grid gap-4 xl:grid-cols-[1.05fr_0.95fr]">
             <div className="space-y-4">
               <label className="space-y-2 text-sm">
-                <span className="text-slate-600">URL do webhook</span>
+                <span className="text-slate-300">URL do webhook</span>
                 <Input
                   onChange={(event) => setWebhookForm((current) => ({ ...current, url: event.target.value }))}
                   placeholder="https://seu-sistema.com/webhook"
@@ -394,7 +394,7 @@ export const TenantOnboardingWorkbench = ({
                 />
               </label>
               <label className="space-y-2 text-sm">
-                <span className="text-slate-600">Secret HMAC</span>
+                <span className="text-slate-300">Secret HMAC</span>
                 <Input
                   onChange={(event) => setWebhookForm((current) => ({ ...current, secret: event.target.value }))}
                   placeholder="segredo-webhook-forte"
@@ -402,7 +402,7 @@ export const TenantOnboardingWorkbench = ({
                 />
               </label>
               <label className="space-y-2 text-sm">
-                <span className="text-slate-600">Eventos</span>
+                <span className="text-slate-300">Eventos</span>
                 <Input
                   onChange={(event) => setWebhookForm((current) => ({ ...current, subscribedEvents: event.target.value }))}
                   placeholder={defaultWebhookEvents}
@@ -410,7 +410,7 @@ export const TenantOnboardingWorkbench = ({
                 />
               </label>
               <label className="space-y-2 text-sm">
-                <span className="text-slate-600">Headers em JSON</span>
+                <span className="text-slate-300">Headers em JSON</span>
                 <textarea
                   className="min-h-[180px] w-full rounded-[24px] border border-slate-200/80 bg-white/92 px-4 py-3 text-sm text-slate-950 outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
                   onChange={(event) => setWebhookForm((current) => ({ ...current, headersJson: event.target.value }))}
@@ -433,8 +433,8 @@ export const TenantOnboardingWorkbench = ({
             <div className="space-y-4">
               <div className="list-row-light rounded-[24px] p-4">
                 <p className="control-kicker text-slate-400">Config atual</p>
-                <p className="mt-2 text-lg font-semibold text-slate-950">{webhookConfig ? webhookConfig.url : "Nenhum webhook configurado"}</p>
-                <p className="mt-2 text-sm text-slate-600">
+                <p className="mt-2 text-lg font-semibold text-white">{webhookConfig ? webhookConfig.url : "Nenhum webhook configurado"}</p>
+                <p className="mt-2 text-sm text-slate-300">
                   {webhookConfig ? `${webhookConfig.subscribedEvents.length} eventos ativos` : "Ao salvar, o checklist do onboarding sera atualizado."}
                 </p>
               </div>

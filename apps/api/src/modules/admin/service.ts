@@ -477,7 +477,7 @@ export class PlatformAdminService {
       throw new ApiError(400, "AI_API_KEY_REQUIRED", "Informe a API key da IA para o tenant");
     }
 
-    const aiProvider = (await (this.platformPrisma as any).tenantAiProvider.upsert({
+    const aiProvider = await this.platformPrisma.tenantAiProvider.upsert({
       where: {
         tenantId
       },
@@ -496,7 +496,7 @@ export class PlatformAdminService {
         apiKeyEncrypted: nextApiKeyEncrypted,
         isActive: input.isActive
       }
-    })) as PlatformTenantAiProviderRecord;
+    });
 
     return this.mapTenantAiProvider(tenantId, aiProvider);
   }

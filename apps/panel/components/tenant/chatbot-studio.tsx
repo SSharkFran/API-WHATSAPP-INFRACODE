@@ -162,7 +162,7 @@ export const ChatbotStudio = ({ initialInstances }: ChatbotStudioProps) => {
   const [simulationForm, setSimulationForm] = useState<SimulationFormState>(buildSimulationFormState);
   const [lastSavedConfig, setLastSavedConfig] = useState<ChatbotConfig | null>(null);
   const [simulationResult, setSimulationResult] = useState<ChatbotSimulationResult | null>(null);
-  const [pendingAction, setPendingAction] = useState<"load" | "save" | "simulate" | "disconnect-group" | "save-leads-phone" | null>(null);
+  const [pendingAction, setPendingAction] = useState<"load" | "save" | "simulate" | "save-leads-phone" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [fiadoTabs, setFiadoTabs] = useState<FiadoTab[]>([]);
@@ -316,8 +316,15 @@ export const ChatbotStudio = ({ initialInstances }: ChatbotStudioProps) => {
       });
       setSimulationResult(result); setSuccess("Simulação executada.");
     } catch (caught) {
+<<<<<<< HEAD
       setError(caught instanceof Error ? caught.message : "Falha ao simular.");
     } finally { setPendingAction(null); }
+=======
+      setError(caught instanceof Error ? caught.message : "Falha ao simular o chatbot.");
+    } finally {
+      setPendingAction(null);
+    }
+>>>>>>> 355d31a (verificação no codigo)
   };
 
   if (instances.length === 0) {
@@ -799,3 +806,4 @@ export const ChatbotStudio = ({ initialInstances }: ChatbotStudioProps) => {
     </div>
   );
 };
+

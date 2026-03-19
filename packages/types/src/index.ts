@@ -338,7 +338,8 @@ export type ClientMemoryTag =
   | "cliente_antigo"
   | "sem_resposta"
   | "orcamento_enviado"
-  | "fechado";
+  | "fechado"
+  | "paused_by_human";
 
 export interface ClientMemory {
   id: string;
@@ -357,7 +358,7 @@ export interface ClientMemory {
 }
 
 export interface ChatbotSimulationResult {
-  action: "MATCHED" | "WELCOME" | "FALLBACK" | "AI" | "NO_MATCH";
+  action: "MATCHED" | "WELCOME" | "FALLBACK" | "AI" | "HUMAN_HANDOFF" | "NO_MATCH";
   matchedRuleId?: string | null;
   matchedRuleName?: string | null;
   responseText?: string | null;
@@ -513,7 +514,9 @@ export interface WebhookBidirecionalModuleConfig extends BaseModuleConfig {
 }
 
 export interface GoogleCalendarModuleConfig extends BaseModuleConfig {
-  credentials: string;
+  clientId: string;
+  clientSecret: string;
+  refreshToken: string;
   calendarId: string;
 }
 

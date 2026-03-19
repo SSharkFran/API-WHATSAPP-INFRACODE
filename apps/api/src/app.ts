@@ -19,6 +19,7 @@ import { createWebhookQueue } from "./queues/webhook-queue.js";
 import { authPlugin } from "./plugins/auth.js";
 import { swaggerPlugin } from "./plugins/swagger.js";
 import { PlatformAdminService } from "./modules/admin/service.js";
+import { AdminMemoryService } from "./modules/chatbot/admin-memory.service.js";
 import { AuthService } from "./modules/auth/service.js";
 import { ClientMemoryService } from "./modules/chatbot/memory.service.js";
 import { ChatbotService } from "./modules/chatbot/service.js";
@@ -69,6 +70,7 @@ export const buildApp = async () => {
   const clientMemoryService = new ClientMemoryService({
     tenantPrismaRegistry
   });
+  const adminMemoryService = new AdminMemoryService(config.DATA_DIR);
   const fiadoService = new FiadoService({
     tenantPrismaRegistry
   });
@@ -104,6 +106,7 @@ export const buildApp = async () => {
     webhookService,
     chatbotService,
     clientMemoryService,
+    adminMemoryService,
     fiadoService
   });
   const platformAlertService = new PlatformAlertService(platformPrisma, instanceOrchestrator);

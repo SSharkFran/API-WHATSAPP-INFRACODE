@@ -3,6 +3,7 @@ import { mkdir, rm } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { Worker } from "node:worker_threads";
 import type {
+  ClientMemoryTag,
   InstanceHealthReport,
   InstanceLogEvent,
   InstanceSummary,
@@ -20,6 +21,7 @@ import { normalizePhoneNumber, toJid } from "../../lib/phone.js";
 import { ConversationAgent } from "../chatbot/agents/conversation.agent.js";
 import { FiadoAgent } from "../chatbot/agents/fiado.agent.js";
 import { MemoryAgent } from "../chatbot/agents/memory.agent.js";
+import { AdminMemoryService } from "../chatbot/admin-memory.service.js";
 import type { ChatMessage, ConversationSession, LeadData } from "../chatbot/agents/types.js";
 import type { ClientMemoryService } from "../chatbot/memory.service.js";
 import type { ChatbotService } from "../chatbot/service.js";
@@ -38,6 +40,7 @@ interface InstanceOrchestratorDeps {
   planEnforcementService: PlanEnforcementService;
   chatbotService: ChatbotService;
   clientMemoryService: ClientMemoryService;
+  adminMemoryService: AdminMemoryService;
   fiadoService: FiadoService;
   platformAlertService?: PlatformAlertService;
 }
@@ -127,6 +130,7 @@ interface CreateInstanceInput {
 }
 
 const buildWorkerKey = (tenantId: string, instanceId: string): string => `${tenantId}:${instanceId}`;
+const ADMIN_PHONE = "5599999999999";
 
 /**
  * Orquestra o ciclo de vida das instancias WhatsApp em workers isolados.
@@ -139,6 +143,8 @@ export class InstanceOrchestrator {
   private readonly redis: IORedis;
   private readonly webhookService: WebhookService;
   private readonly planEnforcementService: PlanEnforcementService;
+  private readonly clientMemoryService: ClientMemoryService;
+  private readonly adminMemoryService: AdminMemoryService;
   private readonly memoryAgent: MemoryAgent;
   private readonly conversationAgent: ConversationAgent;
   private readonly fiadoAgent: FiadoAgent;
@@ -157,6 +163,8 @@ export class InstanceOrchestrator {
     this.redis = deps.redis;
     this.webhookService = deps.webhookService;
     this.planEnforcementService = deps.planEnforcementService;
+    this.clientMemoryService = deps.clientMemoryService;
+    this.adminMemoryService = deps.adminMemoryService;
     this.memoryAgent = new MemoryAgent({
       clientMemoryService: deps.clientMemoryService
     });
@@ -1106,6 +1114,24 @@ if (event.status === "CONNECTED") {
         return;
       }
 
+      const clientMemory = await this.clientMemoryService.findByPhone(tenantId, resolvedContactNumber);
+
+      if (
+        inputText &&
+        await this.adminMemoryService.handleAdminCommand(
+          instance.id,
+          ADMIN_PHONE,
+          resolvedContactNumber,
+          inputText
+        )
+      ) {
+        return;
+      }
+
+      if (clientMemory?.tags.includes("paused_by_human")) {
+        return;
+      }
+
       const { contextString } = await this.memoryAgent.getContext({
         tenantId,
         phoneNumber: resolvedContactNumber,
@@ -1149,7 +1175,7 @@ if (event.status === "CONNECTED") {
         return;
       }
 
-      const rawResponse = await this.conversationAgent.reply({
+      const chatbotResult = await this.conversationAgent.reply({
         tenantId,
         instanceId: instance.id,
         message: finalInputText,
@@ -1160,6 +1186,23 @@ if (event.status === "CONNECTED") {
         phoneNumber: contact.phoneNumber ?? remoteNumber,
         remoteJid: event.remoteJid
       });
+
+      if (chatbotResult?.action === "HUMAN_HANDOFF") {
+        await this.clientMemoryService.upsert(tenantId, resolvedContactNumber, {
+          name: contact.displayName,
+          lastContactAt: new Date(),
+          tags: [...new Set<ClientMemoryTag>([...(clientMemory?.tags ?? []), "paused_by_human"])]
+        });
+
+        await this.sendMessage(tenantId, instance.id, {
+          type: "text",
+          to: ADMIN_PHONE,
+          text: `Transbordo humano solicitado pelo cliente ${resolvedContactNumber}. O bot foi pausado para este contato.`
+        });
+        return;
+      }
+
+      const rawResponse = chatbotResult?.responseText ?? null;
 
       if (!rawResponse) {
         await this.memoryAgent.update({

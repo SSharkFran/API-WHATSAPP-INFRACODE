@@ -16,7 +16,8 @@ export const clientMemoryTagSchema = z.enum([
   "cliente_antigo",
   "sem_resposta",
   "orcamento_enviado",
-  "fechado"
+  "fechado",
+  "paused_by_human"
 ]);
 
 export const chatbotRuleSchema = z.object({
@@ -130,8 +131,16 @@ export const chatbotSimulationBodySchema = z.object({
 });
 
 export const chatbotSimulationResponseSchema = z.object({
-  action: z.enum(["MATCHED", "WELCOME", "FALLBACK", "AI", "NO_MATCH"]),
+  action: z.enum(["MATCHED", "WELCOME", "FALLBACK", "AI", "HUMAN_HANDOFF", "NO_MATCH"]),
   matchedRuleId: z.string().nullable().optional(),
   matchedRuleName: z.string().nullable().optional(),
   responseText: z.string().nullable().optional()
+});
+
+export const googleCalendarModuleSchema = z.object({
+  isEnabled: z.boolean().default(false),
+  clientId: z.string().min(1),
+  clientSecret: z.string().min(1),
+  refreshToken: z.string().min(1),
+  calendarId: z.string().min(1)
 });

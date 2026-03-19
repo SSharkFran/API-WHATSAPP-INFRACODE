@@ -1,4 +1,6 @@
 import type { ChatbotAiProvider, ChatbotConfig, ChatbotModules, ChatbotRule, ChatbotSimulationResult } from "@infracode/types";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import { z } from "zod";
 import type { Prisma } from "../../../../../prisma/generated/tenant-client/index.js";
 import type { AppConfig } from "../../config.js";
@@ -6,7 +8,8 @@ import type { PlatformPrisma, TenantPrismaRegistry } from "../../lib/database.js
 import { decrypt } from "../../lib/crypto.js";
 import { ApiError } from "../../lib/errors.js";
 import { assertValidPhoneNumber, normalizePhoneNumber } from "../../lib/phone.js";
-import { chatbotAiConfigSchema, chatbotRuleSchema, upsertChatbotAiBodySchema } from "./schemas.js";
+import { chatbotAiConfigSchema, chatbotRuleSchema, googleCalendarModuleSchema, upsertChatbotAiBodySchema } from "./schemas.js";
+import { GoogleCalendarTool } from "./tools/google-calendar.tool.js";
 import type { PlatformAlertService } from "../platform/alert.service.js";
 
 interface ChatbotServiceDeps {
@@ -32,6 +35,44 @@ interface ManagedAiProviderRuntime {
   isActive: boolean;
   isConfigured: boolean;
   apiKeyEncrypted: string | null;
+}
+
+interface OpenAiToolCall {
+  id: string;
+  type?: string;
+  function?: {
+    name?: string;
+    arguments?: string;
+  };
+}
+
+type OpenAiCompatibleMessage =
+  | {
+      role: "system" | "user";
+      content: string;
+    }
+  | {
+      role: "assistant";
+      content: string | null;
+      tool_calls?: OpenAiToolCall[];
+    }
+  | {
+      role: "tool";
+      tool_call_id: string;
+      name: string;
+      content: string;
+    };
+
+interface ChatbotToolRuntime {
+  definitions: Array<{
+    type: "function";
+    function: {
+      name: "checkAvailability" | "createEvent";
+      description: string;
+      parameters: Record<string, unknown>;
+    };
+  }>;
+  googleCalendar: GoogleCalendarTool;
 }
 
 const chatbotRulesArraySchema = z.array(chatbotRuleSchema);
@@ -479,7 +520,7 @@ private async evaluateConfig(
     return parsed as unknown as Prisma.InputJsonValue;
   }
 
-private async evaluateWithAi(
+  private async evaluateWithAi(
     tenantId: string,
     prisma: Awaited<ReturnType<TenantPrismaRegistry["getClient"]>>,
     config: ChatbotConfig,
@@ -513,24 +554,87 @@ private async evaluateWithAi(
         config.ai.systemPrompt,
         config.ai.maxContextMessages
       );
+      let toolRuntime: ChatbotToolRuntime | undefined;
+      const googleCalendarConfigResult = googleCalendarModuleSchema.safeParse(config.modules?.googleCalendar);
+
+      if (googleCalendarConfigResult.success && googleCalendarConfigResult.data.isEnabled) {
+        toolRuntime = {
+          googleCalendar: new GoogleCalendarTool(googleCalendarConfigResult.data),
+          definitions: [
+            {
+              type: "function",
+              function: {
+                name: "checkAvailability",
+                description: "Consulta horarios disponiveis no Google Calendar para uma data especifica.",
+                parameters: {
+                  type: "object",
+                  properties: {
+                    date: {
+                      type: "string",
+                      description: "Data no formato YYYY-MM-DD para consultar disponibilidade."
+                    }
+                  },
+                  required: ["date"],
+                  additionalProperties: false
+                }
+              }
+            },
+            {
+              type: "function",
+              function: {
+                name: "createEvent",
+                description: "Cria um evento de agendamento confirmado no Google Calendar.",
+                parameters: {
+                  type: "object",
+                  properties: {
+                    summary: {
+                      type: "string",
+                      description: "Titulo do evento."
+                    },
+                    description: {
+                      type: "string",
+                      description: "Descricao detalhada do agendamento."
+                    },
+                    startDateTime: {
+                      type: "string",
+                      description: "Data/hora inicial em formato ISO 8601."
+                    },
+                    endDateTime: {
+                      type: "string",
+                      description: "Data/hora final em formato ISO 8601."
+                    }
+                  },
+                  required: ["summary", "description", "startDateTime", "endDateTime"],
+                  additionalProperties: false
+                }
+              }
+            }
+          ]
+        };
+      }
+
       const responseText = await this.callAiWithFallback(
         tenantId,
         managedAiProvider,
         apiKey,
         conversation,
         config.ai.temperature,
-        config
+        config,
+        toolRuntime
       );
 
       if (!responseText) {
         return null;
       }
 
+      const isHandoff = /\[TRANSBORDO_HUMANO\]/i.test(responseText);
+      const cleanedText = responseText.replace(/\[TRANSBORDO_HUMANO\]/gi, "").trim();
+
       return {
-        action: "AI",
+        action: isHandoff ? "HUMAN_HANDOFF" : "AI",
         matchedRuleId: null,
         matchedRuleName: `${managedAiProvider.provider}:${managedAiProvider.model}`,
-        responseText
+        responseText: cleanedText
       };
     } catch (err) {
       console.error("[chatbot:ai] erro:", err);
@@ -578,11 +682,24 @@ private async evaluateWithAi(
       "REGRA CRITICA: So inclua o bloco [RESUMO_LEAD] quando o agendamento estiver 100% confirmado, com nome completo do cliente, data e horario definidos e servico de interesse identificado. Se qualquer um desses campos estiver faltando, pergunte ao cliente antes de gerar o bloco. NUNCA gere [RESUMO_LEAD] com campos 'nao informado' nos campos Nome, Horario agendado ou Servico de interesse."
     ];
 
+    const memoryFilePath = join(this.config.DATA_DIR, "instances", instanceId, "memory.md");
+    try {
+      const memoryContent = await readFile(memoryFilePath, "utf-8");
+      if (memoryContent.trim()) {
+        systemParts.push(`\n--- CONTEXTO LOCAL (memory.md) ---\n${memoryContent.trim()}`);
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+        throw error;
+      }
+    }
+
     if (input.clientContext?.trim()) {
       systemParts.push(input.clientContext.trim());
     }
 
     const system = systemParts.join("\n");
+
     const messages: Array<{ role: "user" | "assistant"; content: string }> = [];
 
     if (input.remoteJid) {
@@ -665,14 +782,16 @@ private async evaluateWithAi(
       messages: Array<{ role: "user" | "assistant"; content: string }>;
     },
     temperature: number,
-    config: ChatbotConfig
+    config: ChatbotConfig,
+    toolRuntime?: ChatbotToolRuntime
   ): Promise<string | null> {
     try {
       return await this.requestOpenAiCompatibleCompletion(
         managedAiProvider,
         apiKey,
         conversation,
-        temperature
+        temperature,
+        toolRuntime
       );
     } catch (err: unknown) {
       const fetchErr = err as { status?: number; statusCode?: number; message?: string };
@@ -860,18 +979,27 @@ private async evaluateWithAi(
       system: string;
       messages: Array<{ role: "user" | "assistant"; content: string }>;
     },
-    temperature: number
+    temperature: number,
+    toolRuntime?: ChatbotToolRuntime,
+    messageHistory?: OpenAiCompatibleMessage[],
+    recursionDepth = 0
   ): Promise<string | null> {
     const provider = managedAiProvider.provider as string | null;
     const baseUrl = managedAiProvider.baseUrl.endsWith("/") ? managedAiProvider.baseUrl : `${managedAiProvider.baseUrl}/`;
     const isAnthropic = provider === "ANTHROPIC";
-    const messagesWithSystem = [
-      {
-        role: "system" as const,
-        content: conversation.system
-      },
-      ...conversation.messages
-    ];
+    const messagesWithSystem: OpenAiCompatibleMessage[] =
+      messageHistory ??
+      [
+        {
+          role: "system",
+          content: conversation.system
+        },
+        ...conversation.messages.map((message) => ({
+          role: message.role,
+          content: message.content
+        }))
+      ];
+    const openAiTools = !isAnthropic && toolRuntime?.definitions.length ? toolRuntime.definitions : undefined;
     const url = isAnthropic ? "https://api.anthropic.com/v1/messages" : new URL("chat/completions", baseUrl).toString();
     const response = await fetch(url, {
       method: "POST",
@@ -899,7 +1027,13 @@ private async evaluateWithAi(
               model: managedAiProvider.model,
               messages: messagesWithSystem,
               temperature,
-              max_tokens: 500
+              max_tokens: 500,
+              ...(openAiTools
+                ? {
+                    tools: openAiTools,
+                    tool_choice: "auto" as const
+                  }
+                : {})
             }
       )
     });
@@ -931,24 +1065,116 @@ private async evaluateWithAi(
     const json = (await response.json()) as {
       choices?: Array<{
         message?: {
+          tool_calls?: OpenAiToolCall[];
           content?: string | Array<{ type?: string; text?: string }>;
         };
       }>;
     };
-    const content = json.choices?.[0]?.message?.content;
+    const message = json.choices?.[0]?.message;
+    const content = message?.content;
+    const normalizedContent =
+      typeof content === "string"
+        ? content.trim() || null
+        : Array.isArray(content)
+          ? content
+              .map((item) => (typeof item.text === "string" ? item.text : ""))
+              .join("\n")
+              .trim() || null
+          : null;
+    const toolCalls = Array.isArray(message?.tool_calls) ? message.tool_calls.filter((item) => typeof item?.id === "string") : [];
 
-    if (typeof content === "string") {
-      return content.trim() || null;
+    if (!isAnthropic && toolRuntime?.googleCalendar && toolCalls.length > 0) {
+      if (recursionDepth >= 3) {
+        throw new Error("Limite de execucao de tools atingido");
+      }
+
+      const nextMessages: OpenAiCompatibleMessage[] = [
+        ...messagesWithSystem,
+        {
+          role: "assistant",
+          content: normalizedContent,
+          tool_calls: toolCalls
+        }
+      ];
+
+      for (const toolCall of toolCalls) {
+        const functionName = toolCall.function?.name;
+        const rawArguments = toolCall.function?.arguments ?? "{}";
+
+        if (!functionName || (functionName !== "checkAvailability" && functionName !== "createEvent")) {
+          nextMessages.push({
+            role: "tool",
+            tool_call_id: toolCall.id,
+            name: functionName ?? "unknown",
+            content: JSON.stringify({
+              success: false,
+              error: `Ferramenta nao suportada: ${functionName ?? "desconhecida"}`
+            })
+          });
+          continue;
+        }
+
+        let parsedArguments: Record<string, unknown> = {};
+
+        try {
+          parsedArguments = JSON.parse(rawArguments) as Record<string, unknown>;
+        } catch {
+          nextMessages.push({
+            role: "tool",
+            tool_call_id: toolCall.id,
+            name: functionName,
+            content: JSON.stringify({
+              success: false,
+              error: "Argumentos invalidos para a ferramenta"
+            })
+          });
+          continue;
+        }
+
+        try {
+          const toolResult =
+            functionName === "checkAvailability"
+              ? await toolRuntime.googleCalendar.checkAvailability(
+                  typeof parsedArguments.date === "string" ? parsedArguments.date : ""
+                )
+              : await toolRuntime.googleCalendar.createEvent(
+                  typeof parsedArguments.summary === "string" ? parsedArguments.summary : "",
+                  typeof parsedArguments.description === "string" ? parsedArguments.description : "",
+                  typeof parsedArguments.startDateTime === "string" ? parsedArguments.startDateTime : "",
+                  typeof parsedArguments.endDateTime === "string" ? parsedArguments.endDateTime : ""
+                );
+
+          nextMessages.push({
+            role: "tool",
+            tool_call_id: toolCall.id,
+            name: functionName,
+            content: JSON.stringify(toolResult)
+          });
+        } catch (error) {
+          nextMessages.push({
+            role: "tool",
+            tool_call_id: toolCall.id,
+            name: functionName,
+            content: JSON.stringify({
+              success: false,
+              error: error instanceof Error ? error.message : "Erro ao executar ferramenta"
+            })
+          });
+        }
+      }
+
+      return this.requestOpenAiCompatibleCompletion(
+        managedAiProvider,
+        apiKey,
+        conversation,
+        temperature,
+        toolRuntime,
+        nextMessages,
+        recursionDepth + 1
+      );
     }
 
-    if (Array.isArray(content)) {
-      return content
-        .map((item) => (typeof item.text === "string" ? item.text : ""))
-        .join("\n")
-        .trim();
-    }
-
-    return null;
+    return normalizedContent;
   }
 }
 

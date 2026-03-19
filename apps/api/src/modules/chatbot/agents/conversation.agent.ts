@@ -1,3 +1,4 @@
+import type { ChatbotSimulationResult } from "@infracode/types";
 import type { ChatbotService } from "../service.js";
 import type { ChatMessage } from "./types.js";
 
@@ -24,8 +25,8 @@ export class ConversationAgent {
     contactName?: string | null;
     phoneNumber: string;
     remoteJid?: string | null;
-  }): Promise<string | null> {
-    const result = await this.chatbotService.evaluateInbound(params.tenantId, params.instanceId, {
+  }): Promise<ChatbotSimulationResult | null> {
+    return this.chatbotService.evaluateInbound(params.tenantId, params.instanceId, {
       text: params.message,
       isFirstContact: params.isFirstContact,
       contactName: undefined,
@@ -33,7 +34,5 @@ export class ConversationAgent {
       remoteJid: params.remoteJid,
       clientContext: params.clientContext
     });
-
-    return result?.responseText ?? null;
   }
 }

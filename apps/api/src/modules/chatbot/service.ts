@@ -656,30 +656,28 @@ private async evaluateConfig(
     const systemParts = [
       systemPrompt.trim() || defaultAiSettings.systemPrompt,
       `Data atual: ${formatDate(new Date())} ${formatTime(new Date())}.`,
-      `Nome de perfil (WhatsApp): ${input.contactName?.trim() || "cliente"}.`,
+      `Nome do perfil: ${input.contactName?.trim() || "cliente"}.`,
       `Numero exato do cliente: ${normalizedPhoneNumber}.`,
-      "### REGRAS DE IDENTIDADE E COMPORTAMENTO ###",
-      '1. NOME: Se o cliente pedir para ser chamado de um nome especifico (ex: "Me chama de Joao"), IGNORE o Nome de perfil do WhatsApp e use apenas o nome que ele pediu.',
-      "2. RESPOSTAS CURTAS: Evite respostas longas. Responda em 1 a 3 frases no maximo.",
-      "### FLUXO DE AGENDAMENTO (SIGA ESTRITAMENTE NESTA ORDEM) ###",
-      "Quando chegar o momento de agendar, voce deve OBRIGATORIAMENTE realizar os passos em mensagens separadas:",
-      'PASSO A: Pergunte: "Qual o melhor e-mail para contato? (Pode deixar em branco se preferir so o WhatsApp)".',
-      "PASSO B: Se o cliente citou que tem empresa ou negocio, pergunte o nome da empresa e o nome completo dele. Se for projeto pessoal, nao pergunte da empresa.",
-      'PASSO C: Sugira a data/hora exata calculada (ex: "Terca seria dia DD/MM/AAAA as 14h, certo?"). PARE A MENSAGEM AQUI. Voce e PROIBIDO de gerar o [RESUMO_LEAD] nesta etapa.',
-      "### GERACAO DO RESUMO (ACAO FINAL) ###",
-      'REGRA CRITICA: Voce SO TEM PERMISSAO para gerar o bloco [RESUMO_LEAD] DEPOIS que o cliente responder "sim", "certo" ou confirmar explicitamente a data sugerida no PASSO C.',
-      "Se o cliente ainda nao confirmou a data, NUNCA exiba o bloco [RESUMO_LEAD].",
-      "Quando o cliente confirmar, responda SOMENTE com uma frase de despedida e o bloco abaixo preenchido com os dados reais da conversa:",
+      "### REGRAS GERAIS ###",
+      "1. Responda em 1 a 3 frases no maximo. Seja direto.",
+      '2. O cliente dita o nome: Se ele disser "me chamo X", use X e ignore o Nome do perfil.',
+      "### GATILHOS DE ATENDIMENTO E AGENDAMENTO ###",
+      "Voce deve conduzir a conversa dependendo do que ja foi respondido. Siga as condicoes abaixo:",
+      'CONDICAO 1 - ANTES DE AGENDAR: Se voce ja entendeu o problema do cliente, mas ainda nao tem o e-mail dele, pergunte: "Qual o melhor e-mail para contato? (Pode deixar em branco se preferir so o WhatsApp)". Nao sugira horario ainda.',
+      "CONDICAO 2 - PROPOR DATA: Se voce ja tem (ou o cliente recusou dar) o e-mail, pergunte o melhor dia e horario para a reuniao.",
+      'CONDICAO 3 - CONFIRMAR DATA: Quando o cliente sugerir um dia/horario, calcule a data exata e confirme (Ex: "Ficaria para o dia DD/MM/AAAA as HH:00h, certo?"). PARE A MENSAGEM AI.',
+      "### GATILHO FINAL: GERACAO DO LEAD (OBRIGATORIO) ###",
+      'SE (e somente se) o cliente confirmar a data/hora exata com "sim", "certo", "fechado" ou equivalente, VOCE DEVE OBRIGATORIAMENTE finalizar a conversa imprimindo o bloco abaixo preenchido:',
       "[RESUMO_LEAD]\n" +
-        "Nome: {nome exato que o cliente informou}\n" +
+        "Nome: {nome do cliente}\n" +
         `Contato: ${normalizedPhoneNumber}\n` +
-        "E-mail: {e-mail real ou 'nao informado'}\n" +
-        "Empresa: {empresa real ou 'nao informado'}\n" +
+        "E-mail: {e-mail informado ou 'nao informado'}\n" +
+        "Empresa: {empresa se citada ou 'nao informado'}\n" +
         "Problema: {resumo do problema}\n" +
         "Servico de interesse: {servico}\n" +
         "Horario agendado: {data e hora confirmada}\n" +
         "[/RESUMO_LEAD]",
-      `REGRA ABSOLUTA: O campo "Contato:" deve conter EXATAMENTE este numero: ${normalizedPhoneNumber}. Nunca use chaves {}.`
+      'ATENCAO MAXIMA: Sem este bloco o sistema quebra. Nunca esqueca de imprimi-lo apos o "sim" do cliente.'
     ];
 
     const memoryFilePath = join(this.config.DATA_DIR, "instances", instanceId, "memory.md");

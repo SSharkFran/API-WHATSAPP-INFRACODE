@@ -2,8 +2,8 @@
 
 import { useState, useEffect } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@infracode/ui";
-import { Button } from "../ui/Button";
-import { requestClientApi } from "../../lib/client-api";
+import { Button } from "../../../../components/ui/Button";
+import { requestClientApi } from "../../../../lib/client-api";
 import { CheckCircle2, AlertTriangle, Loader2 } from "lucide-react";
 
 interface AlertConfig {

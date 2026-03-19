@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import type {
   ChatbotAiMode,
   ChatbotConfig,
+  ChatbotModules,
   ChatbotRule,
   ChatbotSimulationResult,
   ChatbotTriggerType,
@@ -41,6 +42,10 @@ interface ChatbotFormState {
     isProviderConfigured: boolean;
     isProviderActive: boolean;
   };
+  aiFallbackProvider: string;
+  aiFallbackApiKey: string;
+  aiFallbackModel: string;
+  modules: ChatbotModules;
 }
 
 interface SimulationFormState {
@@ -50,7 +55,7 @@ interface SimulationFormState {
   phoneNumber: string;
 }
 
-type StudioTab = "geral" | "prompt" | "leads" | "fiado" | "estado";
+type StudioTab = "geral" | "prompt" | "leads" | "fiado" | "modulos" | "ia-reserva" | "estado";
 
 const triggerTypeLabels: Record<ChatbotTriggerType, string> = {
   EXACT: "Exato",
@@ -93,7 +98,11 @@ const buildDefaultFormState = (): ChatbotFormState => ({
     isManagedByAdmin: true,
     isProviderConfigured: false,
     isProviderActive: false
-  }
+  },
+  aiFallbackProvider: "",
+  aiFallbackApiKey: "",
+  aiFallbackModel: "",
+  modules: {}
 });
 
 const buildSimulationFormState = (): SimulationFormState => ({
@@ -122,7 +131,11 @@ const mapConfigToFormState = (config: ChatbotConfig): ChatbotFormState => ({
     isManagedByAdmin: config.ai.isManagedByAdmin,
     isProviderConfigured: config.ai.isProviderConfigured,
     isProviderActive: config.ai.isProviderActive
-  }
+  },
+  aiFallbackProvider: config.aiFallbackProvider ?? "",
+  aiFallbackApiKey: config.aiFallbackApiKey ?? "",
+  aiFallbackModel: config.aiFallbackModel ?? "",
+  modules: config.modules ?? {}
 });
 
 const formatDateTime = (value?: string | null): string =>
@@ -150,6 +163,8 @@ const tabs: { id: StudioTab; label: string }[] = [
   { id: "prompt", label: "Prompt IA" },
   { id: "leads", label: "Leads" },
   { id: "fiado", label: "Fiado" },
+  { id: "modulos", label: "Módulos" },
+  { id: "ia-reserva", label: "IA Reserva" },
   { id: "estado", label: "Estado" }
 ];
 
@@ -265,7 +280,11 @@ export const ChatbotStudio = ({ initialInstances }: ChatbotStudioProps) => {
             systemPrompt: formState.ai.systemPrompt.trim(),
             temperature: formState.ai.temperature,
             maxContextMessages: formState.ai.maxContextMessages
-          }
+          },
+          aiFallbackProvider: formState.aiFallbackProvider || null,
+          aiFallbackApiKey: formState.aiFallbackApiKey.trim() || null,
+          aiFallbackModel: formState.aiFallbackModel.trim() || null,
+          modules: formState.modules
         }
       });
       setLastSavedConfig(saved);
@@ -756,6 +775,382 @@ export const ChatbotStudio = ({ initialInstances }: ChatbotStudioProps) => {
           </div>
         )}
 
+        {/* ── IA RESERVA ────────────────────────────────────────────────── */}
+        {activeTab === "ia-reserva" && (
+          <div className="rounded-[var(--radius-lg)] border border-[var(--border-subtle)] bg-[var(--bg-secondary)] overflow-hidden max-w-xl">
+            <div className="px-5 py-4 border-b border-[var(--border-subtle)]">
+              <p className="text-[10px] font-mono uppercase tracking-widest text-[var(--text-tertiary)] mb-1">Fallback de IA</p>
+              <h2 className="text-base font-semibold text-[var(--text-primary)]">Provider reserva</h2>
+            </div>
+            <div className="p-5 space-y-5">
+              <div className="rounded-[var(--radius-md)] border border-[var(--accent-blue)]/20 bg-[var(--accent-blue)]/8 px-4 py-3 text-sm text-[var(--text-secondary)]">
+                Usado automaticamente se o provider principal (Groq) falhar com erro 429 (rate limit) ou 5xx.
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium text-[var(--text-secondary)]">Provider reserva</label>
+                <select
+                  className={selectClass}
+                  value={formState.aiFallbackProvider}
+                  onChange={(e) => setFormState((c) => ({ ...c, aiFallbackProvider: e.target.value }))}
+                >
+                  <option value="">Nenhum</option>
+                  <option value="openai">OpenAI</option>
+                  <option value="anthropic">Anthropic</option>
+                  <option value="gemini">Gemini</option>
+                  <option value="ollama">Ollama</option>
+                </select>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium text-[var(--text-secondary)]">API Key do provider reserva</label>
+                <input
+                  type="password"
+                  className={[fieldClass, "h-11"].join(" ")}
+                  placeholder={formState.aiFallbackProvider === "ollama" ? "Nao se aplica para Ollama" : "sk-..."}
+                  value={formState.aiFallbackApiKey}
+                  onChange={(e) => setFormState((c) => ({ ...c, aiFallbackApiKey: e.target.value }))}
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium text-[var(--text-secondary)]">Modelo reserva</label>
+                <input
+                  type="text"
+                  className={[fieldClass, "h-11"].join(" ")}
+                  placeholder={
+                    formState.aiFallbackProvider === "anthropic"
+                      ? "claude-haiku-4-5-20251001"
+                      : formState.aiFallbackProvider === "gemini"
+                        ? "gemini-2.0-flash"
+                        : formState.aiFallbackProvider === "ollama"
+                          ? "llama3.1:8b"
+                          : "gpt-4o-mini"
+                  }
+                  value={formState.aiFallbackModel}
+                  onChange={(e) => setFormState((c) => ({ ...c, aiFallbackModel: e.target.value }))}
+                />
+                <p className="text-[10px] text-[var(--text-tertiary)]">
+                  {formState.aiFallbackProvider === "anthropic"
+                    ? "Ex: claude-haiku-4-5-20251001, claude-sonnet-4-20250514"
+                    : formState.aiFallbackProvider === "gemini"
+                      ? "Ex: gemini-2.0-flash, gemini-1.5-flash"
+                      : formState.aiFallbackProvider === "ollama"
+                        ? "Ex: llama3.1:8b, qwen2.5:7b. Usa OLLAMA_HOST no backend."
+                        : "Ex: gpt-4o-mini, gpt-4o"}
+                </p>
+              </div>
+
+              <div className="flex gap-3 pt-1">
+                <Button variant="primary" size="md" loading={pendingAction === "save"}
+                  disabled={pendingAction !== null || !selectedInstance} onClick={() => void saveConfig()}>
+                  <Save aria-hidden="true" className="h-3.5 w-3.5" /> Salvar
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── MÓDULOS ───────────────────────────────────────────────────── */}
+        {activeTab === "modulos" && (
+          <div className="space-y-5 max-w-4xl">
+            {/* 💬 Atendimento */}
+            <div className="rounded-[var(--radius-lg)] border border-[var(--border-subtle)] bg-[var(--bg-secondary)] overflow-hidden">
+              <div className="px-5 py-4 border-b border-[var(--border-subtle)] flex items-center gap-2">
+                <span className="text-lg">💬</span>
+                <h2 className="text-base font-semibold text-[var(--text-primary)]">Atendimento</h2>
+              </div>
+              <div className="p-5 grid gap-4 sm:grid-cols-2">
+                {[
+                  { key: "faq", label: "FAQ Automático", desc: "Responde perguntas frequentes configuradas" },
+                  { key: "horarioAtendimento", label: "Horário de Atendimento", desc: "Mensagem automática fora do horário" },
+                  { key: "antiSpam", label: "Anti-spam", desc: "Ignora mensagens repetidas" },
+                  { key: "multiIdioma", label: "Multi-idioma", desc: "Detecta e responde no mesmo idioma" }
+                ].map(({ key, label, desc }) => (
+                  <div key={key} className="flex items-start justify-between gap-3 p-3 rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--bg-tertiary)]">
+                    <div>
+                      <p className="text-sm font-medium text-[var(--text-primary)]">{label}</p>
+                      <p className="text-xs text-[var(--text-tertiary)] mt-0.5">{desc}</p>
+                    </div>
+                    <label className="flex items-center gap-2 cursor-pointer flex-shrink-0">
+                      <span className="relative inline-flex h-5 w-9 items-center rounded-full transition-colors duration-200"
+                        style={{ background: formState.modules[key as keyof ChatbotModules]?.isEnabled ? "var(--accent-green)" : "var(--bg-active)" }}>
+                        <input type="checkbox" className="sr-only"
+                          checked={formState.modules[key as keyof ChatbotModules]?.isEnabled ?? false}
+                          onChange={(e) => setFormState((c) => ({
+                            ...c,
+                            modules: { ...c.modules, [key]: { ...c.modules[key as keyof ChatbotModules], isEnabled: e.target.checked } }
+                          }))} />
+                        <span className={["inline-block h-3 w-3 rounded-full bg-white shadow-sm transition-transform duration-200",
+                          formState.modules[key as keyof ChatbotModules]?.isEnabled ? "translate-x-5" : "translate-x-1"].join(" ")} />
+                      </span>
+                    </label>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* 📅 Agendamento */}
+            <div className="rounded-[var(--radius-lg)] border border-[var(--border-subtle)] bg-[var(--bg-secondary)] overflow-hidden">
+              <div className="px-5 py-4 border-b border-[var(--border-subtle)] flex items-center gap-2">
+                <span className="text-lg">📅</span>
+                <h2 className="text-base font-semibold text-[var(--text-primary)]">Agendamento</h2>
+              </div>
+              <div className="p-5 grid gap-4 sm:grid-cols-2">
+                {[
+                  { key: "agenda", label: "Agenda Inteligente", desc: "Horários disponíveis sem duplo agendamento" },
+                  { key: "lembrete", label: "Lembrete Automático", desc: "Envia lembrete X horas antes" },
+                  { key: "confirmacaoPresenca", label: "Confirmação de Presença", desc: "Pergunta se vai comparecer" },
+                  { key: "cancelamentoReagendamento", label: "Cancel./Reagendamento", desc: "Cliente muda pelo WhatsApp" }
+                ].map(({ key, label, desc }) => (
+                  <div key={key} className="flex items-start justify-between gap-3 p-3 rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--bg-tertiary)]">
+                    <div>
+                      <p className="text-sm font-medium text-[var(--text-primary)]">{label}</p>
+                      <p className="text-xs text-[var(--text-tertiary)] mt-0.5">{desc}</p>
+                    </div>
+                    <label className="flex items-center gap-2 cursor-pointer flex-shrink-0">
+                      <span className="relative inline-flex h-5 w-9 items-center rounded-full transition-colors duration-200"
+                        style={{ background: formState.modules[key as keyof ChatbotModules]?.isEnabled ? "var(--accent-green)" : "var(--bg-active)" }}>
+                        <input type="checkbox" className="sr-only"
+                          checked={formState.modules[key as keyof ChatbotModules]?.isEnabled ?? false}
+                          onChange={(e) => setFormState((c) => ({
+                            ...c,
+                            modules: { ...c.modules, [key]: { ...c.modules[key as keyof ChatbotModules], isEnabled: e.target.checked } }
+                          }))} />
+                        <span className={["inline-block h-3 w-3 rounded-full bg-white shadow-sm transition-transform duration-200",
+                          formState.modules[key as keyof ChatbotModules]?.isEnabled ? "translate-x-5" : "translate-x-1"].join(" ")} />
+                      </span>
+                    </label>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* 💰 Financeiro */}
+            <div className="rounded-[var(--radius-lg)] border border-[var(--border-subtle)] bg-[var(--bg-secondary)] overflow-hidden">
+              <div className="px-5 py-4 border-b border-[var(--border-subtle)] flex items-center gap-2">
+                <span className="text-lg">💰</span>
+                <h2 className="text-base font-semibold text-[var(--text-primary)]">Financeiro</h2>
+              </div>
+              <div className="p-5 grid gap-4 sm:grid-cols-2">
+                {[
+                  { key: "cobrancaAutomatica", label: "Cobrança Automática", desc: "Extrato → PIX → confirma pagamento" },
+                  { key: "notificacaoVencimento", label: "Notificação de Vencimento", desc: "Lembra cliente de dívida próxima" },
+                  { key: "orcamentoRapido", label: "Orçamento Rápido", desc: "Gera orçamento baseado em tabela" }
+                ].map(({ key, label, desc }) => (
+                  <div key={key} className="flex items-start justify-between gap-3 p-3 rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--bg-tertiary)]">
+                    <div>
+                      <p className="text-sm font-medium text-[var(--text-primary)]">{label}</p>
+                      <p className="text-xs text-[var(--text-tertiary)] mt-0.5">{desc}</p>
+                    </div>
+                    <label className="flex items-center gap-2 cursor-pointer flex-shrink-0">
+                      <span className="relative inline-flex h-5 w-9 items-center rounded-full transition-colors duration-200"
+                        style={{ background: formState.modules[key as keyof ChatbotModules]?.isEnabled ? "var(--accent-green)" : "var(--bg-active)" }}>
+                        <input type="checkbox" className="sr-only"
+                          checked={formState.modules[key as keyof ChatbotModules]?.isEnabled ?? false}
+                          onChange={(e) => setFormState((c) => ({
+                            ...c,
+                            modules: { ...c.modules, [key]: { ...c.modules[key as keyof ChatbotModules], isEnabled: e.target.checked } }
+                          }))} />
+                        <span className={["inline-block h-3 w-3 rounded-full bg-white shadow-sm transition-transform duration-200",
+                          formState.modules[key as keyof ChatbotModules]?.isEnabled ? "translate-x-5" : "translate-x-1"].join(" ")} />
+                      </span>
+                    </label>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* 📦 Catálogo & Pedidos */}
+            <div className="rounded-[var(--radius-lg)] border border-[var(--border-subtle)] bg-[var(--bg-secondary)] overflow-hidden">
+              <div className="px-5 py-4 border-b border-[var(--border-subtle)] flex items-center gap-2">
+                <span className="text-lg">📦</span>
+                <h2 className="text-base font-semibold text-[var(--text-primary)]">Catálogo & Pedidos</h2>
+              </div>
+              <div className="p-5 grid gap-4 sm:grid-cols-2">
+                {[
+                  { key: "catalogo", label: "Cardápio/Catálogo", desc: "Mostra produtos configurados" },
+                  { key: "pedidoWhatsApp", label: "Pedido pelo WhatsApp", desc: "Cliente monta pedido" },
+                  { key: "statusPedido", label: "Status do Pedido", desc: "Cliente consulta status" },
+                  { key: "envioMidia", label: "Envio de Mídia", desc: "PDF, imagem, áudio por gatilho" }
+                ].map(({ key, label, desc }) => (
+                  <div key={key} className="flex items-start justify-between gap-3 p-3 rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--bg-tertiary)]">
+                    <div>
+                      <p className="text-sm font-medium text-[var(--text-primary)]">{label}</p>
+                      <p className="text-xs text-[var(--text-tertiary)] mt-0.5">{desc}</p>
+                    </div>
+                    <label className="flex items-center gap-2 cursor-pointer flex-shrink-0">
+                      <span className="relative inline-flex h-5 w-9 items-center rounded-full transition-colors duration-200"
+                        style={{ background: formState.modules[key as keyof ChatbotModules]?.isEnabled ? "var(--accent-green)" : "var(--bg-active)" }}>
+                        <input type="checkbox" className="sr-only"
+                          checked={formState.modules[key as keyof ChatbotModules]?.isEnabled ?? false}
+                          onChange={(e) => setFormState((c) => ({
+                            ...c,
+                            modules: { ...c.modules, [key]: { ...c.modules[key as keyof ChatbotModules], isEnabled: e.target.checked } }
+                          }))} />
+                        <span className={["inline-block h-3 w-3 rounded-full bg-white shadow-sm transition-transform duration-200",
+                          formState.modules[key as keyof ChatbotModules]?.isEnabled ? "translate-x-5" : "translate-x-1"].join(" ")} />
+                      </span>
+                    </label>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* 📊 Dados & CRM */}
+            <div className="rounded-[var(--radius-lg)] border border-[var(--border-subtle)] bg-[var(--bg-secondary)] overflow-hidden">
+              <div className="px-5 py-4 border-b border-[var(--border-subtle)] flex items-center gap-2">
+                <span className="text-lg">📊</span>
+                <h2 className="text-base font-semibold text-[var(--text-primary)]">Dados & CRM</h2>
+              </div>
+              <div className="p-5 grid gap-4 sm:grid-cols-2">
+                {[
+                  { key: "capturaDados", label: "Captura de Dados", desc: "Coleta nome, email, interesse" },
+                  { key: "nps", label: "NPS", desc: "Pesquisa de satisfação pós-atendimento" },
+                  { key: "tagFollowUp", label: "Tag de Follow-up", desc: "Salva quem não fechou" },
+                  { key: "exportarLeads", label: "Exportar Leads", desc: "Exporta base pelo painel" }
+                ].map(({ key, label, desc }) => (
+                  <div key={key} className="flex items-start justify-between gap-3 p-3 rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--bg-tertiary)]">
+                    <div>
+                      <p className="text-sm font-medium text-[var(--text-primary)]">{label}</p>
+                      <p className="text-xs text-[var(--text-tertiary)] mt-0.5">{desc}</p>
+                    </div>
+                    <label className="flex items-center gap-2 cursor-pointer flex-shrink-0">
+                      <span className="relative inline-flex h-5 w-9 items-center rounded-full transition-colors duration-200"
+                        style={{ background: formState.modules[key as keyof ChatbotModules]?.isEnabled ? "var(--accent-green)" : "var(--bg-active)" }}>
+                        <input type="checkbox" className="sr-only"
+                          checked={formState.modules[key as keyof ChatbotModules]?.isEnabled ?? false}
+                          onChange={(e) => setFormState((c) => ({
+                            ...c,
+                            modules: { ...c.modules, [key]: { ...c.modules[key as keyof ChatbotModules], isEnabled: e.target.checked } }
+                          }))} />
+                        <span className={["inline-block h-3 w-3 rounded-full bg-white shadow-sm transition-transform duration-200",
+                          formState.modules[key as keyof ChatbotModules]?.isEnabled ? "translate-x-5" : "translate-x-1"].join(" ")} />
+                      </span>
+                    </label>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* 🔗 Integrações */}
+            <div className="rounded-[var(--radius-lg)] border border-[var(--border-subtle)] bg-[var(--bg-secondary)] overflow-hidden">
+              <div className="px-5 py-4 border-b border-[var(--border-subtle)] flex items-center gap-2">
+                <span className="text-lg">🔗</span>
+                <h2 className="text-base font-semibold text-[var(--text-primary)]">Integrações</h2>
+              </div>
+              <div className="p-5 grid gap-4 sm:grid-cols-2">
+                {[
+                  { key: "webhook", label: "Webhook de Saída", desc: "Dispara evento para sistema externo" },
+                  { key: "webhookBidirecional", label: "Webhook Bidirecional", desc: "Sistema externo responde" },
+                  { key: "googleCalendar", label: "Google Calendar", desc: "Cria evento ao agendar" },
+                  { key: "planilhaGoogle", label: "Planilha Google", desc: "Registra leads/pedidos" }
+                ].map(({ key, label, desc }) => (
+                  <div key={key} className="flex items-start justify-between gap-3 p-3 rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--bg-tertiary)]">
+                    <div>
+                      <p className="text-sm font-medium text-[var(--text-primary)]">{label}</p>
+                      <p className="text-xs text-[var(--text-tertiary)] mt-0.5">{desc}</p>
+                    </div>
+                    <label className="flex items-center gap-2 cursor-pointer flex-shrink-0">
+                      <span className="relative inline-flex h-5 w-9 items-center rounded-full transition-colors duration-200"
+                        style={{ background: formState.modules[key as keyof ChatbotModules]?.isEnabled ? "var(--accent-green)" : "var(--bg-active)" }}>
+                        <input type="checkbox" className="sr-only"
+                          checked={formState.modules[key as keyof ChatbotModules]?.isEnabled ?? false}
+                          onChange={(e) => setFormState((c) => ({
+                            ...c,
+                            modules: { ...c.modules, [key]: { ...c.modules[key as keyof ChatbotModules], isEnabled: e.target.checked } }
+                          }))} />
+                        <span className={["inline-block h-3 w-3 rounded-full bg-white shadow-sm transition-transform duration-200",
+                          formState.modules[key as keyof ChatbotModules]?.isEnabled ? "translate-x-5" : "translate-x-1"].join(" ")} />
+                      </span>
+                    </label>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* 🛡️ Controle */}
+            <div className="rounded-[var(--radius-lg)] border border-[var(--border-subtle)] bg-[var(--bg-secondary)] overflow-hidden">
+              <div className="px-5 py-4 border-b border-[var(--border-subtle)] flex items-center gap-2">
+                <span className="text-lg">🛡️</span>
+                <h2 className="text-base font-semibold text-[var(--text-primary)]">Controle</h2>
+              </div>
+              <div className="p-5 grid gap-4 sm:grid-cols-2">
+                {[
+                  { key: "listaBranca", label: "Lista Branca", desc: "Só responde para números cadastrados" },
+                  { key: "blacklist", label: "Blacklist", desc: "Bloqueia números específicos" },
+                  { key: "limiteMensagens", label: "Limite de Mensagens", desc: "Evita flood por contato" },
+                  { key: "palavraPausa", label: "Palavra de Pausa", desc: "Cliente digita 'sair' e para" }
+                ].map(({ key, label, desc }) => (
+                  <div key={key} className="flex items-start justify-between gap-3 p-3 rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--bg-tertiary)]">
+                    <div>
+                      <p className="text-sm font-medium text-[var(--text-primary)]">{label}</p>
+                      <p className="text-xs text-[var(--text-tertiary)] mt-0.5">{desc}</p>
+                    </div>
+                    <label className="flex items-center gap-2 cursor-pointer flex-shrink-0">
+                      <span className="relative inline-flex h-5 w-9 items-center rounded-full transition-colors duration-200"
+                        style={{ background: formState.modules[key as keyof ChatbotModules]?.isEnabled ? "var(--accent-green)" : "var(--bg-active)" }}>
+                        <input type="checkbox" className="sr-only"
+                          checked={formState.modules[key as keyof ChatbotModules]?.isEnabled ?? false}
+                          onChange={(e) => setFormState((c) => ({
+                            ...c,
+                            modules: { ...c.modules, [key]: { ...c.modules[key as keyof ChatbotModules], isEnabled: e.target.checked } }
+                          }))} />
+                        <span className={["inline-block h-3 w-3 rounded-full bg-white shadow-sm transition-transform duration-200",
+                          formState.modules[key as keyof ChatbotModules]?.isEnabled ? "translate-x-5" : "translate-x-1"].join(" ")} />
+                      </span>
+                    </label>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* 🎯 Marketing */}
+            <div className="rounded-[var(--radius-lg)] border border-[var(--border-subtle)] bg-[var(--bg-secondary)] overflow-hidden">
+              <div className="px-5 py-4 border-b border-[var(--border-subtle)] flex items-center gap-2">
+                <span className="text-lg">🎯</span>
+                <h2 className="text-base font-semibold text-[var(--text-primary)]">Marketing</h2>
+              </div>
+              <div className="p-5 grid gap-4 sm:grid-cols-2">
+                {[
+                  { key: "disparoMassa", label: "Disparo em Massa", desc: "Envia para lista de contatos" },
+                  { key: "campanhaSegmento", label: "Campanha por Segmento", desc: "Dispara para clientes com tag" },
+                  { key: "reativacao", label: "Reativação Automática", desc: "Mensagem para cliente inativo" },
+                  { key: "cupomPromocao", label: "Cupom/Promoção", desc: "Envia desconto por gatilho" }
+                ].map(({ key, label, desc }) => (
+                  <div key={key} className="flex items-start justify-between gap-3 p-3 rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--bg-tertiary)]">
+                    <div>
+                      <p className="text-sm font-medium text-[var(--text-primary)]">{label}</p>
+                      <p className="text-xs text-[var(--text-tertiary)] mt-0.5">{desc}</p>
+                    </div>
+                    <label className="flex items-center gap-2 cursor-pointer flex-shrink-0">
+                      <span className="relative inline-flex h-5 w-9 items-center rounded-full transition-colors duration-200"
+                        style={{ background: formState.modules[key as keyof ChatbotModules]?.isEnabled ? "var(--accent-green)" : "var(--bg-active)" }}>
+                        <input type="checkbox" className="sr-only"
+                          checked={formState.modules[key as keyof ChatbotModules]?.isEnabled ?? false}
+                          onChange={(e) => setFormState((c) => ({
+                            ...c,
+                            modules: { ...c.modules, [key]: { ...c.modules[key as keyof ChatbotModules], isEnabled: e.target.checked } }
+                          }))} />
+                        <span className={["inline-block h-3 w-3 rounded-full bg-white shadow-sm transition-transform duration-200",
+                          formState.modules[key as keyof ChatbotModules]?.isEnabled ? "translate-x-5" : "translate-x-1"].join(" ")} />
+                      </span>
+                    </label>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Save button */}
+            <div className="flex gap-3">
+              <Button variant="primary" size="md" loading={pendingAction === "save"}
+                disabled={pendingAction !== null || !selectedInstance} onClick={() => void saveConfig()}>
+                <Save aria-hidden="true" className="h-3.5 w-3.5" /> Salvar módulos
+              </Button>
+            </div>
+          </div>
+        )}
+
         {/* ── ESTADO ────────────────────────────────────────────────────── */}
         {activeTab === "estado" && (
           <div className="rounded-[var(--radius-lg)] border border-[var(--border-subtle)] bg-[var(--bg-secondary)] overflow-hidden max-w-xl">
@@ -764,15 +1159,17 @@ export const ChatbotStudio = ({ initialInstances }: ChatbotStudioProps) => {
               <h2 className="text-base font-semibold text-[var(--text-primary)]">Configuração salva</h2>
             </div>
             <div className="p-5 space-y-2 text-sm">
-              {[
+                {[
                 { label: "Instância", value: selectedInstance ? `${selectedInstance.name} — ${selectedInstance.status}` : "—" },
                 { label: "Última gravação", value: formatDateTime(lastSavedConfig?.updatedAt) },
                 { label: "Regras", value: String(formState.rules.length) },
                 { label: "Chatbot", value: formState.isEnabled ? "Habilitado" : "Desabilitado" },
                 { label: "IA", value: formState.ai.isEnabled ? `${formState.ai.mode} · ${formState.ai.provider ?? "aguardando admin"}` : "Desabilitada" },
+                { label: "IA Reserva", value: lastSavedConfig?.aiFallbackProvider ? `${lastSavedConfig.aiFallbackProvider} · ${lastSavedConfig.aiFallbackModel || "padrão"}` : "Não configurado" },
                 { label: "Alertas lead", value: lastSavedConfig?.leadsPhoneNumber || "Não configurado" },
                 { label: "Resumo leads", value: lastSavedConfig?.leadsEnabled !== false ? "Ativo" : "Inativo" },
-                { label: "Fiado", value: lastSavedConfig?.fiadoEnabled ? "Ativo" : "Inativo" }
+                { label: "Fiado", value: lastSavedConfig?.fiadoEnabled ? "Ativo" : "Inativo" },
+                { label: "Módulos ativos", value: String(Object.values(formState.modules).filter(m => m?.isEnabled).length) }
               ].map(({ label, value }) => (
                 <div key={label} className="flex justify-between px-4 py-2.5 rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--bg-tertiary)]">
                   <span className="text-[var(--text-tertiary)] text-xs font-mono uppercase tracking-wide">{label}</span>
@@ -787,6 +1184,9 @@ export const ChatbotStudio = ({ initialInstances }: ChatbotStudioProps) => {
                 </Badge>
                 <Badge variant={formState.ai.isEnabled ? "info" : "neutral"}>
                   {formState.ai.isEnabled ? "IA ON" : "IA OFF"}
+                </Badge>
+                <Badge variant={formState.aiFallbackProvider ? "warning" : "neutral"}>
+                  {formState.aiFallbackProvider ? `IA Reserva: ${formState.aiFallbackProvider}` : "IA Reserva OFF"}
                 </Badge>
                 <Badge variant={formState.leadsEnabled ? "success" : "neutral"}>
                   {formState.leadsEnabled ? "Leads ON" : "Leads OFF"}

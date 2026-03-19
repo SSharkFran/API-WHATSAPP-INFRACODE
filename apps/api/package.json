@@ -6,6 +6,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "dev": "tsx watch src/server.ts",
+    "start:db-push": "node ../../scripts/with-root-env.mjs \"prisma db push --schema prisma/platform.prisma --accept-data-loss && prisma db push --schema prisma/tenant.prisma --accept-data-loss\"",
+    "start": "pnpm run start:db-push && node dist/apps/api/src/server.js",
     "lint": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "prisma:generate": "node ../../scripts/with-root-env.mjs \"prisma generate --schema prisma/platform.prisma && prisma generate --schema prisma/tenant.prisma\"",

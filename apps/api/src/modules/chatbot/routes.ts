@@ -139,7 +139,11 @@ export const registerChatbotRoutes = async (app: FastifyInstance): Promise<void>
         },
         leadsPhoneNumber: body.leadsPhoneNumber ?? null,
         leadsEnabled: body.leadsEnabled,
-        fiadoEnabled: currentConfig.fiadoEnabled ?? false
+        fiadoEnabled: currentConfig.fiadoEnabled ?? false,
+        aiFallbackProvider: currentConfig.aiFallbackProvider ?? null,
+        aiFallbackApiKey: currentConfig.aiFallbackApiKey ?? null,
+        aiFallbackModel: currentConfig.aiFallbackModel ?? null,
+        modules: currentConfig.modules ?? {}
       });
 
       await recordPlatformAuditLog(

@@ -3,6 +3,7 @@ import { z } from "zod";
 export const chatbotTriggerTypeSchema = z.enum(["EXACT", "CONTAINS", "REGEX", "FIRST_CONTACT"]);
 export const chatbotAiModeSchema = z.enum(["RULES_ONLY", "RULES_THEN_AI", "AI_ONLY"]);
 export const chatbotAiProviderSchema = z.enum(["GROQ", "OPENAI_COMPATIBLE", "ANTHROPIC"]);
+export const chatbotFallbackProviderSchema = z.enum(["openai", "anthropic", "gemini", "ollama"]);
 export const clientMemoryStatusSchema = z.enum([
   "lead_frio",
   "lead_quente",
@@ -61,6 +62,10 @@ export const chatbotConfigSchema = z.object({
   fiadoEnabled: z.boolean().default(false),
   rules: z.array(chatbotRuleSchema),
   ai: chatbotAiConfigSchema,
+  aiFallbackProvider: chatbotFallbackProviderSchema.nullable().optional(),
+  aiFallbackApiKey: z.string().nullable().optional(),
+  aiFallbackModel: z.string().nullable().optional(),
+  modules: z.record(z.string(), z.unknown()).optional(),
   createdAt: z.string(),
   updatedAt: z.string()
 });
@@ -73,7 +78,11 @@ export const upsertChatbotBodySchema = z.object({
   ai: upsertChatbotAiBodySchema.optional(),
   leadsPhoneNumber: z.string().min(10).max(20).nullable().optional(),
   leadsEnabled: z.boolean().default(true),
-  fiadoEnabled: z.boolean().default(false)
+  fiadoEnabled: z.boolean().default(false),
+  aiFallbackProvider: chatbotFallbackProviderSchema.nullable().optional(),
+  aiFallbackApiKey: z.string().max(512).nullable().optional(),
+  aiFallbackModel: z.string().max(120).nullable().optional(),
+  modules: z.record(z.string(), z.unknown()).optional()
 });
 
 export const upsertLeadsPhoneBodySchema = z.object({

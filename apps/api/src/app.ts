@@ -26,6 +26,7 @@ import { FiadoService } from "./modules/chatbot/fiado.service.js";
 import { InstanceOrchestrator } from "./modules/instances/service.js";
 import { MessageService } from "./modules/messages/service.js";
 import { PlanEnforcementService } from "./modules/platform/plan-enforcement.service.js";
+import { PlatformAlertService } from "./modules/platform/alert.service.js";
 import { PrivacyService } from "./modules/privacy/service.js";
 import { TenantManagementService } from "./modules/tenant/service.js";
 import { WebhookService } from "./modules/webhooks/service.js";
@@ -105,6 +106,9 @@ export const buildApp = async () => {
     clientMemoryService,
     fiadoService
   });
+  const platformAlertService = new PlatformAlertService(platformPrisma, instanceOrchestrator);
+  chatbotService.setPlatformAlertService(platformAlertService);
+  instanceOrchestrator.setPlatformAlertService(platformAlertService);
   const platformAdminService = new PlatformAdminService({
     config,
     platformPrisma,
@@ -139,6 +143,7 @@ export const buildApp = async () => {
   app.decorate("tenantManagementService", tenantManagementService);
   app.decorate("planEnforcementService", planEnforcementService);
   app.decorate("instanceOrchestrator", instanceOrchestrator);
+  app.decorate("platformAlertService", platformAlertService);
   app.decorate("messageService", messageService);
   app.decorate("privacyService", privacyService);
   app.decorate("webhookService", webhookService);

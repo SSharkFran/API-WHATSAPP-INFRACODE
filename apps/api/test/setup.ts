@@ -18,3 +18,5 @@ process.env.PUBLIC_API_BASE_URL ??= "http://localhost:3333";
 process.env.ROOT_DOMAIN ??= "infracode.local";
 process.env.ADMIN_SUBDOMAIN ??= "admin";
 process.env.SMTP_FROM ??= "noreply@infracode.local";
+process.env.GROQ_API_KEY ??= "test-groq-key";
+process.env.GEMINI_API_KEY ??= "test-gemini-key";

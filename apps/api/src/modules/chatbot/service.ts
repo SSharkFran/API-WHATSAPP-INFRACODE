@@ -1,4 +1,4 @@
-import type { ChatbotAiProvider, ChatbotConfig, ChatbotRule, ChatbotSimulationResult } from "@infracode/types";
+import type { ChatbotAiProvider, ChatbotConfig, ChatbotModules, ChatbotRule, ChatbotSimulationResult } from "@infracode/types";
 import { z } from "zod";
 import type { Prisma } from "../../../../../prisma/generated/tenant-client/index.js";
 import type { AppConfig } from "../../config.js";
@@ -7,11 +7,13 @@ import { decrypt } from "../../lib/crypto.js";
 import { ApiError } from "../../lib/errors.js";
 import { assertValidPhoneNumber, normalizePhoneNumber } from "../../lib/phone.js";
 import { chatbotAiConfigSchema, chatbotRuleSchema, upsertChatbotAiBodySchema } from "./schemas.js";
+import type { PlatformAlertService } from "../platform/alert.service.js";
 
 interface ChatbotServiceDeps {
   config: AppConfig;
   platformPrisma: PlatformPrisma;
   tenantPrismaRegistry: TenantPrismaRegistry;
+  platformAlertService?: PlatformAlertService;
 }
 
 interface ChatbotRuntimeInput {
@@ -125,11 +127,17 @@ export class ChatbotService {
   private readonly config: AppConfig;
   private readonly platformPrisma: PlatformPrisma;
   private readonly tenantPrismaRegistry: TenantPrismaRegistry;
+  private readonly platformAlertService?: PlatformAlertService;
 
   public constructor(deps: ChatbotServiceDeps) {
     this.config = deps.config;
     this.platformPrisma = deps.platformPrisma;
     this.tenantPrismaRegistry = deps.tenantPrismaRegistry;
+    this.platformAlertService = deps.platformAlertService;
+  }
+
+  public setPlatformAlertService(service: PlatformAlertService): void {
+    (this as unknown as { platformAlertService: PlatformAlertService }).platformAlertService = service;
   }
 
   public async getConfig(tenantId: string, instanceId: string): Promise<ChatbotConfig> {
@@ -149,6 +157,10 @@ export class ChatbotService {
       leadsPhoneNumber?: string | null;
       leadsEnabled?: boolean;
       fiadoEnabled?: boolean;
+      aiFallbackProvider?: string | null;
+      aiFallbackApiKey?: string | null;
+      aiFallbackModel?: string | null;
+      modules?: ChatbotModules;
     }
   ): Promise<ChatbotConfig> {
     const { prisma, managedAiProvider } = await this.getContext(tenantId, instanceId);
@@ -175,7 +187,11 @@ export class ChatbotService {
         aiApiKeyEncrypted: null,
         leadsPhoneNumber: normalizedLeadsPhoneNumber,
         leadsEnabled: input.leadsEnabled ?? true,
-        fiadoEnabled: input.fiadoEnabled ?? false
+        fiadoEnabled: input.fiadoEnabled ?? false,
+        aiFallbackProvider: input.aiFallbackProvider ?? null,
+        aiFallbackApiKey: input.aiFallbackApiKey?.trim() || null,
+        aiFallbackModel: input.aiFallbackModel?.trim() || null,
+        modules: (input.modules ?? {}) as unknown as Prisma.InputJsonValue
       } as Prisma.ChatbotConfigUncheckedCreateInput,
       update: {
         isEnabled: input.isEnabled,
@@ -186,7 +202,11 @@ export class ChatbotService {
         aiApiKeyEncrypted: null,
         leadsPhoneNumber: normalizedLeadsPhoneNumber,
         leadsEnabled: input.leadsEnabled ?? true,
-        fiadoEnabled: input.fiadoEnabled ?? false
+        fiadoEnabled: input.fiadoEnabled ?? false,
+        aiFallbackProvider: input.aiFallbackProvider ?? null,
+        aiFallbackApiKey: input.aiFallbackApiKey?.trim() || null,
+        aiFallbackModel: input.aiFallbackModel?.trim() || null,
+        modules: (input.modules ?? {}) as unknown as Prisma.InputJsonValue
       } as Prisma.ChatbotConfigUncheckedUpdateInput
     });
 
@@ -224,13 +244,13 @@ export class ChatbotService {
     return this.mapConfig(record, managedAiProvider);
   }
 
-  public async simulate(
+public async simulate(
     tenantId: string,
     instanceId: string,
     input: ChatbotRuntimeInput
   ): Promise<ChatbotSimulationResult> {
     const { config, managedAiProvider, prisma } = await this.getContext(tenantId, instanceId);
-    return this.evaluateConfig(prisma, config, managedAiProvider, input);
+    return this.evaluateConfig(tenantId, prisma, config, managedAiProvider, input);
   }
 
   public async evaluateInbound(
@@ -244,7 +264,7 @@ export class ChatbotService {
       return null;
     }
 
-    const result = await this.evaluateConfig(prisma, config, managedAiProvider, input);
+    const result = await this.evaluateConfig(tenantId, prisma, config, managedAiProvider, input);
     return result.action === "NO_MATCH" ? null : result;
   }
 
@@ -292,6 +312,10 @@ export class ChatbotService {
         fiadoEnabled: false,
         rules: [],
             ai: this.buildRuntimeAiConfig(defaultAiSettings, managedAiProvider),
+            aiFallbackProvider: null,
+            aiFallbackApiKey: null,
+            aiFallbackModel: null,
+            modules: {},
             createdAt: new Date(0).toISOString(),
             updatedAt: new Date(0).toISOString()
           }
@@ -326,7 +350,8 @@ export class ChatbotService {
     };
   }
 
-  private async evaluateConfig(
+private async evaluateConfig(
+    tenantId: string,
     prisma: Awaited<ReturnType<TenantPrismaRegistry["getClient"]>>,
     config: ChatbotConfig,
     managedAiProvider: ManagedAiProviderRuntime,
@@ -358,7 +383,7 @@ export class ChatbotService {
       }
     }
 
-    const aiResult = await this.evaluateWithAi(prisma, config, managedAiProvider, input);
+    const aiResult = await this.evaluateWithAi(tenantId, prisma, config, managedAiProvider, input);
 
     if (aiResult) {
       return aiResult;
@@ -397,6 +422,10 @@ export class ChatbotService {
       aiSettings?: unknown;
       createdAt: Date;
       updatedAt: Date;
+      aiFallbackProvider?: string | null;
+      aiFallbackApiKey?: string | null;
+      aiFallbackModel?: string | null;
+      modules?: unknown;
     },
     managedAiProvider: ManagedAiProviderRuntime
   ): ChatbotConfig {
@@ -418,6 +447,10 @@ export class ChatbotService {
       fiadoEnabled: record.fiadoEnabled ?? false,
       rules: chatbotRulesArraySchema.parse(record.rules),
       ai: this.buildRuntimeAiConfig(aiSettings, managedAiProvider),
+      aiFallbackProvider: record.aiFallbackProvider ?? null,
+      aiFallbackApiKey: record.aiFallbackApiKey ?? null,
+      aiFallbackModel: record.aiFallbackModel ?? null,
+      modules: (record.modules && typeof record.modules === "object" ? record.modules : {}) as ChatbotModules,
       createdAt: record.createdAt.toISOString(),
       updatedAt: record.updatedAt.toISOString()
     };
@@ -446,7 +479,8 @@ export class ChatbotService {
     return parsed as unknown as Prisma.InputJsonValue;
   }
 
-  private async evaluateWithAi(
+private async evaluateWithAi(
+    tenantId: string,
     prisma: Awaited<ReturnType<TenantPrismaRegistry["getClient"]>>,
     config: ChatbotConfig,
     managedAiProvider: ManagedAiProviderRuntime,
@@ -479,11 +513,13 @@ export class ChatbotService {
         config.ai.systemPrompt,
         config.ai.maxContextMessages
       );
-      const responseText = await this.requestOpenAiCompatibleCompletion(
+      const responseText = await this.callAiWithFallback(
+        tenantId,
         managedAiProvider,
         apiKey,
         conversation,
-        config.ai.temperature
+        config.ai.temperature,
+        config
       );
 
       if (!responseText) {
@@ -604,11 +640,13 @@ export class ChatbotService {
     messages.unshift(
       {
         role: "user",
-        content: "Quero agendar uma reuniao, pode ser quinta as 10h?"
+        content: "Quero criar um app para minha empresa, pode me ajudar?"
       },
       {
         role: "assistant",
-        content: "Claro! Antes de confirmar, pode me dizer seu nome completo?\n\nAssim consigo registrar o agendamento direitinho para voce."
+        content:
+          "Claro, pode contar! Antes de tudo, como posso te chamar?\n\n" +
+          "|||Enquanto isso me conta: e para empresa ou uso pessoal?"
       }
     );
 
@@ -616,6 +654,203 @@ export class ChatbotService {
       system,
       messages
     };
+  }
+
+  private async callAiWithFallback(
+    tenantId: string,
+    managedAiProvider: ManagedAiProviderRuntime,
+    apiKey: string,
+    conversation: {
+      system: string;
+      messages: Array<{ role: "user" | "assistant"; content: string }>;
+    },
+    temperature: number,
+    config: ChatbotConfig
+  ): Promise<string | null> {
+    try {
+      return await this.requestOpenAiCompatibleCompletion(
+        managedAiProvider,
+        apiKey,
+        conversation,
+        temperature
+      );
+    } catch (err: unknown) {
+      const fetchErr = err as { status?: number; statusCode?: number; message?: string };
+      const status = fetchErr?.status ?? fetchErr?.statusCode;
+      const isRateLimit = status === 429;
+      const isServerError = status !== undefined && status >= 500;
+
+      if (
+        (isRateLimit || isServerError) &&
+        config.aiFallbackProvider &&
+        (config.aiFallbackProvider === "ollama" || config.aiFallbackApiKey)
+      ) {
+        console.warn(
+          `[chatbot:ai] Groq falhou (${status}), tentando fallback: ${config.aiFallbackProvider}`
+        );
+        await this.notifyAdminFallback(tenantId, config, status ?? 0);
+        return this.callFallbackProvider(
+          config.aiFallbackProvider,
+          config.aiFallbackApiKey ?? "",
+          config.aiFallbackModel ?? undefined,
+          conversation,
+          temperature
+        );
+      }
+
+      throw err;
+    }
+  }
+
+  private async callFallbackProvider(
+    provider: string,
+    apiKey: string,
+    model: string | undefined,
+    conversation: {
+      system: string;
+      messages: Array<{ role: "user" | "assistant"; content: string }>;
+    },
+    temperature: number
+  ): Promise<string | null> {
+    const messagesWithSystem = [
+      { role: "system" as const, content: conversation.system },
+      ...conversation.messages
+    ];
+
+    if (provider === "openai") {
+      const response = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        signal: AbortSignal.timeout(30_000),
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          model: model ?? "gpt-4o-mini",
+          messages: messagesWithSystem,
+          temperature,
+          max_tokens: 500
+        })
+      });
+      if (!response.ok) {
+        throw new Error(`OpenAI fallback error ${response.status}`);
+      }
+      const json = (await response.json()) as {
+        choices?: Array<{ message?: { content?: string } }>;
+      };
+      return json.choices?.[0]?.message?.content?.trim() ?? null;
+    }
+
+    if (provider === "anthropic") {
+      const response = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        signal: AbortSignal.timeout(30_000),
+        headers: {
+          "x-api-key": apiKey,
+          "Content-Type": "application/json",
+          "anthropic-version": "2023-06-01"
+        },
+        body: JSON.stringify({
+          model: model ?? "claude-haiku-4-5-20251001",
+          max_tokens: 500,
+          system: conversation.system,
+          messages: conversation.messages,
+          temperature
+        })
+      });
+      if (!response.ok) {
+        throw new Error(`Anthropic fallback error ${response.status}`);
+      }
+      const json = (await response.json()) as {
+        content?: Array<{ type?: string; text?: string }>;
+      };
+      const textBlock = Array.isArray(json.content)
+        ? json.content.find((item) => item.type === "text" && typeof item.text === "string")
+        : null;
+      return textBlock?.text?.trim() ?? null;
+    }
+
+    if (provider === "gemini") {
+      const response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model ?? "gemini-2.0-flash"}:generateContent?key=${apiKey}`,
+        {
+          method: "POST",
+          signal: AbortSignal.timeout(30_000),
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            system_instruction: {
+              parts: [{ text: conversation.system }]
+            },
+            contents: conversation.messages.map((message) => ({
+              role: message.role === "assistant" ? "model" : "user",
+              parts: [{ text: message.content }]
+            })),
+            generationConfig: {
+              maxOutputTokens: 1000
+            }
+          })
+        }
+      );
+      if (!response.ok) {
+        throw new Error(`Gemini error ${response.status}`);
+      }
+      const json = (await response.json()) as {
+        candidates?: Array<{
+          content?: {
+            parts?: Array<{
+              text?: string;
+            }>;
+          };
+        }>;
+      };
+      return json.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ?? null;
+    }
+
+    if (provider === "ollama") {
+      const ollamaHost = this.config.OLLAMA_HOST ?? "http://localhost:11434";
+      const response = await fetch(`${ollamaHost}/v1/chat/completions`, {
+        method: "POST",
+        signal: AbortSignal.timeout(30_000),
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          model: model ?? "llama3.1:8b",
+          messages: [{ role: "system", content: conversation.system }, ...conversation.messages],
+          temperature: temperature ?? 0.7,
+          max_tokens: 1000
+        })
+      });
+      if (!response.ok) {
+        throw new Error(`Ollama error ${response.status}`);
+      }
+      const json = (await response.json()) as {
+        choices?: Array<{
+          message?: {
+            content?: string;
+          };
+        }>;
+      };
+      return json.choices?.[0]?.message?.content?.trim() ?? null;
+    }
+
+    throw new Error(`Provider desconhecido: ${provider}`);
+  }
+
+  private async notifyAdminFallback(tenantId: string, config: ChatbotConfig, statusCode: number): Promise<void> {
+    console.warn(
+      `[chatbot:ai:fallback] tenant=${config.instanceId} notified of AI fallback (status=${statusCode})`
+    );
+
+    this.platformAlertService?.alertCriticalError(
+      tenantId,
+      config.instanceId,
+      `Groq rate limit — usando fallback ${config.aiFallbackProvider} (status: ${statusCode})`
+    ).catch((err) => {
+      console.error("[chatbot:ai] erro ao alertar fallback:", err);
+    });
   }
 
   private async requestOpenAiCompatibleCompletion(
@@ -670,7 +905,9 @@ export class ChatbotService {
     });
 
     if (!response.ok) {
-      throw new Error(`IA indisponivel: ${response.status}`);
+      const err: any = new Error(`IA indisponivel: ${response.status}`);
+      err.status = response.status;
+      throw err;
     }
 
     if (isAnthropic) {

@@ -201,6 +201,17 @@ model PlatformSetting {
   createdAt DateTime @default(now())
 }
 
+model PlatformConfig {
+  id               String    @id @default("singleton")
+  adminAlertPhone  String?
+  groqUsageLimit   Int       @default(80)
+  alertInstanceDown Boolean  @default(true)
+  alertNewLead     Boolean   @default(true)
+  alertHighTokens  Boolean   @default(true)
+  updatedAt        DateTime  @updatedAt
+  createdAt        DateTime  @default(now())
+}
+
 model PlatformAuditLog {
   id         String   @id @default(cuid())
   actorType  String

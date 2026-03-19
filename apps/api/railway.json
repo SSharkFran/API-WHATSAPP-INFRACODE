@@ -16,8 +16,7 @@
     ]
   },
   "deploy": {
-    "preDeployCommand": "pnpm --filter @infracode/api prisma:push:platform",
-    "startCommand": "node apps/api/dist/apps/api/src/server.js",
+    "startCommand": "pnpm --filter @infracode/api start",
     "healthcheckPath": "/health",
     "healthcheckTimeout": 300,
     "restartPolicyType": "ON_FAILURE",

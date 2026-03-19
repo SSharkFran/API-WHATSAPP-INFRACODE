@@ -6,6 +6,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { parentPort, workerData } from "node:worker_threads";
 import {
   DisconnectReason,
+  downloadContentFromMessage,
   fetchLatestBaileysVersion,
   makeInMemoryStore,
   makeWASocket,
@@ -32,11 +33,22 @@ interface RpcCommand {
   payload: SendMessagePayload;
 }
 
+interface DownloadMediaCommand {
+  type: "download-media";
+  requestId: string;
+  rawMessage: Record<string, unknown>;
+  messageKey: {
+    remoteJid?: string | null;
+    id?: string | null;
+    fromMe?: boolean | null;
+  };
+}
+
 interface LifecycleCommand {
   type: "pause" | "shutdown";
 }
 
-type IncomingCommand = RpcCommand | LifecycleCommand;
+type IncomingCommand = RpcCommand | DownloadMediaCommand | LifecycleCommand;
 
 interface ConnectionUpdateEvent {
   qr?: string;
@@ -448,7 +460,13 @@ const startSocket = async (): Promise<void> => {
               ...serializeIncomingPayload(message.message as Record<string, unknown>),
               pushName: message.pushName ?? null
             },
-            messageType: detectMessageType(message.message as Record<string, unknown>)
+            messageType: detectMessageType(message.message as Record<string, unknown>),
+            rawMessage: message.message as Record<string, unknown>,
+            messageKey: {
+              remoteJid: message.key.remoteJid,
+              id: message.key.id,
+              fromMe: message.key.fromMe
+            }
           });
         }
       } catch (error) {
@@ -558,9 +576,66 @@ const handleSendMessage = async (command: RpcCommand): Promise<void> => {
   }
 };
 
+const handleDownloadMedia = async (command: DownloadMediaCommand): Promise<void> => {
+  try {
+    if (!socket) {
+      throw new Error("Instancia nao conectada");
+    }
+
+    const audioMsg = command.rawMessage?.audioMessage ?? command.rawMessage?.pttMessage;
+    const imageMsg = command.rawMessage?.imageMessage;
+
+    let mediaContent: Record<string, unknown> | undefined;
+    let mediaType: string;
+
+    if (audioMsg) {
+      mediaContent = audioMsg as Record<string, unknown>;
+      mediaType = "audio";
+    } else if (imageMsg) {
+      mediaContent = imageMsg as Record<string, unknown>;
+      mediaType = "image";
+    } else {
+      throw new Error("Mensagem nao contem midia baixavel");
+    }
+
+    const chunks: Buffer[] = [];
+    const stream = await downloadContentFromMessage(
+      mediaContent as never,
+      mediaType as never
+    );
+
+    for await (const chunk of stream) {
+      chunks.push(Buffer.from(chunk));
+    }
+
+    const buffer = Buffer.concat(chunks);
+    const base64 = buffer.toString("base64");
+    const mimeType = (mediaContent?.mimetype as string | undefined) ?? null;
+
+    parentPort?.postMessage({
+      type: "rpc-result",
+      requestId: command.requestId,
+      data: { buffer: base64, mimeType }
+    });
+  } catch (error) {
+    parentPort?.postMessage({
+      type: "rpc-error",
+      requestId: command.requestId,
+      error: {
+        message: error instanceof Error ? error.message : "Falha ao baixar midia"
+      }
+    });
+  }
+};
+
 parentPort?.on("message", async (command: IncomingCommand) => {
   if (command.type === "send-message") {
     await handleSendMessage(command);
+    return;
+  }
+
+  if (command.type === "download-media") {
+    await handleDownloadMedia(command);
     return;
   }
 

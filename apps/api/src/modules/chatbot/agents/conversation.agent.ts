@@ -28,7 +28,7 @@ export class ConversationAgent {
     const result = await this.chatbotService.evaluateInbound(params.tenantId, params.instanceId, {
       text: params.message,
       isFirstContact: params.isFirstContact,
-      contactName: params.contactName,
+      contactName: undefined,
       phoneNumber: params.phoneNumber,
       remoteJid: params.remoteJid,
       clientContext: params.clientContext

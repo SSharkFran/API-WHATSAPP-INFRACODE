@@ -1,0 +1,217 @@
+import type { PlatformPrisma } from "../../lib/database.js";
+import type { InstanceOrchestrator } from "../instances/service.js";
+
+interface PlatformConfigRecord {
+  adminAlertPhone: string | null;
+  groqUsageLimit: number;
+  alertInstanceDown: boolean;
+  alertNewLead: boolean;
+  alertHighTokens: boolean;
+}
+
+export class PlatformAlertService {
+  private readonly platformPrisma: PlatformPrisma;
+  private readonly instanceOrchestrator: InstanceOrchestrator;
+
+  public constructor(
+    platformPrisma: PlatformPrisma,
+    instanceOrchestrator: InstanceOrchestrator
+  ) {
+    this.platformPrisma = platformPrisma;
+    this.instanceOrchestrator = instanceOrchestrator;
+  }
+
+  private async getConfig(): Promise<PlatformConfigRecord | null> {
+    const config = await this.platformPrisma.platformConfig.findUnique({
+      where: { id: "singleton" }
+    });
+    return config;
+  }
+
+  private async getAdminPhone(): Promise<string | null> {
+    const config = await this.getConfig();
+    return config?.adminAlertPhone ?? null;
+  }
+
+  private async getAnyConnectedInstance(): Promise<{
+    tenantId: string;
+    instanceId: string;
+    name: string;
+  } | null> {
+    const tenants = await this.platformPrisma.tenant.findMany({
+      where: {
+        status: "ACTIVE",
+        suspendedAt: null
+      },
+      select: { id: true }
+    });
+
+    for (const tenant of tenants) {
+      try {
+        const instances = await this.instanceOrchestrator.listInstances(tenant.id);
+        const connected = instances.find((i) => i.status === "CONNECTED");
+        if (connected) {
+          return {
+            tenantId: tenant.id,
+            instanceId: connected.id,
+            name: connected.name
+          };
+        }
+      } catch {
+        continue;
+      }
+    }
+    return null;
+  }
+
+  async alertInstanceDown(
+    tenantId: string,
+    instanceId: string,
+    instanceName: string
+  ): Promise<void> {
+    const config = await this.getConfig();
+    if (!config?.adminAlertPhone || !config.alertInstanceDown) return;
+
+    const phone = config.adminAlertPhone;
+    const msg = `⚠️ *ALERTA InfraCode*\n\nInstância caída!\n\nTenant: ${tenantId}\nInstância: ${instanceName} (${instanceId})\nHorário: ${new Date().toLocaleString("pt-BR")}`;
+
+    await this.sendAdminAlert(phone, msg);
+  }
+
+  async alertInstanceUp(
+    tenantId: string,
+    instanceId: string,
+    instanceName: string
+  ): Promise<void> {
+    const config = await this.getConfig();
+    if (!config?.adminAlertPhone || !config.alertInstanceDown) return;
+
+    const phone = config.adminAlertPhone;
+    const msg = `✅ *InfraCode*\n\nInstância reconectada!\n\nTenant: ${tenantId}\nInstância: ${instanceName}\nHorário: ${new Date().toLocaleString("pt-BR")}`;
+
+    await this.sendAdminAlert(phone, msg);
+  }
+
+  async alertHighTokenUsage(
+    tenantId: string,
+    provider: string,
+    usagePercent: number
+  ): Promise<void> {
+    const config = await this.getConfig();
+    if (!config?.adminAlertPhone || !config.alertHighTokens) return;
+
+    const phone = config.adminAlertPhone;
+    const msg = `🔴 *ALERTA InfraCode*\n\nUso de tokens alto!\n\nTenant: ${tenantId}\nProvider: ${provider}\nUso: ${usagePercent}% do limite\nHorário: ${new Date().toLocaleString("pt-BR")}`;
+
+    await this.sendAdminAlert(phone, msg);
+  }
+
+  async alertNewLead(
+    tenantId: string,
+    instanceName: string,
+    leadSummary: string
+  ): Promise<void> {
+    const config = await this.getConfig();
+    if (!config?.adminAlertPhone || !config.alertNewLead) return;
+
+    const phone = config.adminAlertPhone;
+    const msg = `📋 *Novo lead — InfraCode*\n\nTenant: ${tenantId}\nInstância: ${instanceName}\n\n${leadSummary}`;
+
+    await this.sendAdminAlert(phone, msg);
+  }
+
+  async alertCriticalError(
+    tenantId: string,
+    instanceId: string,
+    error: string
+  ): Promise<void> {
+    const config = await this.getConfig();
+    if (!config?.adminAlertPhone) return;
+
+    const phone = config.adminAlertPhone;
+    const msg = `🚨 *ERRO CRÍTICO — InfraCode*\n\nTenant: ${tenantId}\nInstância: ${instanceId}\nErro: ${error.slice(0, 200)}\nHorário: ${new Date().toLocaleString("pt-BR")}`;
+
+    await this.sendAdminAlert(phone, msg);
+  }
+
+  async getConfigPublic(): Promise<PlatformConfigRecord> {
+    const config = await this.platformPrisma.platformConfig.findUnique({
+      where: { id: "singleton" }
+    });
+
+    if (!config) {
+      const created = await this.platformPrisma.platformConfig.create({
+        data: { id: "singleton" }
+      });
+      return {
+        adminAlertPhone: created.adminAlertPhone,
+        groqUsageLimit: created.groqUsageLimit,
+        alertInstanceDown: created.alertInstanceDown,
+        alertNewLead: created.alertNewLead,
+        alertHighTokens: created.alertHighTokens
+      };
+    }
+
+    return {
+      adminAlertPhone: config.adminAlertPhone,
+      groqUsageLimit: config.groqUsageLimit,
+      alertInstanceDown: config.alertInstanceDown,
+      alertNewLead: config.alertNewLead,
+      alertHighTokens: config.alertHighTokens
+    };
+  }
+
+  async updateConfig(input: {
+    adminAlertPhone?: string | null;
+    groqUsageLimit?: number;
+    alertInstanceDown?: boolean;
+    alertNewLead?: boolean;
+    alertHighTokens?: boolean;
+  }): Promise<PlatformConfigRecord> {
+    const updated = await this.platformPrisma.platformConfig.upsert({
+      where: { id: "singleton" },
+      create: {
+        id: "singleton",
+        adminAlertPhone: input.adminAlertPhone ?? null,
+        groqUsageLimit: input.groqUsageLimit ?? 80,
+        alertInstanceDown: input.alertInstanceDown ?? true,
+        alertNewLead: input.alertNewLead ?? true,
+        alertHighTokens: input.alertHighTokens ?? true
+      },
+      update: {
+        ...(input.adminAlertPhone !== undefined && { adminAlertPhone: input.adminAlertPhone }),
+        ...(input.groqUsageLimit !== undefined && { groqUsageLimit: input.groqUsageLimit }),
+        ...(input.alertInstanceDown !== undefined && { alertInstanceDown: input.alertInstanceDown }),
+        ...(input.alertNewLead !== undefined && { alertNewLead: input.alertNewLead }),
+        ...(input.alertHighTokens !== undefined && { alertHighTokens: input.alertHighTokens })
+      }
+    });
+
+    return {
+      adminAlertPhone: updated.adminAlertPhone,
+      groqUsageLimit: updated.groqUsageLimit,
+      alertInstanceDown: updated.alertInstanceDown,
+      alertNewLead: updated.alertNewLead,
+      alertHighTokens: updated.alertHighTokens
+    };
+  }
+
+  private async sendAdminAlert(phone: string, message: string): Promise<void> {
+    try {
+      const sender = await this.getAnyConnectedInstance();
+      if (!sender) {
+        console.warn("[alert] nenhuma instância disponível para enviar alerta admin");
+        return;
+      }
+
+      await this.instanceOrchestrator.sendMessage(sender.tenantId, sender.instanceId, {
+        type: "text",
+        to: phone,
+        targetJid: `${phone}@s.whatsapp.net`,
+        text: message
+      });
+    } catch (err) {
+      console.error("[alert] erro ao enviar alerta admin:", err);
+    }
+  }
+}

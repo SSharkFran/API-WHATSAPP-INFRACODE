@@ -7,6 +7,7 @@ import { encrypt, sha256 } from "../../lib/crypto.js";
 import { resolveTenantSchemaName } from "../../lib/tenant-schema.js";
 import type { AuthService } from "../auth/service.js";
 import type { InstanceOrchestrator } from "../instances/service.js";
+import type { PlatformAlertService } from "../platform/alert.service.js";
 
 interface PlatformAdminServiceDeps {
   config: AppConfig;
@@ -652,5 +653,76 @@ export class PlatformAdminService {
     }
   ) {
     return this.authService.createImpersonationSession(platformUserId, tenantId, reason, requestMeta);
+  }
+
+  public async getAlertConfig(): Promise<{
+    adminAlertPhone: string | null;
+    groqUsageLimit: number;
+    alertInstanceDown: boolean;
+    alertNewLead: boolean;
+    alertHighTokens: boolean;
+  }> {
+    const config = await this.platformPrisma.platformConfig.findUnique({
+      where: { id: "singleton" }
+    });
+
+    if (!config) {
+      return {
+        adminAlertPhone: null,
+        groqUsageLimit: 80,
+        alertInstanceDown: true,
+        alertNewLead: true,
+        alertHighTokens: true
+      };
+    }
+
+    return {
+      adminAlertPhone: config.adminAlertPhone,
+      groqUsageLimit: config.groqUsageLimit,
+      alertInstanceDown: config.alertInstanceDown,
+      alertNewLead: config.alertNewLead,
+      alertHighTokens: config.alertHighTokens
+    };
+  }
+
+  public async updateAlertConfig(input: {
+    adminAlertPhone?: string | null;
+    groqUsageLimit?: number;
+    alertInstanceDown?: boolean;
+    alertNewLead?: boolean;
+    alertHighTokens?: boolean;
+  }): Promise<{
+    adminAlertPhone: string | null;
+    groqUsageLimit: number;
+    alertInstanceDown: boolean;
+    alertNewLead: boolean;
+    alertHighTokens: boolean;
+  }> {
+    const updated = await this.platformPrisma.platformConfig.upsert({
+      where: { id: "singleton" },
+      create: {
+        id: "singleton",
+        adminAlertPhone: input.adminAlertPhone ?? null,
+        groqUsageLimit: input.groqUsageLimit ?? 80,
+        alertInstanceDown: input.alertInstanceDown ?? true,
+        alertNewLead: input.alertNewLead ?? true,
+        alertHighTokens: input.alertHighTokens ?? true
+      },
+      update: {
+        ...(input.adminAlertPhone !== undefined && { adminAlertPhone: input.adminAlertPhone }),
+        ...(input.groqUsageLimit !== undefined && { groqUsageLimit: input.groqUsageLimit }),
+        ...(input.alertInstanceDown !== undefined && { alertInstanceDown: input.alertInstanceDown }),
+        ...(input.alertNewLead !== undefined && { alertNewLead: input.alertNewLead }),
+        ...(input.alertHighTokens !== undefined && { alertHighTokens: input.alertHighTokens })
+      }
+    });
+
+    return {
+      adminAlertPhone: updated.adminAlertPhone,
+      groqUsageLimit: updated.groqUsageLimit,
+      alertInstanceDown: updated.alertInstanceDown,
+      alertNewLead: updated.alertNewLead,
+      alertHighTokens: updated.alertHighTokens
+    };
   }
 }

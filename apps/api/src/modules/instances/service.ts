@@ -1,4 +1,4 @@
-﻿import { EventEmitter } from "node:events";
+import { EventEmitter } from "node:events";
 import { mkdir, rm } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { Worker } from "node:worker_threads";
@@ -19,14 +19,14 @@ import type { MetricsService } from "../../lib/metrics.js";
 import { normalizePhoneNumber, toJid } from "../../lib/phone.js";
 import { ConversationAgent } from "../chatbot/agents/conversation.agent.js";
 import { FiadoAgent } from "../chatbot/agents/fiado.agent.js";
-import { LeadAgent } from "../chatbot/agents/lead.agent.js";
 import { MemoryAgent } from "../chatbot/agents/memory.agent.js";
-import type { ChatMessage, ConversationSession } from "../chatbot/agents/types.js";
+import type { ChatMessage, ConversationSession, LeadData } from "../chatbot/agents/types.js";
 import type { ClientMemoryService } from "../chatbot/memory.service.js";
 import type { ChatbotService } from "../chatbot/service.js";
 import type { PlanEnforcementService } from "../platform/plan-enforcement.service.js";
 import type { WebhookService } from "../webhooks/service.js";
 import type { FiadoService } from "../chatbot/fiado.service.js";
+import type { PlatformAlertService } from "../platform/alert.service.js";
 
 interface InstanceOrchestratorDeps {
   config: AppConfig;
@@ -39,6 +39,7 @@ interface InstanceOrchestratorDeps {
   chatbotService: ChatbotService;
   clientMemoryService: ClientMemoryService;
   fiadoService: FiadoService;
+  platformAlertService?: PlatformAlertService;
 }
 
 interface StatusWorkerEvent {
@@ -74,6 +75,12 @@ interface InboundMessageWorkerEvent {
   externalMessageId?: string;
   payload: Record<string, unknown>;
   messageType: MessageType;
+  rawMessage?: Record<string, unknown>;
+  messageKey?: {
+    remoteJid?: string | null;
+    id?: string | null;
+    fromMe?: boolean | null;
+  };
 }
 
 interface RpcResultWorkerEvent {
@@ -133,9 +140,9 @@ export class InstanceOrchestrator {
   private readonly webhookService: WebhookService;
   private readonly planEnforcementService: PlanEnforcementService;
   private readonly memoryAgent: MemoryAgent;
-  private readonly leadAgent: LeadAgent;
   private readonly conversationAgent: ConversationAgent;
   private readonly fiadoAgent: FiadoAgent;
+  private readonly platformAlertService?: PlatformAlertService;
   private readonly logEmitter = new EventEmitter();
   private readonly qrEmitter = new EventEmitter();
   private readonly latestQrCodes = new Map<string, QrCodeEvent>();
@@ -153,27 +160,17 @@ export class InstanceOrchestrator {
     this.memoryAgent = new MemoryAgent({
       clientMemoryService: deps.clientMemoryService
     });
-    this.leadAgent = new LeadAgent({
-      sendLeadAlert: async ({ tenantId, instanceId, phoneNumber, summary }) => {
-        await this.sendAutomatedTextMessage(
-          tenantId,
-          instanceId,
-          phoneNumber,
-          `${phoneNumber}@s.whatsapp.net`,
-          `🔔 Novo lead agendado:\n\n${summary}`,
-          {
-            action: "lead_summary",
-            kind: "chatbot"
-          }
-        );
-      }
-    });
     this.conversationAgent = new ConversationAgent({
       chatbotService: deps.chatbotService
     });
     this.fiadoAgent = new FiadoAgent({
       fiadoService: deps.fiadoService
     });
+    this.platformAlertService = deps.platformAlertService;
+  }
+
+  public setPlatformAlertService(service: PlatformAlertService): void {
+    (this as unknown as { platformAlertService: PlatformAlertService }).platformAlertService = service;
   }
 
   /**
@@ -433,6 +430,148 @@ export class InstanceOrchestrator {
     });
   }
 
+  private async callWorkerRpc(
+    tenantId: string,
+    instanceId: string,
+    commandType: string,
+    payload: Record<string, unknown>
+  ): Promise<Record<string, unknown>> {
+    const workerKey = buildWorkerKey(tenantId, instanceId);
+    const managedWorker = this.workers.get(workerKey);
+
+    if (!managedWorker) {
+      throw new ApiError(503, "WORKER_UNAVAILABLE", "Worker da instancia indisponivel");
+    }
+
+    const requestId = crypto.randomUUID();
+
+    return new Promise<Record<string, unknown>>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        managedWorker.pendingRequests.delete(requestId);
+        reject(new ApiError(504, "INSTANCE_RPC_TIMEOUT", "Tempo limite excedido no worker da instancia"));
+      }, 60_000);
+
+      managedWorker.pendingRequests.set(requestId, {
+        resolve,
+        reject,
+        timeout
+      });
+
+      managedWorker.worker.postMessage({
+        type: commandType,
+        requestId,
+        ...payload
+      });
+    });
+  }
+
+  private async downloadMediaFromWorker(
+    tenantId: string,
+    instanceId: string,
+    rawMessage: Record<string, unknown>,
+    messageKey: { remoteJid?: string | null; id?: string | null }
+  ): Promise<{ buffer: string; mimeType: string | null } | null> {
+    try {
+      const result = await this.callWorkerRpc(tenantId, instanceId, "download-media", {
+        rawMessage,
+        messageKey
+      }) as { buffer: string; mimeType: string | null };
+      return result;
+    } catch (err) {
+      console.error("[worker] erro ao baixar midia do worker:", err);
+      return null;
+    }
+  }
+
+  private async transcribeAudio(
+    tenantId: string,
+    instanceId: string,
+    rawMessage: Record<string, unknown>,
+    messageKey: { remoteJid?: string | null; id?: string | null }
+  ): Promise<string | null> {
+    const media = await this.downloadMediaFromWorker(tenantId, instanceId, rawMessage, messageKey);
+    if (!media) return null;
+
+    const buffer = Buffer.from(media.buffer, "base64");
+    const formData = new FormData();
+    formData.append("file", new Blob([buffer], { type: media.mimeType ?? "audio/ogg" }), "audio.ogg");
+    formData.append("model", "whisper-large-v3");
+    formData.append("language", "pt");
+
+    const response = await fetch("https://api.groq.com/openai/v1/audio/transcriptions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${this.config.GROQ_API_KEY}`
+      },
+      body: formData
+    });
+
+    if (!response.ok) {
+      console.error("[audio] Groq Whisper error:", await response.text());
+      return null;
+    }
+
+    const data = (await response.json()) as { text: string };
+    return data.text?.trim() ?? null;
+  }
+
+  private async analyzeImage(
+    tenantId: string,
+    instanceId: string,
+    rawMessage: Record<string, unknown>,
+    messageKey: { remoteJid?: string | null; id?: string | null },
+    caption: string,
+    visionPrompt?: string | null
+  ): Promise<string | null> {
+    const media = await this.downloadMediaFromWorker(tenantId, instanceId, rawMessage, messageKey);
+    if (!media) return null;
+
+    const base64Image = media.buffer;
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${this.config.GEMINI_API_KEY}`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          contents: [
+            {
+              parts: [
+                {
+                  inline_data: {
+                    mime_type: "image/jpeg",
+                    data: base64Image
+                  }
+                },
+                {
+                  text:
+                    visionPrompt ??
+                    "Descreva o que voce ve nesta imagem em portugues de forma concisa, focando em informacoes relevantes para o atendimento."
+                }
+              ]
+            }
+          ],
+          generationConfig: {
+            maxOutputTokens: 300
+          }
+        })
+      }
+    );
+
+    if (!response.ok) return null;
+    const data = (await response.json()) as {
+      candidates?: Array<{
+        content?: {
+          parts?: Array<{
+            text?: string;
+          }>;
+        };
+      }>;
+    };
+    return data.candidates?.[0]?.content?.parts?.[0]?.text ?? null;
+  }
+
   /**
    * Assina eventos de log em tempo real para SSE.
    */
@@ -663,7 +802,7 @@ export class InstanceOrchestrator {
         }
       });
 
-      if (event.status === "CONNECTED") {
+if (event.status === "CONNECTED") {
         await this.platformPrisma.tenant.update({
           where: {
             id: tenantId
@@ -682,6 +821,10 @@ export class InstanceOrchestrator {
           },
           tenantId
         });
+
+        this.platformAlertService?.alertInstanceUp(tenantId, instance.id, instance.name).catch((err) => {
+          console.error("[orchestrator] erro ao alertar reconexao:", err);
+        });
       }
 
       if (event.status === "DISCONNECTED" || event.status === "BANNED") {
@@ -695,6 +838,10 @@ export class InstanceOrchestrator {
             status: updated.status
           },
           tenantId
+        });
+
+        this.platformAlertService?.alertInstanceDown(tenantId, instance.id, instance.name).catch((err) => {
+          console.error("[orchestrator] erro ao alertar queda:", err);
         });
       }
     }
@@ -859,19 +1006,66 @@ export class InstanceOrchestrator {
 
     try {
       const inputText = typeof event.payload.text === "string" ? event.payload.text.trim() : "";
-      const normalizedInputText = inputText.normalize("NFKC").trim().toLowerCase();
+
+      let finalInputText = inputText;
+
+      const rawMessage = event.rawMessage;
+      const messageKey = event.messageKey ?? { remoteJid: event.remoteJid };
+
+      const chatbotConfig = await prisma.chatbotConfig.findUnique({
+        where: {
+          instanceId: instance.id
+        }
+      });
+
+      const audioMsg = rawMessage?.audioMessage ?? rawMessage?.pttMessage;
+      if (audioMsg && (chatbotConfig?.audioEnabled ?? false)) {
+        console.log("[audio] mensagem de audio detectada, transcrevendo...");
+        try {
+          const transcript = await this.transcribeAudio(
+            tenantId,
+            instance.id,
+            rawMessage ?? {},
+            messageKey
+          );
+          if (transcript) {
+            console.log("[audio] transcricao:", transcript.slice(0, 100));
+            finalInputText = transcript;
+          }
+        } catch (err) {
+          console.error("[audio] erro na transcricao:", err);
+        }
+      }
+
+      const imageMsg = rawMessage?.imageMessage;
+      if (imageMsg && (chatbotConfig?.visionEnabled ?? false)) {
+        console.log("[vision] imagem detectada, analisando...");
+        try {
+          const caption = (imageMsg as { caption?: string })?.caption ?? "";
+          const analysis = await this.analyzeImage(
+            tenantId,
+            instance.id,
+            rawMessage ?? {},
+            messageKey,
+            caption,
+            chatbotConfig?.visionPrompt
+          );
+          if (analysis) {
+            finalInputText = `[O cliente enviou uma imagem. Analise: ${analysis}]${caption ? ` Legenda: ${caption}` : ""}`;
+          }
+        } catch (err) {
+          console.error("[vision] erro na analise:", err);
+        }
+      }
+
+      const finalNormalizedInputText = finalInputText.normalize("NFKC").trim().toLowerCase();
 
       if (event.remoteJid.endsWith("@g.us")) {
-        if (normalizedInputText === "conectar") {
+        if (finalNormalizedInputText === "conectar") {
           const leadsGroupName =
             typeof event.payload.pushName === "string" && event.payload.pushName.trim()
               ? event.payload.pushName.trim()
               : "Grupo sem nome";
-          const chatbotConfig = await prisma.chatbotConfig.findUnique({
-            where: {
-              instanceId: instance.id
-            }
-          });
 
           if (chatbotConfig) {
             await prisma.chatbotConfig.update({
@@ -912,25 +1106,20 @@ export class InstanceOrchestrator {
         return;
       }
 
-      const chatbotConfig = await prisma.chatbotConfig.findUnique({
-        where: {
-          instanceId: instance.id
-        }
-      });
       const { contextString } = await this.memoryAgent.getContext({
         tenantId,
         phoneNumber: resolvedContactNumber,
         name: contact.displayName
       });
 
-      if (!inputText) {
+      if (!finalInputText) {
         return;
       }
 
-      this.appendConversationHistory(session, "user", inputText);
+      this.appendConversationHistory(session, "user", finalInputText);
 
       const fiadoResponse = await this.fiadoAgent.process({
-        message: inputText,
+        message: finalInputText,
         phoneNumber: resolvedContactNumber,
         tenantId,
         instanceId: instance.id,
@@ -942,7 +1131,7 @@ export class InstanceOrchestrator {
         await this.memoryAgent.update({
           tenantId,
           phoneNumber: resolvedContactNumber,
-          clientMessage: inputText,
+          clientMessage: finalInputText,
           name: contact.displayName
         });
         await this.sendConversationWithDelay({
@@ -963,12 +1152,12 @@ export class InstanceOrchestrator {
       const rawResponse = await this.conversationAgent.reply({
         tenantId,
         instanceId: instance.id,
-        message: inputText,
+        message: finalInputText,
         history: session.history,
         clientContext: contextString,
         isFirstContact,
-        contactName: contact.displayName,
-        phoneNumber: resolvedContactNumber,
+        contactName: undefined,
+        phoneNumber: contact.phoneNumber ?? remoteNumber,
         remoteJid: event.remoteJid
       });
 
@@ -976,26 +1165,90 @@ export class InstanceOrchestrator {
         await this.memoryAgent.update({
           tenantId,
           phoneNumber: resolvedContactNumber,
-          clientMessage: inputText,
+          clientMessage: finalInputText,
           name: contact.displayName
         });
         return;
       }
 
-      const { cleanedText, leadData } = await this.leadAgent.process({
-        responseText: rawResponse,
-        resolvedContactNumber,
-        session,
-        tenantId,
-        instanceId: instance.id,
-        leadsPhoneNumber: chatbotConfig?.leadsPhoneNumber,
-        leadsEnabled: chatbotConfig?.leadsEnabled ?? true
-      });
+      const resumoMatch = rawResponse.match(/\[RESUMO_LEAD\][\s\S]*?\[\/RESUMO_LEAD\]/);
+      const resumoLead = resumoMatch ? resumoMatch[0] : null;
+
+      const clientText = rawResponse.replace(/\[RESUMO_LEAD\][\s\S]*?\[\/RESUMO_LEAD\]/, "").trim();
+
+      console.log("[chatbot] rawResponse:", rawResponse.slice(0, 300));
+      console.log("[chatbot] resumoDetectado:", !!resumoLead);
+      console.log("[chatbot] clientText:", clientText.slice(0, 300));
+
+      let leadData: LeadData | null = null;
+
+      if (resumoLead) {
+        const leadsPhone = chatbotConfig?.leadsPhoneNumber;
+        const leadsEnabled = chatbotConfig?.leadsEnabled ?? true;
+
+        const camposObrigatorios = [
+          /Nome:\s*(?!não informado|nao informado|\(nome\))/i,
+          /Contato:\s*\d{8,}/,
+          /Horário agendado:\s*\d{2}\/\d{2}\/\d{4}/i,
+          /Serviço de interesse:\s*(?!não informado|nao informado)/i
+        ];
+        const camposOk = camposObrigatorios.every((r) => r.test(resumoLead));
+
+        if (camposOk) {
+          const nomeMatch = resumoLead.match(/Nome:\s*(.+)/i);
+          const contatoMatch = resumoLead.match(/Contato:\s*(.+)/i);
+          const emailMatch = resumoLead.match(/E-mail:\s*(.+)/i);
+          const empresaMatch = resumoLead.match(/Empresa:\s*(.+)/i);
+          const problemaMatch = resumoLead.match(/Problema:\s*(.+)/i);
+          const servicoMatch = resumoLead.match(/Serviço de interesse:\s*(.+)/i);
+          const horarioMatch = resumoLead.match(/Horário agendado:\s*(.+)/i);
+
+          leadData = {
+            rawSummary: resumoLead,
+            name: nomeMatch ? nomeMatch[1].trim() : null,
+            contact: contatoMatch ? contatoMatch[1].trim() : remoteNumber,
+            email: emailMatch ? emailMatch[1].trim() : null,
+            companyName: empresaMatch ? empresaMatch[1].trim() : null,
+            problemDescription: problemaMatch ? problemaMatch[1].trim() : null,
+            serviceInterest: servicoMatch ? servicoMatch[1].trim() : null,
+            scheduledText: horarioMatch ? horarioMatch[1].trim() : null,
+            scheduledAt: null,
+            isComplete: true
+          };
+        }
+
+        if (leadData?.isComplete && leadsPhone && leadsEnabled) {
+          const hash = Buffer.from(resumoLead.slice(0, 120)).toString("base64").slice(0, 20);
+          const dedupeKey = `leads:dedup:${instance.id}:${remoteNumber}:${hash}`;
+          const jaEnviado = await this.redis.get(dedupeKey).catch(() => null);
+
+          if (!jaEnviado) {
+            await this.redis.set(dedupeKey, "1", "EX", 120);
+            const leadsJid = `${leadsPhone}@s.whatsapp.net`;
+            await this.sendAutomatedTextMessage(
+              tenantId,
+              instance.id,
+              leadsPhone,
+              leadsJid,
+              `🔔 Novo lead agendado:\n\n${resumoLead}`,
+              { action: "lead_summary", kind: "chatbot" }
+            );
+
+            this.platformAlertService?.alertNewLead(tenantId, instance.name, resumoLead).catch((err) => {
+              console.error("[orchestrator] erro ao alertar novo lead:", err);
+            });
+          } else {
+            console.log("[leads] resumo duplicado ignorado");
+          }
+        } else if (!leadData?.isComplete) {
+          console.log("[leads] resumo incompleto, nao enviado:", resumoLead.slice(0, 100));
+        }
+      }
 
       await this.memoryAgent.update({
         tenantId,
         phoneNumber: resolvedContactNumber,
-        clientMessage: inputText,
+        clientMessage: finalInputText,
         leadData,
         name: contact.displayName
       });
@@ -1012,23 +1265,40 @@ export class InstanceOrchestrator {
         });
       }
 
-      if (!cleanedText.trim()) {
+      if (!clientText.trim()) {
         return;
       }
 
-      await this.sendConversationWithDelay({
-        tenantId,
-        instanceId: instance.id,
-        remoteNumber: resolvedContactNumber,
-        targetJid: event.remoteJid,
-        text: cleanedText,
-        metadata: {
-          action: "conversation_agent",
-          kind: "chatbot"
-        },
-        session
-      });
-    } catch (error) {
+      const delayLeitura = Math.floor(Math.random() * 1000) + 1500;
+      await new Promise((resolve) => setTimeout(resolve, delayLeitura));
+
+      if (clientText.includes("|||")) {
+        const partes = clientText.split("|||").map((p) => p.trim()).filter(Boolean);
+        for (const parte of partes) {
+          await this.sendAutomatedTextMessage(
+            tenantId,
+            instance.id,
+            remoteNumber,
+            event.remoteJid,
+            parte,
+            { action: "conversation_agent", kind: "chatbot" }
+          );
+          this.appendConversationHistory(session, "assistant", parte);
+          const delayDigitacao = Math.floor(Math.random() * 1000) + 1500;
+          await new Promise((resolve) => setTimeout(resolve, delayDigitacao));
+        }
+      } else {
+        await this.sendAutomatedTextMessage(
+          tenantId,
+          instance.id,
+          remoteNumber,
+          event.remoteJid,
+          clientText,
+          { action: "conversation_agent", kind: "chatbot" }
+        );
+        this.appendConversationHistory(session, "assistant", clientText);
+      }
+} catch (error) {
       this.emitLog(buildWorkerKey(tenantId, instance.id), {
         context: {
           error: error instanceof Error ? error.message : "unknown"
@@ -1037,6 +1307,14 @@ export class InstanceOrchestrator {
         level: "warn",
         message: "Falha ao processar resposta automatica do chatbot",
         timestamp: new Date().toISOString()
+      });
+
+      this.platformAlertService?.alertCriticalError(
+        tenantId,
+        instance.id,
+        error instanceof Error ? error.message : "Erro desconhecido no chatbot"
+      ).catch((err) => {
+        console.error("[orchestrator] erro ao alertar erro critico:", err);
       });
     }
   }

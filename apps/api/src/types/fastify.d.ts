@@ -18,6 +18,7 @@ import type { ChatbotService } from "../modules/chatbot/service.js";
 import type { TenantManagementService } from "../modules/tenant/service.js";
 import type { FiadoService } from "../modules/chatbot/fiado.service.js";
 import type { PlanEnforcementService } from "../modules/platform/plan-enforcement.service.js";
+import type { PlatformAlertService } from "../modules/platform/alert.service.js";
 
 declare module "fastify" {
   interface FastifyRequest {
@@ -51,6 +52,7 @@ declare module "fastify" {
     fiadoService: FiadoService;
     tenantManagementService: TenantManagementService;
     planEnforcementService: PlanEnforcementService;
+    platformAlertService: PlatformAlertService;
     queues: {
       sendMessage: Queue;
       webhookDispatch: Queue;

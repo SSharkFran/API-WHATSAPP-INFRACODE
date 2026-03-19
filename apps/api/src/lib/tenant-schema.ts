@@ -144,6 +144,9 @@ export const buildTenantSchemaSql = (schemaName: string): string[] => {
     `ALTER TABLE ${schema}."ChatbotConfig" ADD COLUMN IF NOT EXISTS "leadsPhoneNumber" TEXT;`,
     `ALTER TABLE ${schema}."ChatbotConfig" ADD COLUMN IF NOT EXISTS "leadsEnabled" BOOLEAN NOT NULL DEFAULT TRUE;`,
     `ALTER TABLE ${schema}."ChatbotConfig" ADD COLUMN IF NOT EXISTS "fiadoEnabled" BOOLEAN NOT NULL DEFAULT FALSE;`,
+    `ALTER TABLE ${schema}."ChatbotConfig" ADD COLUMN IF NOT EXISTS "audioEnabled" BOOLEAN NOT NULL DEFAULT FALSE;`,
+    `ALTER TABLE ${schema}."ChatbotConfig" ADD COLUMN IF NOT EXISTS "visionEnabled" BOOLEAN NOT NULL DEFAULT FALSE;`,
+    `ALTER TABLE ${schema}."ChatbotConfig" ADD COLUMN IF NOT EXISTS "visionPrompt" TEXT;`,
     `CREATE TABLE IF NOT EXISTS ${schema}."AuditLog" (
       "id" TEXT PRIMARY KEY,
       "actorType" TEXT NOT NULL,

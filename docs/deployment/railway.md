@@ -62,6 +62,8 @@ Obrigatorias:
 - `API_ENCRYPTION_KEY=<32+ chars>`
 - `WEBHOOK_HMAC_SECRET=<16+ chars>`
 - `JWT_SECRET=<8+ chars>`
+- `GEMINI_API_KEY=<api-key-do-google-ai-studio>`
+- `OLLAMA_HOST=<opcional, ex: http://servidor-ollama:11434>`
 - `ROOT_DOMAIN=<seu-dominio-raiz>`
 - `ADMIN_SUBDOMAIN=admin`
 - `PUBLIC_API_BASE_URL=https://api.<seu-dominio-raiz>`

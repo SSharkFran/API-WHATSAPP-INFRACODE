@@ -295,8 +295,15 @@ export interface ChatbotConfig {
   leadsPhoneNumber?: string | null;
   leadsEnabled?: boolean;
   fiadoEnabled?: boolean;
+  audioEnabled?: boolean;
+  visionEnabled?: boolean;
+  visionPrompt?: string | null;
+  modules?: ChatbotModules;
   rules: ChatbotRule[];
   ai: ChatbotAiConfig;
+  aiFallbackProvider?: string | null;
+  aiFallbackApiKey?: string | null;
+  aiFallbackModel?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -354,4 +361,203 @@ export interface ChatbotSimulationResult {
   matchedRuleId?: string | null;
   matchedRuleName?: string | null;
   responseText?: string | null;
+}
+
+export interface ChatbotModules {
+  faq?: FaqModuleConfig;
+  horarioAtendimento?: HorarioAtendimentoModuleConfig;
+  antiSpam?: AntiSpamModuleConfig;
+  multiIdioma?: MultiIdiomaModuleConfig;
+  agenda?: AgendaModuleConfig;
+  lembrete?: LembreteModuleConfig;
+  confirmacaoPresenca?: ConfirmacaoPresencaModuleConfig;
+  cancelamentoReagendamento?: CancelamentoReagendamentoModuleConfig;
+  cobrancaAutomatica?: CobrancaAutomaticaModuleConfig;
+  notificacaoVencimento?: NotificacaoVencimentoModuleConfig;
+  orcamentoRapido?: OrcamentoRapidoModuleConfig;
+  catalogo?: CatalogoModuleConfig;
+  pedidoWhatsApp?: PedidoWhatsAppModuleConfig;
+  statusPedido?: StatusPedidoModuleConfig;
+  envioMidia?: EnvioMidiaModuleConfig;
+  capturaDados?: CapturaDadosModuleConfig;
+  nps?: NpsModuleConfig;
+  tagFollowUp?: TagFollowUpModuleConfig;
+  exportarLeads?: ExportarLeadsModuleConfig;
+  webhook?: WebhookModuleConfig;
+  webhookBidirecional?: WebhookBidirecionalModuleConfig;
+  googleCalendar?: GoogleCalendarModuleConfig;
+  planilhaGoogle?: PlanilhaGoogleModuleConfig;
+  listaBranca?: ListaBrancaModuleConfig;
+  blacklist?: BlacklistModuleConfig;
+  limiteMensagens?: LimiteMensagensModuleConfig;
+  palavraPausa?: PalavraPausaModuleConfig;
+  disparoMassa?: DisparoMassaModuleConfig;
+  campanhaSegmento?: CampanhaSegmentoModuleConfig;
+  reativacao?: ReativacaoModuleConfig;
+  cupomPromocao?: CupomPromocaoModuleConfig;
+}
+
+export interface BaseModuleConfig {
+  isEnabled: boolean;
+}
+
+export interface FaqModuleConfig extends BaseModuleConfig {
+  faqs?: Array<{ pergunta: string; resposta: string }>;
+}
+
+export interface HorarioAtendimentoModuleConfig extends BaseModuleConfig {
+  horarioInicio: string;
+  horarioFim: string;
+  diasSemana: number[];
+  mensagemForaHorario: string;
+  timezone: string;
+}
+
+export interface AntiSpamModuleConfig extends BaseModuleConfig {
+  intervaloMinutos: number;
+  maxMensagens: number;
+}
+
+export interface MultiIdiomaModuleConfig extends BaseModuleConfig {
+  idiomasPermitidos: string[];
+  idiomaPrincipal: string;
+}
+
+export interface AgendaModuleConfig extends BaseModuleConfig {
+  horariosDisponiveis: string[];
+  duracaoMinutos: number;
+  mensagemConfirmacao: string;
+}
+
+export interface LembreteModuleConfig extends BaseModuleConfig {
+  horasAntes: number;
+  mensagemLembrete: string;
+}
+
+export interface ConfirmacaoPresencaModuleConfig extends BaseModuleConfig {
+  mensagemConfirmacao: string;
+  prazoConfirmacaoHoras: number;
+}
+
+export interface CancelamentoReagendamentoModuleConfig extends BaseModuleConfig {
+  permiteCancelamento: boolean;
+  permiteReagendamento: boolean;
+  prazoCancelamentoHoras: number;
+}
+
+export interface CobrancaAutomaticaModuleConfig extends BaseModuleConfig {
+  extratoMessage: string;
+  chavePix: string;
+  tipoChavePix: string;
+  mensagemConfirmacao: string;
+}
+
+export interface NotificacaoVencimentoModuleConfig extends BaseModuleConfig {
+  diasAntes: number;
+  mensagemVencimento: string;
+}
+
+export interface OrcamentoRapidoModuleConfig extends BaseModuleConfig {
+  tabelaPrecos: Array<{ servico: string; preco: number; descricao?: string }>;
+  mensagemOrcamento: string;
+}
+
+export interface CatalogoModuleConfig extends BaseModuleConfig {
+  produtos: Array<{ id: string; nome: string; preco: number; descricao?: string; imagemUrl?: string }>;
+}
+
+export interface PedidoWhatsAppModuleConfig extends BaseModuleConfig {
+  produtos: string[];
+  mostrarPreco: boolean;
+  mensagemPedido: string;
+}
+
+export interface StatusPedidoModuleConfig extends BaseModuleConfig {
+  statusDisponiveis: Array<{ id: string; label: string; emoji: string }>;
+}
+
+export interface EnvioMidiaModuleConfig extends BaseModuleConfig {
+  gatilhos: Array<{ palavra: string; tipo: "image" | "video" | "audio" | "document"; url: string; caption?: string }>;
+}
+
+export interface CapturaDadosModuleConfig extends BaseModuleConfig {
+  campos: Array<{ key: string; label: string; obrigatorio: boolean; tipo: "text" | "email" | "phone" | "select" }>;
+  mensagemAgradecimento: string;
+}
+
+export interface NpsModuleConfig extends BaseModuleConfig {
+  perguntas: string[];
+  notaMinima: number;
+  mensagemAgradecimento: string;
+}
+
+export interface TagFollowUpModuleConfig extends BaseModuleConfig {
+  tags: string[];
+  diasInatividade: number;
+}
+
+export interface ExportarLeadsModuleConfig extends BaseModuleConfig {
+  formato: "csv" | "xlsx";
+  campos: string[];
+}
+
+export interface WebhookModuleConfig extends BaseModuleConfig {
+  url: string;
+  secret: string;
+  eventos: string[];
+}
+
+export interface WebhookBidirecionalModuleConfig extends BaseModuleConfig {
+  url: string;
+  secret: string;
+}
+
+export interface GoogleCalendarModuleConfig extends BaseModuleConfig {
+  credentials: string;
+  calendarId: string;
+}
+
+export interface PlanilhaGoogleModuleConfig extends BaseModuleConfig {
+  spreadsheetId: string;
+  sheetName: string;
+}
+
+export interface ListaBrancaModuleConfig extends BaseModuleConfig {
+  numeros: string[];
+  modo: "permitir_todos" | "permitir_lista";
+}
+
+export interface BlacklistModuleConfig extends BaseModuleConfig {
+  numeros: string[];
+}
+
+export interface LimiteMensagensModuleConfig extends BaseModuleConfig {
+  maxPorHora: number;
+  maxPorDia: number;
+}
+
+export interface PalavraPausaModuleConfig extends BaseModuleConfig {
+  palavras: string[];
+  mensagemPausa: string;
+}
+
+export interface DisparoMassaModuleConfig extends BaseModuleConfig {
+  modeloMensagem: string;
+  agendamentoPadrao: string;
+}
+
+export interface CampanhaSegmentoModuleConfig extends BaseModuleConfig {
+  segmentoTags: string[];
+  modeloMensagem: string;
+}
+
+export interface ReativacaoModuleConfig extends BaseModuleConfig {
+  diasInatividade: number;
+  modeloMensagem: string;
+  maxPorMes: number;
+}
+
+export interface CupomPromocaoModuleConfig extends BaseModuleConfig {
+  cupons: Array<{ codigo: string; desconto: number; tipo: "percentual" | "fixo"; validade: string }>;
+  palavrasGatilho: string[];
 }

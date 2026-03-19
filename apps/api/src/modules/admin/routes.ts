@@ -347,4 +347,81 @@ export const registerAdminRoutes = async (app: FastifyInstance): Promise<void> =
       return response;
     }
   );
+
+  app.get(
+    "/admin/alerts-config",
+    {
+      config: {
+        auth: "platform",
+        platformRoles: ["PLATFORM_OWNER", "PLATFORM_SUPPORT", "PLATFORM_FINANCE", "PLATFORM_VIEWER"]
+      },
+      schema: {
+        tags: ["Admin"],
+        summary: "Retorna configuracao de alertas globais da plataforma",
+        response: {
+          200: z.object({
+            adminAlertPhone: z.string().nullable(),
+            groqUsageLimit: z.number(),
+            alertInstanceDown: z.boolean(),
+            alertNewLead: z.boolean(),
+            alertHighTokens: z.boolean()
+          })
+        }
+      }
+    },
+    async () => app.platformAdminService.getAlertConfig()
+  );
+
+  app.patch(
+    "/admin/alerts-config",
+    {
+      config: {
+        auth: "platform",
+        platformRoles: ["PLATFORM_OWNER"]
+      },
+      schema: {
+        tags: ["Admin"],
+        summary: "Atualiza configuracao de alertas globais da plataforma",
+        body: z.object({
+          adminAlertPhone: z.string().nullable().optional(),
+          groqUsageLimit: z.number().min(1).max(100).optional(),
+          alertInstanceDown: z.boolean().optional(),
+          alertNewLead: z.boolean().optional(),
+          alertHighTokens: z.boolean().optional()
+        }),
+        response: {
+          200: z.object({
+            adminAlertPhone: z.string().nullable(),
+            groqUsageLimit: z.number(),
+            alertInstanceDown: z.boolean(),
+            alertNewLead: z.boolean(),
+            alertHighTokens: z.boolean()
+          })
+        }
+      }
+    },
+    async (request) => {
+      const body = z.object({
+        adminAlertPhone: z.string().nullable().optional(),
+        groqUsageLimit: z.number().min(1).max(100).optional(),
+        alertInstanceDown: z.boolean().optional(),
+        alertNewLead: z.boolean().optional(),
+        alertHighTokens: z.boolean().optional()
+      }).parse(request.body);
+
+      const updated = await app.platformAdminService.updateAlertConfig(body);
+
+      await recordPlatformAuditLog(
+        app.platformPrisma,
+        request,
+        "alerts_config.update",
+        "PlatformConfig",
+        "singleton",
+        { adminAlertPhone: body.adminAlertPhone ? "[REDACTED]" : undefined },
+        app.config.JWT_SECRET
+      );
+
+      return updated;
+    }
+  );
 };

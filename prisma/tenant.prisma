@@ -153,12 +153,19 @@ model ChatbotConfig {
   fallbackMessage String?
   rules           Json
   aiSettings      Json?
-  aiApiKeyEncrypted String?
-  leadsGroupJid   String?
+  aiApiKeyEncrypted   String?
+  aiFallbackProvider String?
+  aiFallbackApiKey   String?
+  aiFallbackModel    String?
+  leadsGroupJid      String?
   leadsGroupName  String?
   leadsPhoneNumber String?
   leadsEnabled     Boolean  @default(true)
   fiadoEnabled     Boolean  @default(false)
+  audioEnabled     Boolean  @default(false)
+  visionEnabled    Boolean  @default(false)
+  visionPrompt     String?
+  modules          Json     @default("{}")
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
   instance        Instance @relation(fields: [instanceId], references: [id], onDelete: Cascade)

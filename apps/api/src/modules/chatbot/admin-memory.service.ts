@@ -8,7 +8,7 @@ export class AdminMemoryService {
     this.dataDir = dataDir;
   }
 
-  public async handleAdminCommand(
+  public async handleAdminMessage(
     instanceId: string,
     adminPhone: string,
     incomingPhone: string,
@@ -19,16 +19,11 @@ export class AdminMemoryService {
     }
 
     const trimmed = text.trim();
-    if (!this.isCommand(trimmed)) {
+    if (!trimmed) {
       return false;
     }
 
-    const ruleContent = this.extractRuleContent(trimmed);
-    if (!ruleContent) {
-      return false;
-    }
-
-    await this.appendRule(instanceId, ruleContent);
+    await this.appendMemory(instanceId, this.extractMemoryContent(trimmed));
     return true;
   }
 
@@ -42,37 +37,33 @@ export class AdminMemoryService {
     return phone.replace(/\D/g, "");
   }
 
-  private isCommand(text: string): boolean {
-    return text.startsWith("/pitaco ") || text.startsWith("/regra ");
-  }
-
-  private extractRuleContent(text: string): string | null {
+  private extractMemoryContent(text: string): string {
     if (text.startsWith("/pitaco ")) {
       return text.slice("/pitaco ".length).trim();
     }
     if (text.startsWith("/regra ")) {
       return text.slice("/regra ".length).trim();
     }
-    return null;
+    return text;
   }
 
-  private async appendRule(instanceId: string, ruleContent: string): Promise<void> {
+  private async appendMemory(instanceId: string, content: string): Promise<void> {
     const dirPath = resolve(this.dataDir, "instances", instanceId);
     const filePath = resolve(dirPath, "memory.md");
 
     await mkdir(dirPath, { recursive: true });
 
-    const date = new Date();
-    const formattedDate = this.formatDate(date);
-    const entry = `- [${formattedDate}] Regra adicionada: ${ruleContent}\n`;
+    const entry = `- [${this.formatDateTime(new Date())}] Instrucao do admin: ${content}\n`;
 
     await appendFile(filePath, entry, "utf-8");
   }
 
-  private formatDate(date: Date): string {
+  private formatDateTime(date: Date): string {
     const day = String(date.getDate()).padStart(2, "0");
     const month = String(date.getMonth() + 1).padStart(2, "0");
     const year = date.getFullYear();
-    return `${day}/${month}/${year}`;
+    const hours = String(date.getHours()).padStart(2, "0");
+    const minutes = String(date.getMinutes()).padStart(2, "0");
+    return `${day}/${month}/${year} ${hours}:${minutes}`;
   }
 }

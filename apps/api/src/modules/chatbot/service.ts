@@ -656,30 +656,30 @@ private async evaluateConfig(
     const systemParts = [
       systemPrompt.trim() || defaultAiSettings.systemPrompt,
       `Data atual: ${formatDate(new Date())} ${formatTime(new Date())}.`,
-      `Nome do contato: ${input.contactName?.trim() || "cliente"}.`,
-      'Se o nome do contato for "cliente" ou estiver vazio, pergunte o nome do cliente antes de prosseguir com o atendimento. Nunca assuma um nome que nao foi informado.',
-      `Numero do cliente: ${normalizedPhoneNumber}.`,
-      `ATENCAO: O numero de telefone do cliente e ${normalizedPhoneNumber}. Use este numero exato no campo Contato do [RESUMO_LEAD]. Nunca use IDs internos, apenas o numero no formato internacional.`,
-      'Se nao souber algo factual da empresa, admita a limitacao e ofereca transferir para humano.',
-      'Evite respostas longas. Responda em 1 a 4 frases.',
-      "PASSO 5 - AGENDAR A CONVERSA: Antes de encerrar o agendamento, pergunte o e-mail do cliente: 'Qual o melhor e-mail para o Francisco entrar em contato? Pode deixar em branco se preferir so o WhatsApp.'. Se o cliente nao quiser informar, registre como 'nao informado'. Se o cliente mencionar empresa, negocio, CNPJ, funcionarios ou qualquer indicativo de PJ, pergunte o nome da empresa. Se for projeto pessoal ou se nao ficar claro, nao pergunte empresa e deixe 'Empresa' como 'nao informado'. Nunca pergunte empresa se o contexto for claramente pessoal.",
-      'PASSO 6 - CONFIRMACAO FINAL: NUNCA gere [RESUMO_LEAD] sem o cliente confirmar explicitamente a data e o horario exatos no formato DD/MM/AAAA.',
-      "Calcule a data e proponha: 'Terca seria dia DD/MM/AAAA as 14h, certo?'",
-      "So gere o bloco depois que o cliente responder 'sim', 'pode ser', 'confirmado' ou equivalente.",
-      'Nunca interprete silencio ou continuidade da conversa como confirmacao.',
-      'ATENCAO CRITICA: Quando confirmar um agendamento, inclua OBRIGATORIAMENTE ao final da resposta o bloco [RESUMO_LEAD] preenchido com os dados coletados. Sem este bloco o agendamento nao sera registrado.' +
-        '\n\nREGRA CRITICA DE SISTEMA: Sempre que confirmar um agendamento com data e horario, voce DEVE incluir OBRIGATORIAMENTE ao final da sua resposta o bloco abaixo preenchido. Sem ele o agendamento nao sera registrado e o lead sera perdido:\n\n' +
-        '[RESUMO_LEAD]\n' +
-        'Nome: {nome completo do cliente}\n' +
-        'Contato: {numero do WhatsApp}\n' +
-        "E-mail: {e-mail ou 'nao informado'}\n" +
-        "Empresa: {empresa ou 'nao informado'}\n" +
-        'Problema: {problema relatado}\n' +
-        'Servico de interesse: {servico}\n' +
-        'Horario agendado: {data e hora}\n' +
-        '[/RESUMO_LEAD]',
-      `REGRA OBRIGATORIA: No campo "Contato" do bloco [RESUMO_LEAD], use SEMPRE o numero real do cliente: ${normalizedPhoneNumber}. NUNCA escreva "(numero)", "(celular)" ou deixe em branco. O numero ja esta disponivel e deve ser copiado exatamente.`,
-      "REGRA CRITICA: So inclua o bloco [RESUMO_LEAD] quando o agendamento estiver 100% confirmado, com nome completo do cliente, data e horario definidos e servico de interesse identificado. Se qualquer um desses campos estiver faltando, pergunte ao cliente antes de gerar o bloco. NUNCA gere [RESUMO_LEAD] com campos 'nao informado' nos campos Nome, Horario agendado ou Servico de interesse."
+      `Nome de perfil (WhatsApp): ${input.contactName?.trim() || "cliente"}.`,
+      `Numero exato do cliente: ${normalizedPhoneNumber}.`,
+      "### REGRAS DE IDENTIDADE E COMPORTAMENTO ###",
+      '1. NOME: Se o cliente pedir para ser chamado de um nome especifico (ex: "Me chama de Joao"), IGNORE o Nome de perfil do WhatsApp e use apenas o nome que ele pediu.',
+      "2. RESPOSTAS CURTAS: Evite respostas longas. Responda em 1 a 3 frases no maximo.",
+      "### FLUXO DE AGENDAMENTO (SIGA ESTRITAMENTE NESTA ORDEM) ###",
+      "Quando chegar o momento de agendar, voce deve OBRIGATORIAMENTE realizar os passos em mensagens separadas:",
+      'PASSO A: Pergunte: "Qual o melhor e-mail para contato? (Pode deixar em branco se preferir so o WhatsApp)".',
+      "PASSO B: Se o cliente citou que tem empresa ou negocio, pergunte o nome da empresa e o nome completo dele. Se for projeto pessoal, nao pergunte da empresa.",
+      'PASSO C: Sugira a data/hora exata calculada (ex: "Terca seria dia DD/MM/AAAA as 14h, certo?"). PARE A MENSAGEM AQUI. Voce e PROIBIDO de gerar o [RESUMO_LEAD] nesta etapa.',
+      "### GERACAO DO RESUMO (ACAO FINAL) ###",
+      'REGRA CRITICA: Voce SO TEM PERMISSAO para gerar o bloco [RESUMO_LEAD] DEPOIS que o cliente responder "sim", "certo" ou confirmar explicitamente a data sugerida no PASSO C.',
+      "Se o cliente ainda nao confirmou a data, NUNCA exiba o bloco [RESUMO_LEAD].",
+      "Quando o cliente confirmar, responda SOMENTE com uma frase de despedida e o bloco abaixo preenchido com os dados reais da conversa:",
+      "[RESUMO_LEAD]\n" +
+        "Nome: {nome exato que o cliente informou}\n" +
+        `Contato: ${normalizedPhoneNumber}\n` +
+        "E-mail: {e-mail real ou 'nao informado'}\n" +
+        "Empresa: {empresa real ou 'nao informado'}\n" +
+        "Problema: {resumo do problema}\n" +
+        "Servico de interesse: {servico}\n" +
+        "Horario agendado: {data e hora confirmada}\n" +
+        "[/RESUMO_LEAD]",
+      `REGRA ABSOLUTA: O campo "Contato:" deve conter EXATAMENTE este numero: ${normalizedPhoneNumber}. Nunca use chaves {}.`
     ];
 
     const memoryFilePath = join(this.config.DATA_DIR, "instances", instanceId, "memory.md");

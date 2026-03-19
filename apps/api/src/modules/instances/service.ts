@@ -1117,12 +1117,12 @@ if (event.status === "CONNECTED") {
       const clientMemory = await this.clientMemoryService.findByPhone(tenantId, resolvedContactNumber);
 
       if (
-        inputText &&
-        await this.adminMemoryService.handleAdminCommand(
+        finalInputText &&
+        await this.adminMemoryService.handleAdminMessage(
           instance.id,
           ADMIN_PHONE,
           resolvedContactNumber,
-          inputText
+          finalInputText
         )
       ) {
         return;

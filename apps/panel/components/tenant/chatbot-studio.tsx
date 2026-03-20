@@ -33,7 +33,7 @@ interface ChatbotFormState {
   ai: {
     isEnabled: boolean;
     mode: ChatbotAiMode;
-    provider: "GROQ" | "OPENAI_COMPATIBLE" | "ANTHROPIC" | null;
+    provider: "GROQ" | "OPENAI_COMPATIBLE" | null;
     model: string;
     systemPrompt: string;
     temperature: number;
@@ -784,7 +784,7 @@ export const ChatbotStudio = ({ initialInstances }: ChatbotStudioProps) => {
             </div>
             <div className="p-5 space-y-5">
               <div className="rounded-[var(--radius-md)] border border-[var(--accent-blue)]/20 bg-[var(--accent-blue)]/8 px-4 py-3 text-sm text-[var(--text-secondary)]">
-                Usado automaticamente se o provider principal (Groq) falhar com erro 429 (rate limit) ou 5xx.
+                Usado automaticamente se o provider principal configurado no painel admin falhar com erro 429 (rate limit) ou 5xx.
               </div>
 
               <div className="space-y-1.5">
@@ -796,7 +796,6 @@ export const ChatbotStudio = ({ initialInstances }: ChatbotStudioProps) => {
                 >
                   <option value="">Nenhum</option>
                   <option value="openai">OpenAI</option>
-                  <option value="anthropic">Anthropic</option>
                   <option value="gemini">Gemini</option>
                   <option value="ollama">Ollama</option>
                 </select>
@@ -819,9 +818,7 @@ export const ChatbotStudio = ({ initialInstances }: ChatbotStudioProps) => {
                   type="text"
                   className={[fieldClass, "h-11"].join(" ")}
                   placeholder={
-                    formState.aiFallbackProvider === "anthropic"
-                      ? "claude-haiku-4-5-20251001"
-                      : formState.aiFallbackProvider === "gemini"
+                    formState.aiFallbackProvider === "gemini"
                         ? "gemini-2.0-flash"
                         : formState.aiFallbackProvider === "ollama"
                           ? "llama3.1:8b"
@@ -831,9 +828,7 @@ export const ChatbotStudio = ({ initialInstances }: ChatbotStudioProps) => {
                   onChange={(e) => setFormState((c) => ({ ...c, aiFallbackModel: e.target.value }))}
                 />
                 <p className="text-[10px] text-[var(--text-tertiary)]">
-                  {formState.aiFallbackProvider === "anthropic"
-                    ? "Ex: claude-haiku-4-5-20251001, claude-sonnet-4-20250514"
-                    : formState.aiFallbackProvider === "gemini"
+                  {formState.aiFallbackProvider === "gemini"
                       ? "Ex: gemini-2.0-flash, gemini-1.5-flash"
                       : formState.aiFallbackProvider === "ollama"
                         ? "Ex: llama3.1:8b, qwen2.5:7b. Usa OLLAMA_HOST no backend."

@@ -25,6 +25,14 @@ const defaultTenantAiProvider = {
   isActive: false
 } as const;
 
+const normalizeManagedProvider = (provider?: string | null): "GROQ" | "OPENAI_COMPATIBLE" | null => {
+  if (provider === "GROQ" || provider === "OPENAI_COMPATIBLE") {
+    return provider;
+  }
+
+  return null;
+};
+
 interface PlatformTenantAiProviderRecord {
   provider: string;
   baseUrl: string;
@@ -86,11 +94,13 @@ export class PlatformAdminService {
     tenant: PlatformTenantRecord,
     activeInstances: number
   ) {
+    const aiProvider = normalizeManagedProvider(tenant.aiProvider?.provider);
+
     return {
       activeInstances,
-      aiConfigured: Boolean(tenant.aiProvider?.apiKeyEncrypted && tenant.aiProvider?.model),
+      aiConfigured: Boolean(aiProvider && tenant.aiProvider?.apiKeyEncrypted && tenant.aiProvider?.model),
       aiModel: tenant.aiProvider?.model ?? null,
-      aiProvider: (tenant.aiProvider?.provider as "GROQ" | "OPENAI_COMPATIBLE" | "ANTHROPIC" | null) ?? null,
+      aiProvider,
       billingEmail: tenant.billingEmail,
       createdAt: tenant.createdAt.toISOString(),
       id: tenant.id,
@@ -121,9 +131,11 @@ export class PlatformAdminService {
     tenantId: string,
     aiProvider?: PlatformTenantAiProviderRecord | null
   ) {
+    const provider = normalizeManagedProvider(aiProvider?.provider) ?? defaultTenantAiProvider.provider;
+
     return {
       tenantId,
-      provider: (aiProvider?.provider as "GROQ" | "OPENAI_COMPATIBLE" | "ANTHROPIC" | undefined) ?? defaultTenantAiProvider.provider,
+      provider,
       baseUrl: aiProvider?.baseUrl ?? defaultTenantAiProvider.baseUrl,
       model: aiProvider?.model ?? defaultTenantAiProvider.model,
       isActive: aiProvider?.isActive ?? defaultTenantAiProvider.isActive,
@@ -448,7 +460,7 @@ export class PlatformAdminService {
   public async upsertTenantAiConfig(
     tenantId: string,
     input: {
-      provider: "GROQ" | "OPENAI_COMPATIBLE" | "ANTHROPIC";
+      provider: "GROQ" | "OPENAI_COMPATIBLE";
       baseUrl: string;
       model: string;
       apiKey?: string;

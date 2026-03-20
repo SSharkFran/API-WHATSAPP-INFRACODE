@@ -2,8 +2,8 @@ import { z } from "zod";
 
 export const chatbotTriggerTypeSchema = z.enum(["EXACT", "CONTAINS", "REGEX", "FIRST_CONTACT"]);
 export const chatbotAiModeSchema = z.enum(["RULES_ONLY", "RULES_THEN_AI", "AI_ONLY"]);
-export const chatbotAiProviderSchema = z.enum(["GROQ", "OPENAI_COMPATIBLE", "ANTHROPIC"]);
-export const chatbotFallbackProviderSchema = z.enum(["openai", "anthropic", "gemini", "ollama"]);
+export const chatbotAiProviderSchema = z.enum(["GROQ", "OPENAI_COMPATIBLE"]);
+export const chatbotFallbackProviderSchema = z.enum(["openai", "gemini", "ollama"]);
 export const clientMemoryStatusSchema = z.enum([
   "lead_frio",
   "lead_quente",

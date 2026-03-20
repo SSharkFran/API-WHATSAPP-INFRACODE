@@ -248,7 +248,7 @@ export interface ApiErrorShape {
 export type ChatbotTriggerType = "EXACT" | "CONTAINS" | "REGEX" | "FIRST_CONTACT";
 
 export type ChatbotAiMode = "RULES_ONLY" | "RULES_THEN_AI" | "AI_ONLY";
-export type ChatbotAiProvider = "GROQ" | "OPENAI_COMPATIBLE" | "ANTHROPIC";
+export type ChatbotAiProvider = "GROQ" | "OPENAI_COMPATIBLE";
 
 export interface ChatbotRule {
   id: string;

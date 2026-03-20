@@ -84,6 +84,20 @@ const chatbotAiSettingsSchema = chatbotAiConfigSchema.pick({
   maxContextMessages: true
 });
 const chatbotAiUpsertSchema = upsertChatbotAiBodySchema;
+const normalizeManagedAiProvider = (provider?: string | null): ChatbotAiProvider | null => {
+  if (provider === "GROQ" || provider === "OPENAI_COMPATIBLE") {
+    return provider;
+  }
+
+  return null;
+};
+const normalizeFallbackProvider = (provider?: string | null): "openai" | "gemini" | "ollama" | null => {
+  if (provider === "openai" || provider === "gemini" || provider === "ollama") {
+    return provider;
+  }
+
+  return null;
+};
 const defaultAiSettings = {
   isEnabled: false,
   mode: "RULES_THEN_AI",
@@ -381,8 +395,21 @@ public async simulate(
       };
     }
 
+    const provider = normalizeManagedAiProvider(record.provider);
+
+    if (!provider) {
+      return {
+        provider: null,
+        baseUrl: "",
+        model: "",
+        isActive: false,
+        isConfigured: false,
+        apiKeyEncrypted: null
+      };
+    }
+
     return {
-      provider: record.provider as ChatbotAiProvider,
+      provider,
       baseUrl: record.baseUrl,
       model: record.model,
       isActive: record.isActive,
@@ -488,7 +515,7 @@ private async evaluateConfig(
       fiadoEnabled: record.fiadoEnabled ?? false,
       rules: chatbotRulesArraySchema.parse(record.rules),
       ai: this.buildRuntimeAiConfig(aiSettings, managedAiProvider),
-      aiFallbackProvider: record.aiFallbackProvider ?? null,
+      aiFallbackProvider: normalizeFallbackProvider(record.aiFallbackProvider),
       aiFallbackApiKey: record.aiFallbackApiKey ?? null,
       aiFallbackModel: record.aiFallbackModel ?? null,
       modules: (record.modules && typeof record.modules === "object" ? record.modules : {}) as ChatbotModules,
@@ -783,6 +810,8 @@ private async evaluateConfig(
     config: ChatbotConfig,
     toolRuntime?: ChatbotToolRuntime
   ): Promise<string | null> {
+    const primaryProviderLabel = managedAiProvider.provider ?? "provider principal";
+
     try {
       return await this.requestOpenAiCompatibleCompletion(
         managedAiProvider,
@@ -803,9 +832,9 @@ private async evaluateConfig(
         (config.aiFallbackProvider === "ollama" || config.aiFallbackApiKey)
       ) {
         console.warn(
-          `[chatbot:ai] Groq falhou (${status}), tentando fallback: ${config.aiFallbackProvider}`
+          `[chatbot:ai] ${primaryProviderLabel} falhou (${status}), tentando fallback: ${config.aiFallbackProvider}`
         );
-        await this.notifyAdminFallback(tenantId, config, status ?? 0);
+        await this.notifyAdminFallback(tenantId, config, primaryProviderLabel, status ?? 0);
         return this.callFallbackProvider(
           config.aiFallbackProvider,
           config.aiFallbackApiKey ?? "",
@@ -856,35 +885,6 @@ private async evaluateConfig(
         choices?: Array<{ message?: { content?: string } }>;
       };
       return json.choices?.[0]?.message?.content?.trim() ?? null;
-    }
-
-    if (provider === "anthropic") {
-      const response = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        signal: AbortSignal.timeout(30_000),
-        headers: {
-          "x-api-key": apiKey,
-          "Content-Type": "application/json",
-          "anthropic-version": "2023-06-01"
-        },
-        body: JSON.stringify({
-          model: model ?? "claude-haiku-4-5-20251001",
-          max_tokens: 500,
-          system: conversation.system,
-          messages: conversation.messages,
-          temperature
-        })
-      });
-      if (!response.ok) {
-        throw new Error(`Anthropic fallback error ${response.status}`);
-      }
-      const json = (await response.json()) as {
-        content?: Array<{ type?: string; text?: string }>;
-      };
-      const textBlock = Array.isArray(json.content)
-        ? json.content.find((item) => item.type === "text" && typeof item.text === "string")
-        : null;
-      return textBlock?.text?.trim() ?? null;
     }
 
     if (provider === "gemini") {
@@ -956,7 +956,12 @@ private async evaluateConfig(
     throw new Error(`Provider desconhecido: ${provider}`);
   }
 
-  private async notifyAdminFallback(tenantId: string, config: ChatbotConfig, statusCode: number): Promise<void> {
+  private async notifyAdminFallback(
+    tenantId: string,
+    config: ChatbotConfig,
+    providerName: string,
+    statusCode: number
+  ): Promise<void> {
     console.warn(
       `[chatbot:ai:fallback] tenant=${config.instanceId} notified of AI fallback (status=${statusCode})`
     );
@@ -964,7 +969,7 @@ private async evaluateConfig(
     this.platformAlertService?.alertCriticalError(
       tenantId,
       config.instanceId,
-      `Groq rate limit — usando fallback ${config.aiFallbackProvider} (status: ${statusCode})`
+      `Falha do provider principal ${providerName} - usando fallback ${config.aiFallbackProvider} (status: ${statusCode})`
     ).catch((err) => {
       console.error("[chatbot:ai] erro ao alertar fallback:", err);
     });
@@ -982,9 +987,7 @@ private async evaluateConfig(
     messageHistory?: OpenAiCompatibleMessage[],
     recursionDepth = 0
   ): Promise<string | null> {
-    const provider = managedAiProvider.provider as string | null;
     const baseUrl = managedAiProvider.baseUrl.endsWith("/") ? managedAiProvider.baseUrl : `${managedAiProvider.baseUrl}/`;
-    const isAnthropic = provider === "ANTHROPIC";
     const messagesWithSystem: OpenAiCompatibleMessage[] =
       messageHistory ??
       [
@@ -997,67 +1000,33 @@ private async evaluateConfig(
           content: message.content
         }))
       ];
-    const openAiTools = !isAnthropic && toolRuntime?.definitions.length ? toolRuntime.definitions : undefined;
-    const url = isAnthropic ? "https://api.anthropic.com/v1/messages" : new URL("chat/completions", baseUrl).toString();
+    const openAiTools = toolRuntime?.definitions.length ? toolRuntime.definitions : undefined;
+    const url = new URL("chat/completions", baseUrl).toString();
     const response = await fetch(url, {
       method: "POST",
       signal: AbortSignal.timeout(30_000),
-      headers: isAnthropic
-        ? {
-            "Content-Type": "application/json",
-            "x-api-key": apiKey,
-            "anthropic-version": "2023-06-01"
-          }
-        : {
-            Authorization: `Bearer ${apiKey}`,
-            "Content-Type": "application/json"
-          },
-      body: JSON.stringify(
-        isAnthropic
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        model: managedAiProvider.model,
+        messages: messagesWithSystem,
+        temperature,
+        max_tokens: 500,
+        ...(openAiTools
           ? {
-              model: managedAiProvider.model,
-              system: conversation.system,
-              messages: conversation.messages,
-              max_tokens: 500,
-              temperature
+              tools: openAiTools,
+              tool_choice: "auto" as const
             }
-          : {
-              model: managedAiProvider.model,
-              messages: messagesWithSystem,
-              temperature,
-              max_tokens: 500,
-              ...(openAiTools
-                ? {
-                    tools: openAiTools,
-                    tool_choice: "auto" as const
-                  }
-                : {})
-            }
-      )
+          : {})
+      })
     });
 
     if (!response.ok) {
       const err: any = new Error(`IA indisponivel: ${response.status}`);
       err.status = response.status;
       throw err;
-    }
-
-    if (isAnthropic) {
-      const json = (await response.json()) as {
-        content?: Array<{
-          type?: string;
-          text?: string;
-        }>;
-      };
-      const firstTextBlock = Array.isArray(json.content)
-        ? json.content.find((item) => item.type === "text" && typeof item.text === "string")
-        : null;
-
-      if (firstTextBlock?.text) {
-        return firstTextBlock.text.trim() || null;
-      }
-
-      return null;
     }
 
     const json = (await response.json()) as {
@@ -1081,7 +1050,7 @@ private async evaluateConfig(
           : null;
     const toolCalls = Array.isArray(message?.tool_calls) ? message.tool_calls.filter((item) => typeof item?.id === "string") : [];
 
-    if (!isAnthropic && toolRuntime?.googleCalendar && toolCalls.length > 0) {
+    if (toolRuntime?.googleCalendar && toolCalls.length > 0) {
       if (recursionDepth >= 3) {
         throw new Error("Limite de execucao de tools atingido");
       }

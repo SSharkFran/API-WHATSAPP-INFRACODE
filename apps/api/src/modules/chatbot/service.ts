@@ -576,6 +576,7 @@ private async evaluateConfig(
       const apiKey = decrypt(managedAiProvider.apiKeyEncrypted, this.config.API_ENCRYPTION_KEY);
       const conversation = await this.buildAiConversation(
         prisma,
+        tenantId,
         config.instanceId,
         input,
         config.ai.systemPrompt,
@@ -671,6 +672,7 @@ private async evaluateConfig(
 
   private async buildAiConversation(
     prisma: Awaited<ReturnType<TenantPrismaRegistry["getClient"]>>,
+    tenantId: string,
     instanceId: string,
     input: ChatbotRuntimeInput,
     systemPrompt: string,
@@ -690,7 +692,7 @@ private async evaluateConfig(
       '2. O cliente dita o nome: Se ele disser "me chamo X", use X e ignore o Nome do perfil.'
     ];
 
-    const memoryFilePath = join(this.config.DATA_DIR, "instances", instanceId, "memory.md");
+    const memoryFilePath = join(this.config.DATA_DIR, "tenants", tenantId, "instances", instanceId, "memory.md");
     try {
       const memoryContent = await readFile(memoryFilePath, "utf-8");
       if (memoryContent.trim()) {

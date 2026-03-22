@@ -20,6 +20,11 @@ interface WebhookJobPayload {
   instanceId: string;
 }
 
+interface TenantClientEntry {
+  client: TenantPrismaClient;
+  timer: NodeJS.Timeout;
+}
+
 const withSchema = (value: string, schema: string): string => {
   const url = new URL(value);
   url.searchParams.set("schema", schema);
@@ -34,7 +39,9 @@ const tenantBaseUrl = config.TENANT_DATABASE_URL ?? config.DATABASE_URL;
 const platformPrisma = new PlatformPrismaClient({
   datasourceUrl: withSchema(platformBaseUrl, "platform")
 });
-const tenantClients = new Map<string, TenantPrismaClient>();
+const TENANT_CLIENT_MAX = 32;
+const TENANT_CLIENT_TTL_MS = 10 * 60 * 1000;
+const tenantClients = new Map<string, TenantClientEntry>();
 const redisUrl = new URL(config.REDIS_URL);
 const redisConnection = {
   host: redisUrl.hostname,
@@ -43,6 +50,24 @@ const redisConnection = {
   password: redisUrl.password || undefined,
   db: redisUrl.pathname && redisUrl.pathname !== "/" ? Number(redisUrl.pathname.slice(1)) : undefined,
   maxRetriesPerRequest: null
+};
+
+const disposeTenantClient = async (tenantId: string): Promise<void> => {
+  const entry = tenantClients.get(tenantId);
+  if (!entry) return;
+  clearTimeout(entry.timer);
+  tenantClients.delete(tenantId);
+  await entry.client.$disconnect().catch(() => {});
+};
+
+const touchTenantClient = (tenantId: string, entry: TenantClientEntry): void => {
+  clearTimeout(entry.timer);
+  tenantClients.delete(tenantId);
+  tenantClients.set(tenantId, entry);
+  entry.timer = setTimeout(() => {
+    void disposeTenantClient(tenantId);
+  }, TENANT_CLIENT_TTL_MS);
+  entry.timer.unref?.();
 };
 
 const decrypt = (ciphertext: string, key: string): string => {
@@ -63,10 +88,10 @@ const buildHmacSignature = (payload: string, secret: string): string =>
   createHmac("sha256", secret).update(payload).digest("hex");
 
 const getTenantPrisma = async (tenantId: string): Promise<TenantPrismaClient> => {
-  const cached = tenantClients.get(tenantId);
-
-  if (cached) {
-    return cached;
+  const existing = tenantClients.get(tenantId);
+  if (existing) {
+    touchTenantClient(tenantId, existing);
+    return existing.client;
   }
 
   const tenant = await platformPrisma.tenant.findUnique({
@@ -82,7 +107,15 @@ const getTenantPrisma = async (tenantId: string): Promise<TenantPrismaClient> =>
   const client = new TenantPrismaClient({
     datasourceUrl: withSchema(tenantBaseUrl, tenant.schemaName)
   });
-  tenantClients.set(tenantId, client);
+
+  while (tenantClients.size >= TENANT_CLIENT_MAX) {
+    const oldest = tenantClients.keys().next().value as string | undefined;
+    if (oldest) await disposeTenantClient(oldest);
+  }
+
+  const entry: TenantClientEntry = { client, timer: undefined as unknown as NodeJS.Timeout };
+  tenantClients.set(tenantId, entry);
+  touchTenantClient(tenantId, entry);
   return client;
 };
 
@@ -222,8 +255,8 @@ const shutdown = async (signal: string): Promise<void> => {
   logger.info({ signal }, "Encerrando worker");
   await worker.close();
 
-  for (const client of tenantClients.values()) {
-    await client.$disconnect();
+  for (const tenantId of [...tenantClients.keys()]) {
+    await disposeTenantClient(tenantId);
   }
 
   await platformPrisma.$disconnect();

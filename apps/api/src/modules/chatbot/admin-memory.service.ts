@@ -10,6 +10,7 @@ export class AdminMemoryService {
 
   public async handleAdminMessage(
     instanceId: string,
+    tenantId: string,
     adminPhone: string,
     incomingPhone: string,
     text: string
@@ -23,7 +24,7 @@ export class AdminMemoryService {
       return false;
     }
 
-    await this.appendMemory(instanceId, this.extractMemoryContent(trimmed));
+    await this.appendMemory(instanceId, tenantId, this.extractMemoryContent(trimmed));
     return true;
   }
 
@@ -47,8 +48,8 @@ export class AdminMemoryService {
     return text;
   }
 
-  private async appendMemory(instanceId: string, content: string): Promise<void> {
-    const dirPath = resolve(this.dataDir, "instances", instanceId);
+  private async appendMemory(instanceId: string, tenantId: string, content: string): Promise<void> {
+    const dirPath = resolve(this.dataDir, "tenants", tenantId, "instances", instanceId);
     const filePath = resolve(dirPath, "memory.md");
 
     await mkdir(dirPath, { recursive: true });

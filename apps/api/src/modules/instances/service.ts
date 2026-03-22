@@ -130,7 +130,6 @@ interface CreateInstanceInput {
 }
 
 const buildWorkerKey = (tenantId: string, instanceId: string): string => `${tenantId}:${instanceId}`;
-const ADMIN_PHONE = "5599999999999";
 
 /**
  * Orquestra o ciclo de vida das instancias WhatsApp em workers isolados.
@@ -553,9 +552,11 @@ export class InstanceOrchestrator {
                   }
                 },
                 {
-                  text:
+                  text: [
                     visionPrompt ??
-                    "Descreva o que voce ve nesta imagem em portugues de forma concisa, focando em informacoes relevantes para o atendimento."
+                      "Descreva o que voce ve nesta imagem em portugues de forma concisa, focando em informacoes relevantes para o atendimento.",
+                    caption ? `O cliente legendou a imagem com: "${caption}"` : null
+                  ].filter(Boolean).join(" ")
                 }
               ]
             }
@@ -1115,12 +1116,18 @@ if (event.status === "CONNECTED") {
       }
 
       const clientMemory = await this.clientMemoryService.findByPhone(tenantId, resolvedContactNumber);
+      const platformConfig = await this.platformPrisma.platformConfig.findUnique({
+        where: { id: "singleton" }
+      });
+      const adminPhone = platformConfig?.adminAlertPhone ?? null;
 
       if (
         finalInputText &&
+        adminPhone &&
         await this.adminMemoryService.handleAdminMessage(
           instance.id,
-          ADMIN_PHONE,
+          tenantId,
+          adminPhone,
           resolvedContactNumber,
           finalInputText
         )
@@ -1139,7 +1146,11 @@ if (event.status === "CONNECTED") {
       });
 
       if (!finalInputText) {
-        return;
+        if (imageMsg && (chatbotConfig?.visionEnabled ?? false)) {
+          finalInputText = "[O cliente enviou uma imagem. Aguardando análise.]";
+        } else {
+          return;
+        }
       }
 
       this.appendConversationHistory(session, "user", finalInputText);
@@ -1194,11 +1205,13 @@ if (event.status === "CONNECTED") {
           tags: [...new Set<ClientMemoryTag>([...(clientMemory?.tags ?? []), "paused_by_human"])]
         });
 
-        await this.sendMessage(tenantId, instance.id, {
-          type: "text",
-          to: ADMIN_PHONE,
-          text: `Transbordo humano solicitado pelo cliente ${resolvedContactNumber}. O bot foi pausado para este contato.`
-        });
+        if (adminPhone) {
+          await this.sendMessage(tenantId, instance.id, {
+            type: "text",
+            to: adminPhone,
+            text: `Transbordo humano solicitado pelo cliente ${resolvedContactNumber}. O bot foi pausado para este contato.`
+          });
+        }
         return;
       }
 
@@ -1231,8 +1244,6 @@ if (event.status === "CONNECTED") {
 
         const camposObrigatorios = [
           /Nome:\s*(?!não informado|nao informado|\(nome\))/i,
-          /Contato:\s*\d{8,}/,
-          /Horário agendado:\s*\d{2}\/\d{2}\/\d{4}/i,
           /Serviço de interesse:\s*(?!não informado|nao informado)/i
         ];
         const camposOk = camposObrigatorios.every((r) => r.test(resumoLead));
@@ -1261,12 +1272,17 @@ if (event.status === "CONNECTED") {
         }
 
         if (leadData?.isComplete && leadsPhone && leadsEnabled) {
-          const hash = Buffer.from(resumoLead.slice(0, 120)).toString("base64").slice(0, 20);
+          const hashInput = [
+            leadData?.name ?? "",
+            leadData?.serviceInterest ?? "",
+            resolvedContactNumber
+          ].join("|");
+          const hash = Buffer.from(hashInput).toString("base64").slice(0, 32);
           const dedupeKey = `leads:dedup:${instance.id}:${remoteNumber}:${hash}`;
           const jaEnviado = await this.redis.get(dedupeKey).catch(() => null);
 
           if (!jaEnviado) {
-            await this.redis.set(dedupeKey, "1", "EX", 120);
+            await this.redis.set(dedupeKey, "1", "EX", 86400);
             const leadsJid = `${leadsPhone}@s.whatsapp.net`;
             await this.sendAutomatedTextMessage(
               tenantId,

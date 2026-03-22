@@ -59,6 +59,13 @@ export type AppConfig = z.infer<typeof envSchema>;
 export const loadConfig = (): AppConfig => {
   const parsed = envSchema.parse(process.env);
 
+  if (parsed.NODE_ENV === "production" && !parsed.ENABLE_AUTH) {
+    throw new Error(
+      "ENABLE_AUTH must be set to true in production. " +
+      "Running with authentication disabled in production is not allowed."
+    );
+  }
+
   return {
     ...parsed,
     DIRECT_DATABASE_URL: parsed.DIRECT_DATABASE_URL ?? parsed.DATABASE_URL,

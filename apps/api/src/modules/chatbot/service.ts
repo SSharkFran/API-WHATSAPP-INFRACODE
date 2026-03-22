@@ -687,24 +687,7 @@ private async evaluateConfig(
       `Numero exato do cliente: ${normalizedPhoneNumber}.`,
       "### REGRAS GERAIS ###",
       "1. Responda em 1 a 3 frases no maximo. Seja direto.",
-      '2. O cliente dita o nome: Se ele disser "me chamo X", use X e ignore o Nome do perfil.',
-      "### GATILHOS DE ATENDIMENTO E AGENDAMENTO ###",
-      "Voce deve conduzir a conversa dependendo do que ja foi respondido. Siga as condicoes abaixo:",
-      'CONDICAO 1 - ANTES DE AGENDAR: Se voce ja entendeu o problema do cliente, mas ainda nao tem o e-mail dele, pergunte: "Qual o melhor e-mail para contato? (Pode deixar em branco se preferir so o WhatsApp)". Nao sugira horario ainda.',
-      "CONDICAO 2 - PROPOR DATA: Se voce ja tem (ou o cliente recusou dar) o e-mail, pergunte o melhor dia e horario para a reuniao.",
-      'CONDICAO 3 - CONFIRMAR DATA: Quando o cliente sugerir um dia/horario, calcule a data exata e confirme (Ex: "Ficaria para o dia DD/MM/AAAA as HH:00h, certo?"). PARE A MENSAGEM AI.',
-      "### GATILHO FINAL: GERACAO DO LEAD (OBRIGATORIO) ###",
-      'SE (e somente se) o cliente confirmar a data/hora exata com "sim", "certo", "fechado" ou equivalente, VOCE DEVE OBRIGATORIAMENTE finalizar a conversa imprimindo o bloco abaixo preenchido:',
-      "[RESUMO_LEAD]\n" +
-        "Nome: {nome do cliente}\n" +
-        `Contato: ${normalizedPhoneNumber}\n` +
-        "E-mail: {e-mail informado ou 'nao informado'}\n" +
-        "Empresa: {empresa se citada ou 'nao informado'}\n" +
-        "Problema: {resumo do problema}\n" +
-        "Servico de interesse: {servico}\n" +
-        "Horario agendado: {data e hora confirmada}\n" +
-        "[/RESUMO_LEAD]",
-      'ATENCAO MAXIMA: Sem este bloco o sistema quebra. Nunca esqueca de imprimi-lo apos o "sim" do cliente.'
+      '2. O cliente dita o nome: Se ele disser "me chamo X", use X e ignore o Nome do perfil.'
     ];
 
     const memoryFilePath = join(this.config.DATA_DIR, "instances", instanceId, "memory.md");
@@ -778,19 +761,6 @@ private async evaluateConfig(
         content: currentInput
       });
     }
-
-    messages.unshift(
-      {
-        role: "user",
-        content: "Quero criar um app para minha empresa, pode me ajudar?"
-      },
-      {
-        role: "assistant",
-        content:
-          "Claro, pode contar! Antes de tudo, como posso te chamar?\n\n" +
-          "|||Enquanto isso me conta: e para empresa ou uso pessoal?"
-      }
-    );
 
     return {
       system,

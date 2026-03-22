@@ -109,15 +109,17 @@ export class PlatformAlertService {
   async alertNewLead(
     tenantId: string,
     instanceName: string,
-    leadSummary: string
+    leadSummary: string,
+    senderPhoneNumber: string
   ): Promise<void> {
     const config = await this.getConfig();
     if (!config?.adminAlertPhone || !config.alertNewLead) return;
 
     const phone = config.adminAlertPhone;
-    const msg = `📋 *Novo lead — InfraCode*\n\nTenant: ${tenantId}\nInstância: ${instanceName}\n\n${leadSummary}`;
+    let alertMessage = `📋 *Novo lead — InfraCode*\n\nTenant: ${tenantId}\nInstância: ${instanceName}\n\n${leadSummary}`;
+    alertMessage = alertMessage.replace(/\{\{numero\}\}/g, senderPhoneNumber);
 
-    await this.sendAdminAlert(phone, msg);
+    await this.sendAdminAlert(phone, alertMessage);
   }
 
   async alertCriticalError(

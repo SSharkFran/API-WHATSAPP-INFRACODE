@@ -1293,7 +1293,12 @@ if (event.status === "CONNECTED") {
               { action: "lead_summary", kind: "chatbot" }
             );
 
-            this.platformAlertService?.alertNewLead(tenantId, instance.name, resumoLead).catch((err) => {
+            this.platformAlertService?.alertNewLead(
+              tenantId,
+              instance.name,
+              resumoLead,
+              resolvedContactNumber
+            ).catch((err) => {
               console.error("[orchestrator] erro ao alertar novo lead:", err);
             });
           } else {

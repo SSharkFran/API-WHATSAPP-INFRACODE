@@ -29,6 +29,9 @@ interface ChatbotFormState {
   leadsPhoneNumber: string;
   leadsEnabled: boolean;
   fiadoEnabled: boolean;
+  audioEnabled: boolean;
+  visionEnabled: boolean;
+  visionPrompt: string;
   rules: ChatbotRule[];
   ai: {
     isEnabled: boolean;
@@ -85,6 +88,9 @@ const buildDefaultFormState = (): ChatbotFormState => ({
   leadsPhoneNumber: "",
   leadsEnabled: true,
   fiadoEnabled: false,
+  audioEnabled: false,
+  visionEnabled: false,
+  visionPrompt: "",
   rules: [],
   ai: {
     isEnabled: false,
@@ -119,6 +125,9 @@ const mapConfigToFormState = (config: ChatbotConfig): ChatbotFormState => ({
   leadsPhoneNumber: config.leadsPhoneNumber ?? "",
   leadsEnabled: config.leadsEnabled ?? true,
   fiadoEnabled: config.fiadoEnabled ?? false,
+  audioEnabled: config.audioEnabled ?? false,
+  visionEnabled: config.visionEnabled ?? false,
+  visionPrompt: config.visionPrompt ?? "",
   rules: config.rules,
   ai: {
     isEnabled: config.ai.isEnabled,
@@ -269,6 +278,9 @@ export const ChatbotStudio = ({ initialInstances }: ChatbotStudioProps) => {
           leadsPhoneNumber: formState.leadsPhoneNumber.trim() || null,
           leadsEnabled: formState.leadsEnabled,
           fiadoEnabled: formState.fiadoEnabled,
+          audioEnabled: formState.audioEnabled,
+          visionEnabled: formState.visionEnabled,
+          visionPrompt: formState.visionPrompt.trim() || null,
           rules: formState.rules.map((rule) => ({
             ...rule,
             matchValue: rule.triggerType === "FIRST_CONTACT" ? null : rule.matchValue?.trim() || null,
@@ -450,6 +462,43 @@ export const ChatbotStudio = ({ initialInstances }: ChatbotStudioProps) => {
                     value={formState.fallbackMessage}
                     onChange={(e) => setFormState((c) => ({ ...c, fallbackMessage: e.target.value }))}
                     placeholder="Não encontrei resposta. Digite suporte para falar com o time."
+                  />
+                </div>
+
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <label className="flex items-center gap-2.5 cursor-pointer">
+                    <span className="relative inline-flex h-6 w-11 items-center rounded-full cursor-pointer transition-colors duration-200"
+                      style={{ background: formState.audioEnabled ? "var(--accent-green)" : "var(--bg-active)" }}>
+                      <input type="checkbox" className="sr-only" checked={formState.audioEnabled}
+                        onChange={(e) => setFormState((c) => ({ ...c, audioEnabled: e.target.checked }))} />
+                      <span className={["inline-block h-4 w-4 rounded-full bg-white shadow-sm transition-transform duration-200",
+                        formState.audioEnabled ? "translate-x-6" : "translate-x-1"].join(" ")} />
+                    </span>
+                    <span className="text-sm text-[var(--text-secondary)] select-none">Transcrição de áudio</span>
+                  </label>
+
+                  <label className="flex items-center gap-2.5 cursor-pointer">
+                    <span className="relative inline-flex h-6 w-11 items-center rounded-full cursor-pointer transition-colors duration-200"
+                      style={{ background: formState.visionEnabled ? "var(--accent-green)" : "var(--bg-active)" }}>
+                      <input type="checkbox" className="sr-only" checked={formState.visionEnabled}
+                        onChange={(e) => setFormState((c) => ({ ...c, visionEnabled: e.target.checked }))} />
+                      <span className={["inline-block h-4 w-4 rounded-full bg-white shadow-sm transition-transform duration-200",
+                        formState.visionEnabled ? "translate-x-6" : "translate-x-1"].join(" ")} />
+                    </span>
+                    <span className="text-sm text-[var(--text-secondary)] select-none">Análise de imagem (visão)</span>
+                  </label>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-[var(--text-secondary)]">
+                    Prompt de visão (opcional)
+                  </label>
+                  <input
+                    type="text"
+                    className={[fieldClass, "h-11"].join(" ")}
+                    placeholder="Descreva o que vê na imagem focando em..."
+                    value={formState.visionPrompt}
+                    onChange={(e) => setFormState((c) => ({ ...c, visionPrompt: e.target.value }))}
                   />
                 </div>
 
@@ -1164,6 +1213,8 @@ export const ChatbotStudio = ({ initialInstances }: ChatbotStudioProps) => {
                 { label: "Alertas lead", value: lastSavedConfig?.leadsPhoneNumber || "Não configurado" },
                 { label: "Resumo leads", value: lastSavedConfig?.leadsEnabled !== false ? "Ativo" : "Inativo" },
                 { label: "Fiado", value: lastSavedConfig?.fiadoEnabled ? "Ativo" : "Inativo" },
+                { label: "Áudio", value: lastSavedConfig?.audioEnabled ? "Ativo" : "Inativo" },
+                { label: "Visão (imagem)", value: lastSavedConfig?.visionEnabled ? "Ativo" : "Inativo" },
                 { label: "Módulos ativos", value: String(Object.values(formState.modules).filter(m => m?.isEnabled).length) }
               ].map(({ label, value }) => (
                 <div key={label} className="flex justify-between px-4 py-2.5 rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--bg-tertiary)]">

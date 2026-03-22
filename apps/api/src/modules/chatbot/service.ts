@@ -212,6 +212,9 @@ export class ChatbotService {
       leadsPhoneNumber?: string | null;
       leadsEnabled?: boolean;
       fiadoEnabled?: boolean;
+      audioEnabled?: boolean;
+      visionEnabled?: boolean;
+      visionPrompt?: string | null;
       aiFallbackProvider?: string | null;
       aiFallbackApiKey?: string | null;
       aiFallbackModel?: string | null;
@@ -223,6 +226,14 @@ export class ChatbotService {
     const aiInput = chatbotAiUpsertSchema.parse(input.ai ?? defaultAiSettings);
     const leadsPhoneNumberRaw = input.leadsPhoneNumber?.trim() ?? null;
     const normalizedLeadsPhoneNumber = leadsPhoneNumberRaw ? normalizePhoneNumber(leadsPhoneNumberRaw) : null;
+    const existingConfig = await prisma.chatbotConfig.findUnique({
+      where: {
+        instanceId
+      }
+    });
+    const audioEnabled = input.audioEnabled ?? existingConfig?.audioEnabled ?? false;
+    const visionEnabled = input.visionEnabled ?? existingConfig?.visionEnabled ?? false;
+    const visionPrompt = input.visionPrompt?.trim() ?? existingConfig?.visionPrompt ?? null;
 
     if (leadsPhoneNumberRaw && normalizedLeadsPhoneNumber) {
       assertValidPhoneNumber(normalizedLeadsPhoneNumber);
@@ -243,6 +254,9 @@ export class ChatbotService {
         leadsPhoneNumber: normalizedLeadsPhoneNumber,
         leadsEnabled: input.leadsEnabled ?? true,
         fiadoEnabled: input.fiadoEnabled ?? false,
+        audioEnabled,
+        visionEnabled,
+        visionPrompt,
         aiFallbackProvider: input.aiFallbackProvider ?? null,
         aiFallbackApiKey: input.aiFallbackApiKey?.trim() || null,
         aiFallbackModel: input.aiFallbackModel?.trim() || null,
@@ -258,6 +272,9 @@ export class ChatbotService {
         leadsPhoneNumber: normalizedLeadsPhoneNumber,
         leadsEnabled: input.leadsEnabled ?? true,
         fiadoEnabled: input.fiadoEnabled ?? false,
+        audioEnabled,
+        visionEnabled,
+        visionPrompt,
         aiFallbackProvider: input.aiFallbackProvider ?? null,
         aiFallbackApiKey: input.aiFallbackApiKey?.trim() || null,
         aiFallbackModel: input.aiFallbackModel?.trim() || null,
@@ -360,12 +377,15 @@ public async simulate(
             isEnabled: false,
             welcomeMessage: null,
             fallbackMessage: null,
-        leadsGroupJid: null,
-        leadsGroupName: null,
-        leadsPhoneNumber: null,
-        leadsEnabled: true,
-        fiadoEnabled: false,
-        rules: [],
+            leadsGroupJid: null,
+            leadsGroupName: null,
+            leadsPhoneNumber: null,
+            leadsEnabled: true,
+            fiadoEnabled: false,
+            audioEnabled: false,
+            visionEnabled: false,
+            visionPrompt: null,
+            rules: [],
             ai: this.buildRuntimeAiConfig(defaultAiSettings, managedAiProvider),
             aiFallbackProvider: null,
             aiFallbackApiKey: null,
@@ -486,6 +506,9 @@ private async evaluateConfig(
       leadsPhoneNumber?: string | null;
       leadsEnabled?: boolean | null;
       fiadoEnabled?: boolean | null;
+      audioEnabled?: boolean | null;
+      visionEnabled?: boolean | null;
+      visionPrompt?: string | null;
       rules: unknown;
       aiSettings?: unknown;
       createdAt: Date;
@@ -513,6 +536,9 @@ private async evaluateConfig(
       leadsPhoneNumber: record.leadsPhoneNumber ?? null,
       leadsEnabled: record.leadsEnabled ?? true,
       fiadoEnabled: record.fiadoEnabled ?? false,
+      audioEnabled: record.audioEnabled ?? false,
+      visionEnabled: record.visionEnabled ?? false,
+      visionPrompt: record.visionPrompt ?? null,
       rules: chatbotRulesArraySchema.parse(record.rules),
       ai: this.buildRuntimeAiConfig(aiSettings, managedAiProvider),
       aiFallbackProvider: normalizeFallbackProvider(record.aiFallbackProvider),

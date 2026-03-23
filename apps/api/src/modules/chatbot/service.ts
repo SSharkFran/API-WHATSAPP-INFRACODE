@@ -7,7 +7,7 @@ import type { AppConfig } from "../../config.js";
 import type { PlatformPrisma, TenantPrismaRegistry } from "../../lib/database.js";
 import { decrypt } from "../../lib/crypto.js";
 import { ApiError } from "../../lib/errors.js";
-import { assertValidPhoneNumber, normalizePhoneNumber } from "../../lib/phone.js";
+import { assertValidPhoneNumber, normalizePhoneNumber, toJid } from "../../lib/phone.js";
 import type { ChatMessage } from "./agents/types.js";
 import { chatbotAiConfigSchema, chatbotRuleSchema, googleCalendarModuleSchema, upsertChatbotAiBodySchema } from "./schemas.js";
 import { GoogleCalendarTool } from "./tools/google-calendar.tool.js";
@@ -38,7 +38,7 @@ interface ManagedAiProviderRuntime {
   apiKeyEncrypted: string | null;
 }
 
-type LeadPorte = "Pequeno" | "Médio" | "Grande" | "G.Especial";
+type LeadPorte = "Pequeno" | "Médio" | "Grande" | "G. Especial";
 type LeadServiceLevel = "Essencial" | "Completa" | "Detalhada";
 type LeadDirtLevel = "Leve" | "Média" | "Pesada";
 
@@ -56,6 +56,7 @@ interface ExtractedLeadFromConversation {
 interface ExtractedLeadAiPayload {
   nome: string | null;
   veiculo: string | null;
+  porte: LeadPorte | null;
   servico: LeadServiceLevel | null;
   horario: string | null;
   sujeira: LeadDirtLevel | null;
@@ -153,35 +154,23 @@ const normalizeLeadLookup = (value: string): string =>
     .replace(/[^a-z0-9]+/g, " ")
     .trim()
     .replace(/\s+/g, " ");
-const leadVehiclePorteKeywordFallbacks: Array<{ keywords: string[]; porte: LeadPorte }> = [
-  {
-    keywords: ["caminhonete", "picape", "pickup"],
-    porte: "Grande"
-  },
-  {
-    keywords: ["carro", "sedan", "hatch"],
-    porte: "Médio"
-  },
-  {
-    keywords: ["caminhao", "truck"],
-    porte: "G.Especial"
-  },
-  {
-    keywords: ["moto"],
-    porte: "Pequeno"
-  }
-];
 const leadExtractionAiSystemPrompt = [
-  "You are a data extraction assistant. Analyze the conversation and return ONLY a valid JSON object with no extra text, no markdown, no explanation.",
+  "You are a data extraction assistant. Analyze this conversation and return ONLY a valid JSON object, no markdown, no explanation, nothing else.",
   "",
-  "Extract these fields:",
+  "Extract:",
   "- nome: the client's name (string or null)",
-  "- veiculo: the vehicle model or type mentioned (string or null)",
-  '- servico: the service chosen - must be exactly \"Essencial\", \"Completa\", or \"Detalhada\" (string or null)',
-  "- horario: any time or date preference mentioned (string or null)",
-  '- sujeira: dirt level inferred from conversation - \"Leve\", \"Média\", \"Pesada\", or null',
+  "- veiculo: vehicle model or type mentioned (string or null)",
+  "- porte: classify vehicle size as exactly one of: 'Pequeno', 'Médio', 'Grande', or 'G. Especial'",
+  "  Pequeno: small hatchbacks (HB20, Onix, Polo, Kwid, Mobi, Argo)",
+  "  Médio: sedans and mid-size (Civic, Corolla, Cruze, Virtus, Camaro)",
+  "  Grande: pickups and large SUVs (Hilux, L200, Amarok, Ranger, SW4, Compass)",
+  "  G. Especial: heavy trucks, Ram, Silverado, F-250 and larger",
+  "  Default to 'Médio' if vehicle mentioned but size uncertain.",
+  "  Return null only if no vehicle mentioned.",
+  "- servico: exactly 'Essencial', 'Completa', or 'Detalhada' (or null)",
+  "- horario: any time or date preference (string or null)",
+  "- sujeira: 'Leve', 'Média', 'Pesada', or null",
   "",
-  "Return null for any field not clearly present in the conversation.",
   "Return ONLY the JSON object, nothing else."
 ].join("\n");
 
@@ -682,7 +671,111 @@ private async evaluateConfig(
     return parsed as unknown as Prisma.InputJsonValue;
   }
 
-  public async extractLeadWithAi(
+  public async processLeadAfterConversation(
+    conversationId: string,
+    chatbotConfig: ChatbotConfig & { __tenantId?: string },
+    phoneNumber: string
+  ): Promise<void> {
+    const tenantId = chatbotConfig.__tenantId?.trim();
+
+    if (!tenantId) {
+      return;
+    }
+
+    const prisma = await this.tenantPrismaRegistry.getClient(tenantId);
+    console.log("[lead] iniciando extração para conversa:", conversationId);
+
+    try {
+      const conversation = await prisma.conversation.findUnique({
+        where: {
+          id: conversationId
+        },
+        select: {
+          id: true,
+          instanceId: true,
+          leadSent: true,
+          awaitingLeadExtraction: true,
+          contact: {
+            select: {
+              phoneNumber: true,
+              fields: true
+            }
+          }
+        }
+      });
+
+      if (!conversation) {
+        throw new Error("Conversa nao encontrada");
+      }
+
+      if (conversation.leadSent) {
+        await prisma.conversation.update({
+          where: {
+            id: conversationId
+          },
+          data: {
+            awaitingLeadExtraction: false
+          } as Prisma.ConversationUncheckedUpdateInput
+        });
+        return;
+      }
+
+      const contactFields =
+        conversation.contact?.fields && typeof conversation.contact.fields === "object"
+          ? (conversation.contact.fields as Record<string, unknown>)
+          : null;
+      const remoteJid =
+        (typeof contactFields?.lastRemoteJid === "string" && contactFields.lastRemoteJid.trim()) ||
+        toJid(conversation.contact?.phoneNumber ?? phoneNumber);
+      const messages = await this.loadLeadConversationMessages(prisma, conversation.instanceId, remoteJid);
+      const extracted = await this.extractLeadWithAi(messages, phoneNumber, chatbotConfig);
+
+      console.log("[lead] dados extraídos:", JSON.stringify(extracted));
+
+      if (!extracted) {
+        throw new Error("Falha ao extrair dados obrigatorios do lead");
+      }
+
+      const alertMessage = [
+        "🔔 Novo lead detectado:",
+        `Nome: ${extracted.nome}`,
+        `Contato: ${extracted.contato}`,
+        `Veículo: ${extracted.veiculo} - ${extracted.porte}`,
+        `Serviço de interesse: Zelo ${extracted.servico}`,
+        `Sujeira Identificada: ${extracted.sujeira ?? "não avaliada"}`,
+        `Valor Estimado: R$ ${extracted.valorEstimado.toFixed(2).replace(".", ",")}`,
+        `Horário agendado: ${extracted.horario ?? "a confirmar pelo consultor"}`
+      ].join("\n");
+      const alertSent = (await this.platformAlertService?.alertLeadMessage(alertMessage, phoneNumber)) ?? false;
+
+      if (!alertSent) {
+        throw new Error("Falha ao enviar alerta de lead");
+      }
+
+      await prisma.conversation.update({
+        where: {
+          id: conversationId
+        },
+        data: {
+          leadSent: true,
+          awaitingLeadExtraction: false
+        } as Prisma.ConversationUncheckedUpdateInput
+      });
+      console.log("[lead] lead enviado para:", phoneNumber);
+    } catch (error) {
+      console.error("[lead] erro na extração:", error);
+      await prisma.conversation.update({
+        where: {
+          id: conversationId
+        },
+        data: {
+          awaitingLeadExtraction: false
+        } as Prisma.ConversationUncheckedUpdateInput
+      }).catch(() => undefined);
+    }
+  }
+
+  private async extractLeadWithAi(
     messages: ChatMessage[],
     phoneNumber: string,
     chatbotConfig: ChatbotConfig & { __tenantId?: string }
@@ -706,74 +799,95 @@ private async evaluateConfig(
       return null;
     }
 
-    try {
-      const apiKey = decrypt(managedAiProvider.apiKeyEncrypted, this.config.API_ENCRYPTION_KEY);
-      console.log("[lead:extract] chamando IA com", messages.length, "mensagens");
-      const rawResponse = await this.callAiWithFallback(
-        tenantId,
-        managedAiProvider,
-        apiKey,
-        {
-          system: leadExtractionAiSystemPrompt,
-          messages: [
-            {
-              role: "user",
-              content: transcript
-            }
-          ]
-        },
-        0,
-        chatbotConfig
-      );
-      console.log("[lead:extract] resposta bruta da IA:", rawResponse);
+    const apiKey = decrypt(managedAiProvider.apiKeyEncrypted, this.config.API_ENCRYPTION_KEY);
+    const rawResponse = await this.callAiWithFallback(
+      tenantId,
+      managedAiProvider,
+      apiKey,
+      {
+        system: leadExtractionAiSystemPrompt,
+        messages: [
+          {
+            role: "user",
+            content: transcript
+          }
+        ]
+      },
+      0,
+      chatbotConfig
+    );
 
-      if (!rawResponse) {
-        return null;
-      }
-
-      const extractedLead = this.parseLeadExtractionResponse(rawResponse);
-
-      if (!extractedLead?.nome || !extractedLead.veiculo || !extractedLead.servico) {
-        const nome = extractedLead?.nome ?? null;
-        const veiculo = extractedLead?.veiculo ?? null;
-        const servico = extractedLead?.servico ?? null;
-        console.log("[lead:extract] retornando null — campos faltando:", { nome, veiculo, servico });
-        return null;
-      }
-
-      const porte =
-        this.lookupLeadVehiclePorte(extractedLead.veiculo, chatbotConfig.leadVehicleTable) ??
-        this.inferLeadPorteFromVehicle(extractedLead.veiculo);
-
-      if (!porte) {
-        return null;
-      }
-
-      const basePrice = this.lookupLeadTableValue(chatbotConfig.leadPriceTable, porte, extractedLead.servico);
-
-      if (basePrice === null) {
-        return null;
-      }
-
-      const surcharge =
-        extractedLead.sujeira === "Média" || extractedLead.sujeira === "Pesada"
-          ? this.lookupLeadTableValue(chatbotConfig.leadSurchargeTable, porte, extractedLead.sujeira) ?? 0
-          : 0;
-
-      return {
-        nome: extractedLead.nome,
-        contato: phoneNumber,
-        veiculo: extractedLead.veiculo,
-        porte,
-        servico: extractedLead.servico,
-        horario: extractedLead.horario,
-        sujeira: extractedLead.sujeira,
-        valorEstimado: Number((basePrice + surcharge).toFixed(2))
-      };
-    } catch (error) {
-      console.error("[lead:extract] erro na chamada IA:", error);
+    if (!rawResponse) {
       return null;
     }
+
+    const extractedLead = this.parseLeadExtractionResponse(rawResponse);
+
+    if (!extractedLead?.nome || !extractedLead.veiculo || !extractedLead.servico) {
+      return null;
+    }
+
+    const porte = extractedLead.porte ?? "Médio";
+
+    const basePrice = this.lookupLeadTableValue(chatbotConfig.leadPriceTable, porte, extractedLead.servico);
+
+    if (basePrice === null) {
+      return null;
+    }
+
+    const surcharge =
+      extractedLead.sujeira === "Média" || extractedLead.sujeira === "Pesada"
+        ? this.lookupLeadTableValue(chatbotConfig.leadSurchargeTable, porte, extractedLead.sujeira) ?? 0
+        : 0;
+
+    return {
+      nome: extractedLead.nome,
+      contato: phoneNumber,
+      veiculo: extractedLead.veiculo,
+      porte,
+      servico: extractedLead.servico,
+      horario: extractedLead.horario,
+      sujeira: extractedLead.sujeira,
+      valorEstimado: Number((basePrice + surcharge).toFixed(2))
+    };
+  }
+
+  private async loadLeadConversationMessages(
+    prisma: Awaited<ReturnType<TenantPrismaRegistry["getClient"]>>,
+    instanceId: string,
+    remoteJid: string
+  ): Promise<ChatMessage[]> {
+    const records = await prisma.message.findMany({
+      where: {
+        instanceId,
+        remoteJid
+      },
+      orderBy: {
+        createdAt: "asc"
+      },
+      select: {
+        direction: true,
+        payload: true
+      }
+    });
+
+    const messages: ChatMessage[] = [];
+
+    for (const record of records) {
+      const payload = record.payload as Record<string, unknown> | null;
+      const text = typeof payload?.text === "string" ? payload.text.trim() : "";
+
+      if (!text) {
+        continue;
+      }
+
+      messages.push({
+        role: record.direction === "INBOUND" ? "user" : "assistant",
+        content: text
+      });
+    }
+
+    return messages;
   }
 
   private buildLeadExtractionTranscript(messages: ChatMessage[]): string {
@@ -800,7 +914,6 @@ private async evaluateConfig(
 
     try {
       const parsed = JSON.parse(sanitizedResponse) as Record<string, unknown> | null;
-      console.log("[lead:extract] JSON parseado:", JSON.stringify(parsed));
 
       if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
         return null;
@@ -809,12 +922,12 @@ private async evaluateConfig(
       return {
         nome: this.parseNullableLeadString(parsed.nome),
         veiculo: this.parseNullableLeadString(parsed.veiculo),
+        porte: this.normalizeLeadPorte(parsed.porte) ?? (this.parseNullableLeadString(parsed.veiculo) ? "Médio" : null),
         servico: this.normalizeLeadServiceValue(parsed.servico),
         horario: this.parseNullableLeadString(parsed.horario),
         sujeira: this.normalizeLeadDirtLevel(parsed.sujeira)
       };
-    } catch (error) {
-      console.error("[lead:extract] erro ao parsear JSON:", error);
+    } catch {
       return null;
     }
   }
@@ -866,40 +979,6 @@ private async evaluateConfig(
     return null;
   }
 
-  private lookupLeadVehiclePorte(vehicle: string, leadVehicleTable: ChatbotConfig["leadVehicleTable"]): LeadPorte | null {
-    if (!leadVehicleTable || typeof leadVehicleTable !== "object") {
-      return null;
-    }
-
-    const normalizedVehicle = normalizeLeadLookup(vehicle);
-
-    if (!normalizedVehicle) {
-      return null;
-    }
-
-    const match = Object.entries(leadVehicleTable).find(
-      ([model]) => normalizeLeadLookup(model) === normalizedVehicle
-    );
-
-    return match ? this.normalizeLeadPorte(match[1]) : null;
-  }
-
-  private inferLeadPorteFromVehicle(vehicle: string): LeadPorte | null {
-    const normalizedVehicle = normalizeLeadLookup(vehicle);
-
-    if (!normalizedVehicle) {
-      return null;
-    }
-
-    for (const fallback of leadVehiclePorteKeywordFallbacks) {
-      if (fallback.keywords.some((keyword) => normalizedVehicle.includes(keyword))) {
-        return fallback.porte;
-      }
-    }
-
-    return null;
-  }
-
   private normalizeLeadPorte(value: unknown): LeadPorte | null {
     const normalized = normalizeLeadLookup(String(value ?? ""));
 
@@ -913,7 +992,7 @@ private async evaluateConfig(
       return "Grande";
     }
     if (normalized === "g especial" || normalized === "gespecial") {
-      return "G.Especial";
+      return "G. Especial";
     }
 
     return null;

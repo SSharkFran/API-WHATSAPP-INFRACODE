@@ -127,6 +127,7 @@ model Conversation {
   status           String   @default("OPEN")
   tags             String[] @default([])
   leadSent         Boolean  @default(false)
+  awaitingLeadExtraction Boolean @default(false)
   slaDeadlineAt    DateTime?
   lastMessageAt    DateTime?
   createdAt        DateTime @default(now())

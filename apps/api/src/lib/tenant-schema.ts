@@ -107,12 +107,14 @@ export const buildTenantSchemaSql = (schemaName: string): string[] => {
       "status" TEXT NOT NULL DEFAULT 'OPEN',
       "tags" TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
       "leadSent" BOOLEAN NOT NULL DEFAULT FALSE,
+      "awaitingLeadExtraction" BOOLEAN NOT NULL DEFAULT FALSE,
       "slaDeadlineAt" TIMESTAMPTZ,
       "lastMessageAt" TIMESTAMPTZ,
       "createdAt" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       "updatedAt" TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );`,
     `ALTER TABLE ${schema}."Conversation" ADD COLUMN IF NOT EXISTS "leadSent" BOOLEAN NOT NULL DEFAULT FALSE;`,
+    `ALTER TABLE ${schema}."Conversation" ADD COLUMN IF NOT EXISTS "awaitingLeadExtraction" BOOLEAN NOT NULL DEFAULT FALSE;`,
     `CREATE INDEX IF NOT EXISTS "idx_${schemaName}_conversation_status" ON ${schema}."Conversation" ("status");`,
     `CREATE TABLE IF NOT EXISTS ${schema}."MessageTemplate" (
       "id" TEXT PRIMARY KEY,

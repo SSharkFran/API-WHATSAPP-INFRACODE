@@ -954,7 +954,8 @@ if (event.status === "CONNECTED") {
       },
       select: {
         id: true,
-        leadSent: true
+        leadSent: true,
+        awaitingLeadExtraction: true
       }
     });
 
@@ -968,7 +969,8 @@ if (event.status === "CONNECTED") {
           },
           select: {
             id: true,
-            leadSent: true
+            leadSent: true,
+            awaitingLeadExtraction: true
           }
         })
       : await prisma.conversation.update({
@@ -978,7 +980,8 @@ if (event.status === "CONNECTED") {
           },
           select: {
             id: true,
-            leadSent: true
+            leadSent: true,
+            awaitingLeadExtraction: true
           }
         });
 
@@ -1135,6 +1138,10 @@ if (event.status === "CONNECTED") {
           );
         }
 
+        return;
+      }
+
+      if (activeConversation.awaitingLeadExtraction) {
         return;
       }
 
@@ -1338,49 +1345,6 @@ if (event.status === "CONNECTED") {
         }
       }
 
-      const leadAutoExtractValue = chatbotConfig?.leadAutoExtract as unknown;
-      console.log("[lead:debug] leadAutoExtract:", chatbotConfig?.leadAutoExtract, typeof chatbotConfig?.leadAutoExtract);
-      const leadAutoExtractEnabled = leadAutoExtractValue === true || leadAutoExtractValue === "true";
-
-      if (leadAutoExtractEnabled && !session.leadAlreadySent) {
-        console.log("[lead:debug] iniciando extração por IA");
-        const conversationMessages = await this.loadConversationMessages(prisma, instance.id, event.remoteJid);
-        const resolvedChatbotConfig = await this.chatbotService.getConfig(tenantId, instance.id);
-        const result = await this.chatbotService.extractLeadWithAi(conversationMessages, resolvedContactNumber, {
-          ...resolvedChatbotConfig,
-          __tenantId: tenantId
-        });
-        const extractedLead = result;
-
-        if (!extractedLead) {
-          console.log("[lead:debug] extração retornou null, dados:", JSON.stringify(result));
-        }
-
-        if (extractedLead) {
-          const alertMessage = [
-            "🔔 Novo lead detectado:",
-            `Nome: ${extractedLead.nome}`,
-            `Contato: ${extractedLead.contato}`,
-            `Veículo: ${extractedLead.veiculo} - ${extractedLead.porte}`,
-            `Serviço de interesse: Zelo ${extractedLead.servico}`,
-            `Sujeira Identificada: ${extractedLead.sujeira ?? "não avaliada"}`,
-            `Valor Estimado: R$ ${formatCurrencyValue(extractedLead.valorEstimado)}`,
-            `Horário agendado: ${extractedLead.horario ?? "a confirmar pelo consultor"}`
-          ].join("\n");
-
-          const autoExtractAlertSent =
-            (await this.platformAlertService?.alertLeadMessage(alertMessage, resolvedContactNumber).catch((err) => {
-              console.error("[orchestrator] erro ao enviar lead autoextraido:", err);
-              return false;
-            })) ?? false;
-
-          if (autoExtractAlertSent) {
-            await this.markConversationLeadSent(prisma, activeConversation.id, session);
-            console.log("[lead:debug] lead enviado com sucesso");
-          }
-        }
-      }
-
       await this.memoryAgent.update({
         tenantId,
         phoneNumber: resolvedContactNumber,
@@ -1434,7 +1398,47 @@ if (event.status === "CONNECTED") {
         );
         this.appendConversationHistory(session, "assistant", clientText);
       }
-} catch (error) {
+
+      const leadAutoExtractValue = chatbotConfig?.leadAutoExtract as unknown;
+      const leadAutoExtractEnabled = leadAutoExtractValue === true || leadAutoExtractValue === "true";
+      const responseText = clientText.replace(/\|\|\|/g, " ");
+      const isClosing = /encaminhei.*consultor|consultor.*contato|em instantes.*contato/i.test(responseText);
+
+      if (leadAutoExtractEnabled && isClosing && !session.leadAlreadySent && !activeConversation.awaitingLeadExtraction) {
+        await prisma.conversation.update({
+          where: {
+            id: activeConversation.id
+          },
+          data: {
+            awaitingLeadExtraction: true
+          } as Prisma.ConversationUncheckedUpdateInput
+        });
+
+        void (async () => {
+          try {
+            const resolvedChatbotConfig = await this.chatbotService.getConfig(tenantId, instance.id);
+            await this.chatbotService.processLeadAfterConversation(
+              activeConversation.id,
+              {
+                ...resolvedChatbotConfig,
+                __tenantId: tenantId
+              },
+              resolvedContactNumber
+            );
+          } catch (error) {
+            console.error("[lead] erro na extração:", error);
+            await prisma.conversation.update({
+              where: {
+                id: activeConversation.id
+              },
+              data: {
+                awaitingLeadExtraction: false
+              } as Prisma.ConversationUncheckedUpdateInput
+            });
+          }
+        })();
+      }
+    } catch (error) {
       this.emitLog(buildWorkerKey(tenantId, instance.id), {
         context: {
           error: error instanceof Error ? error.message : "unknown"
@@ -1514,44 +1518,6 @@ if (event.status === "CONNECTED") {
     return session;
   }
 
-  private async loadConversationMessages(
-    prisma: Awaited<ReturnType<TenantPrismaRegistry["getClient"]>>,
-    instanceId: string,
-    remoteJid: string
-  ): Promise<ChatMessage[]> {
-    const records = await prisma.message.findMany({
-      where: {
-        instanceId,
-        remoteJid
-      },
-      orderBy: {
-        createdAt: "asc"
-      },
-      select: {
-        direction: true,
-        payload: true
-      }
-    });
-
-    const messages: ChatMessage[] = [];
-
-    for (const record of records) {
-      const payload = record.payload as Record<string, unknown> | null;
-      const text = typeof payload?.text === "string" ? payload.text.trim() : "";
-
-      if (!text) {
-        continue;
-      }
-
-      messages.push({
-        role: record.direction === "INBOUND" ? "user" : "assistant",
-        content: text
-      });
-    }
-
-    return messages;
-  }
-
   private async markConversationLeadSent(
     prisma: Awaited<ReturnType<TenantPrismaRegistry["getClient"]>>,
     conversationId: string,
@@ -1566,7 +1532,8 @@ if (event.status === "CONNECTED") {
         id: conversationId
       },
       data: {
-        leadSent: true
+        leadSent: true,
+        awaitingLeadExtraction: false
       } as Prisma.ConversationUncheckedUpdateInput
     });
 

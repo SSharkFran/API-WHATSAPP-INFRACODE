@@ -145,6 +145,24 @@ const normalizeLeadLookup = (value: string): string =>
     .replace(/[^a-z0-9]+/g, " ")
     .trim()
     .replace(/\s+/g, " ");
+const leadVehicleKeywordFallbacks: Array<{ pattern: RegExp; porte: LeadPorte }> = [
+  {
+    pattern: /(?:^|[^\p{L}\p{N}])(caminhonete|picape|pickup)(?=$|[^\p{L}\p{N}])/iu,
+    porte: "Grande"
+  },
+  {
+    pattern: /(?:^|[^\p{L}\p{N}])(carro|sedan)(?=$|[^\p{L}\p{N}])/iu,
+    porte: "Médio"
+  },
+  {
+    pattern: /(?:^|[^\p{L}\p{N}])(mototaxi|moto)(?=$|[^\p{L}\p{N}])/iu,
+    porte: "Pequeno"
+  },
+  {
+    pattern: /(?:^|[^\p{L}\p{N}])(caminhao|caminhão|truck)(?=$|[^\p{L}\p{N}])/iu,
+    porte: "G.Especial"
+  }
+];
 
 const matchesRule = (rule: ChatbotRule, normalizedInput: string, isFirstContact: boolean): boolean => {
   if (!rule.isActive) {
@@ -735,10 +753,6 @@ private async evaluateConfig(
           Boolean(entry.model && entry.normalizedModel && entry.porte)
       );
 
-    if (entries.length === 0) {
-      return null;
-    }
-
     const normalizedMessages = userMessages.map((message) => normalizeLeadLookup(message));
     let bestMatch: { model: string; porte: LeadPorte; score: number } | null = null;
 
@@ -777,7 +791,38 @@ private async evaluateConfig(
           model: bestMatch.model,
           porte: bestMatch.porte
         }
-      : null;
+      : this.extractLeadGenericVehicle(userMessages);
+  }
+
+  private extractLeadGenericVehicle(userMessages: string[]): { model: string; porte: LeadPorte } | null {
+    for (const message of [...userMessages].reverse()) {
+      for (const fallback of leadVehicleKeywordFallbacks) {
+        const match = message.match(fallback.pattern);
+
+        if (!match?.[1]) {
+          continue;
+        }
+
+        return {
+          model: this.formatLeadVehicleLabel(match[1]),
+          porte: fallback.porte
+        };
+      }
+    }
+
+    return null;
+  }
+
+  private formatLeadVehicleLabel(value: string): string {
+    const normalizedValue = value.replace(/\s+/g, " ").trim();
+
+    if (!normalizedValue) {
+      return normalizedValue;
+    }
+
+    return normalizedValue === normalizedValue.toLowerCase()
+      ? normalizedValue.charAt(0).toLocaleUpperCase("pt-BR") + normalizedValue.slice(1)
+      : normalizedValue;
   }
 
   private extractLeadService(userMessages: string[]): LeadServiceLevel | null {

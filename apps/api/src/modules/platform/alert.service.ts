@@ -126,6 +126,10 @@ export class PlatformAlertService {
     return this.sendAdminAlert(phone, renderedMessage);
   }
 
+  async sendAlertToPhone(phone: string, message: string): Promise<boolean> {
+    return this.sendAdminAlert(phone, message);
+  }
+
   async alertCriticalError(
     tenantId: string,
     instanceId: string,

@@ -708,7 +708,8 @@ private async evaluateConfig(
 
     try {
       const apiKey = decrypt(managedAiProvider.apiKeyEncrypted, this.config.API_ENCRYPTION_KEY);
-      const responseText = await this.callAiWithFallback(
+      console.log("[lead:extract] chamando IA com", messages.length, "mensagens");
+      const rawResponse = await this.callAiWithFallback(
         tenantId,
         managedAiProvider,
         apiKey,
@@ -724,14 +725,19 @@ private async evaluateConfig(
         0,
         chatbotConfig
       );
+      console.log("[lead:extract] resposta bruta da IA:", rawResponse);
 
-      if (!responseText) {
+      if (!rawResponse) {
         return null;
       }
 
-      const extractedLead = this.parseLeadExtractionResponse(responseText);
+      const extractedLead = this.parseLeadExtractionResponse(rawResponse);
 
       if (!extractedLead?.nome || !extractedLead.veiculo || !extractedLead.servico) {
+        const nome = extractedLead?.nome ?? null;
+        const veiculo = extractedLead?.veiculo ?? null;
+        const servico = extractedLead?.servico ?? null;
+        console.log("[lead:extract] retornando null — campos faltando:", { nome, veiculo, servico });
         return null;
       }
 
@@ -765,7 +771,7 @@ private async evaluateConfig(
         valorEstimado: Number((basePrice + surcharge).toFixed(2))
       };
     } catch (error) {
-      console.error("[chatbot:lead-ai] erro ao extrair lead:", error);
+      console.error("[lead:extract] erro na chamada IA:", error);
       return null;
     }
   }
@@ -794,6 +800,7 @@ private async evaluateConfig(
 
     try {
       const parsed = JSON.parse(sanitizedResponse) as Record<string, unknown> | null;
+      console.log("[lead:extract] JSON parseado:", JSON.stringify(parsed));
 
       if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
         return null;
@@ -806,7 +813,8 @@ private async evaluateConfig(
         horario: this.parseNullableLeadString(parsed.horario),
         sujeira: this.normalizeLeadDirtLevel(parsed.sujeira)
       };
-    } catch {
+    } catch (error) {
+      console.error("[lead:extract] erro ao parsear JSON:", error);
       return null;
     }
   }

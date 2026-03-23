@@ -746,7 +746,27 @@ private async evaluateConfig(
         `Valor Estimado: R$ ${extracted.valorEstimado.toFixed(2).replace(".", ",")}`,
         `Horário agendado: ${extracted.horario ?? "a confirmar pelo consultor"}`
       ].join("\n");
-      const alertSent = (await this.platformAlertService?.alertLeadMessage(alertMessage, phoneNumber)) ?? false;
+      const alertPhone =
+        (await this.platformPrisma.platformConfig.findUnique({
+          where: { id: "singleton" },
+          select: { adminAlertPhone: true }
+        }))?.adminAlertPhone ?? null;
+
+      console.log("[lead] tentando enviar para:", alertPhone);
+      console.log("[lead] instanceId:", conversation.instanceId);
+      console.log("[lead] mensagem:", alertMessage);
+
+      let alertSent = false;
+
+      try {
+        alertSent = (await this.platformAlertService?.alertLeadMessage(alertMessage, phoneNumber)) ?? false;
+      } catch (error) {
+        console.error(
+          "[lead] erro completo ao enviar:",
+          JSON.stringify(error, Object.getOwnPropertyNames(error))
+        );
+        throw error;
+      }
 
       if (!alertSent) {
         throw new Error("Falha ao enviar alerta de lead");

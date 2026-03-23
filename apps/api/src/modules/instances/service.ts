@@ -1338,13 +1338,23 @@ if (event.status === "CONNECTED") {
         }
       }
 
-      if ((chatbotConfig?.leadAutoExtract ?? false) && !session.leadAlreadySent) {
+      const leadAutoExtractValue = chatbotConfig?.leadAutoExtract as unknown;
+      console.log("[lead:debug] leadAutoExtract:", chatbotConfig?.leadAutoExtract, typeof chatbotConfig?.leadAutoExtract);
+      const leadAutoExtractEnabled = leadAutoExtractValue === true || leadAutoExtractValue === "true";
+
+      if (leadAutoExtractEnabled && !session.leadAlreadySent) {
+        console.log("[lead:debug] iniciando extração por IA");
         const conversationMessages = await this.loadConversationMessages(prisma, instance.id, event.remoteJid);
         const resolvedChatbotConfig = await this.chatbotService.getConfig(tenantId, instance.id);
-        const extractedLead = await this.chatbotService.extractLeadWithAi(conversationMessages, resolvedContactNumber, {
+        const result = await this.chatbotService.extractLeadWithAi(conversationMessages, resolvedContactNumber, {
           ...resolvedChatbotConfig,
           __tenantId: tenantId
         });
+        const extractedLead = result;
+
+        if (!extractedLead) {
+          console.log("[lead:debug] extração retornou null, dados:", JSON.stringify(result));
+        }
 
         if (extractedLead) {
           const alertMessage = [
@@ -1366,6 +1376,7 @@ if (event.status === "CONNECTED") {
 
           if (autoExtractAlertSent) {
             await this.markConversationLeadSent(prisma, activeConversation.id, session);
+            console.log("[lead:debug] lead enviado com sucesso");
           }
         }
       }

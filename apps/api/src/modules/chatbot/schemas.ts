@@ -4,6 +4,7 @@ export const chatbotTriggerTypeSchema = z.enum(["EXACT", "CONTAINS", "REGEX", "F
 export const chatbotAiModeSchema = z.enum(["RULES_ONLY", "RULES_THEN_AI", "AI_ONLY"]);
 export const chatbotAiProviderSchema = z.enum(["GROQ", "OPENAI_COMPATIBLE"]);
 export const chatbotFallbackProviderSchema = z.enum(["openai", "gemini", "ollama"]);
+const chatbotJsonMapSchema = z.record(z.string(), z.unknown());
 export const clientMemoryStatusSchema = z.enum([
   "lead_frio",
   "lead_quente",
@@ -64,6 +65,10 @@ export const chatbotConfigSchema = z.object({
   audioEnabled: z.boolean().default(false),
   visionEnabled: z.boolean().default(false),
   visionPrompt: z.string().nullable().optional(),
+  leadAutoExtract: z.boolean().default(false),
+  leadVehicleTable: chatbotJsonMapSchema.default({}),
+  leadPriceTable: chatbotJsonMapSchema.default({}),
+  leadSurchargeTable: chatbotJsonMapSchema.default({}),
   rules: z.array(chatbotRuleSchema),
   ai: chatbotAiConfigSchema,
   aiFallbackProvider: chatbotFallbackProviderSchema.nullable().optional(),
@@ -86,6 +91,10 @@ export const upsertChatbotBodySchema = z.object({
   audioEnabled: z.boolean().default(false),
   visionEnabled: z.boolean().default(false),
   visionPrompt: z.string().max(1_000).nullable().optional(),
+  leadAutoExtract: z.boolean().default(false),
+  leadVehicleTable: chatbotJsonMapSchema.optional(),
+  leadPriceTable: chatbotJsonMapSchema.optional(),
+  leadSurchargeTable: chatbotJsonMapSchema.optional(),
   aiFallbackProvider: chatbotFallbackProviderSchema.nullable().optional(),
   aiFallbackApiKey: z.string().max(512).nullable().optional(),
   aiFallbackModel: z.string().max(120).nullable().optional(),

@@ -298,6 +298,10 @@ export interface ChatbotConfig {
   audioEnabled?: boolean;
   visionEnabled?: boolean;
   visionPrompt?: string | null;
+  leadAutoExtract?: boolean;
+  leadVehicleTable?: Record<string, unknown>;
+  leadPriceTable?: Record<string, unknown>;
+  leadSurchargeTable?: Record<string, unknown>;
   modules?: ChatbotModules;
   rules: ChatbotRule[];
   ai: ChatbotAiConfig;

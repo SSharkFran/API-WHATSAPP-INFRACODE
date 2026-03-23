@@ -130,6 +130,11 @@ interface CreateInstanceInput {
 }
 
 const buildWorkerKey = (tenantId: string, instanceId: string): string => `${tenantId}:${instanceId}`;
+const formatCurrencyValue = (value: number): string =>
+  new Intl.NumberFormat("pt-BR", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  }).format(value);
 
 /**
  * Orquestra o ciclo de vida das instancias WhatsApp em workers isolados.
@@ -144,6 +149,7 @@ export class InstanceOrchestrator {
   private readonly planEnforcementService: PlanEnforcementService;
   private readonly clientMemoryService: ClientMemoryService;
   private readonly adminMemoryService: AdminMemoryService;
+  private readonly chatbotService: ChatbotService;
   private readonly memoryAgent: MemoryAgent;
   private readonly conversationAgent: ConversationAgent;
   private readonly fiadoAgent: FiadoAgent;
@@ -164,6 +170,7 @@ export class InstanceOrchestrator {
     this.planEnforcementService = deps.planEnforcementService;
     this.clientMemoryService = deps.clientMemoryService;
     this.adminMemoryService = deps.adminMemoryService;
+    this.chatbotService = deps.chatbotService;
     this.memoryAgent = new MemoryAgent({
       clientMemoryService: deps.clientMemoryService
     });
@@ -944,28 +951,44 @@ if (event.status === "CONNECTED") {
         status: {
           in: ["OPEN", "PENDING", "TRANSFERRED"]
         }
+      },
+      select: {
+        id: true,
+        leadSent: true
       }
     });
 
     const isFirstContact = !conversation;
+    const activeConversation = !conversation
+      ? await prisma.conversation.create({
+          data: {
+            instanceId: instance.id,
+            contactId: contact.id,
+            lastMessageAt: new Date()
+          },
+          select: {
+            id: true,
+            leadSent: true
+          }
+        })
+      : await prisma.conversation.update({
+          where: { id: conversation.id },
+          data: {
+            lastMessageAt: new Date()
+          },
+          select: {
+            id: true,
+            leadSent: true
+          }
+        });
 
-    if (!conversation) {
-      await prisma.conversation.create({
-        data: {
-          instanceId: instance.id,
-          contactId: contact.id,
-          lastMessageAt: new Date()
-        }
-      });
-    } else {
-      await prisma.conversation.update({
-        where: { id: conversation.id },
-        data: {
-          lastMessageAt: new Date()
-        }
-      });
-    }
-    const session = await this.getConversationSession(prisma, sessionKey, instance.id, event.remoteJid);
+    const session = await this.getConversationSession(
+      prisma,
+      sessionKey,
+      instance.id,
+      event.remoteJid,
+      activeConversation.leadSent
+    );
 
     await prisma.message.create({
       data: {
@@ -1293,19 +1316,60 @@ if (event.status === "CONNECTED") {
               { action: "lead_summary", kind: "chatbot" }
             );
 
-            this.platformAlertService?.alertNewLead(
-              tenantId,
-              instance.name,
-              resumoLead,
-              resolvedContactNumber
-            ).catch((err) => {
-              console.error("[orchestrator] erro ao alertar novo lead:", err);
-            });
+            const summaryAlertSent =
+              (await this.platformAlertService?.alertNewLead(
+                tenantId,
+                instance.name,
+                resumoLead,
+                resolvedContactNumber
+              ).catch((err) => {
+                console.error("[orchestrator] erro ao alertar novo lead:", err);
+                return false;
+              })) ?? false;
+
+            if (summaryAlertSent) {
+              await this.markConversationLeadSent(prisma, activeConversation.id, session);
+            }
           } else {
             console.log("[leads] resumo duplicado ignorado");
           }
         } else if (!leadData?.isComplete) {
           console.log("[leads] resumo incompleto, nao enviado:", resumoLead.slice(0, 100));
+        }
+      }
+
+      if ((chatbotConfig?.leadAutoExtract ?? false) && !session.leadAlreadySent) {
+        const conversationMessages = await this.loadConversationMessages(prisma, instance.id, event.remoteJid);
+        const extractedLead = this.chatbotService.extractLeadFromConversation(conversationMessages, resolvedContactNumber, {
+          leadVehicleTable:
+            (chatbotConfig?.leadVehicleTable as Record<string, unknown> | undefined) ?? {},
+          leadPriceTable:
+            (chatbotConfig?.leadPriceTable as Record<string, unknown> | undefined) ?? {},
+          leadSurchargeTable:
+            (chatbotConfig?.leadSurchargeTable as Record<string, unknown> | undefined) ?? {}
+        });
+
+        if (extractedLead) {
+          const alertMessage = [
+            "🔔 Novo lead detectado:",
+            `Nome: ${extractedLead.nome}`,
+            `Contato: ${extractedLead.contato}`,
+            `Veículo: ${extractedLead.veiculo} - ${extractedLead.porte}`,
+            `Serviço de interesse: Zelo ${extractedLead.servico}`,
+            `Sujeira Identificada: ${extractedLead.sujeira ?? "não avaliada"}`,
+            `Valor Estimado: R$ ${formatCurrencyValue(extractedLead.valorEstimado)}`,
+            `Horário agendado: ${extractedLead.horario ?? "a confirmar pelo consultor"}`
+          ].join("\n");
+
+          const autoExtractAlertSent =
+            (await this.platformAlertService?.alertLeadMessage(alertMessage, resolvedContactNumber).catch((err) => {
+              console.error("[orchestrator] erro ao enviar lead autoextraido:", err);
+              return false;
+            })) ?? false;
+
+          if (autoExtractAlertSent) {
+            await this.markConversationLeadSent(prisma, activeConversation.id, session);
+          }
         }
       }
 
@@ -1391,11 +1455,13 @@ if (event.status === "CONNECTED") {
     prisma: Awaited<ReturnType<TenantPrismaRegistry["getClient"]>>,
     sessionKey: string,
     instanceId: string,
-    remoteJid: string
+    remoteJid: string,
+    leadAlreadySent: boolean
   ): Promise<ConversationSession> {
     const existingSession = this.conversationSessions.get(sessionKey);
 
     if (existingSession) {
+      existingSession.leadAlreadySent = existingSession.leadAlreadySent || leadAlreadySent;
       return existingSession;
     }
 
@@ -1432,12 +1498,71 @@ if (event.status === "CONNECTED") {
 
     const session: ConversationSession = {
       history: history.slice(-20),
-      leadAlreadySent: false
+      leadAlreadySent
     };
 
     this.conversationSessions.set(sessionKey, session);
 
     return session;
+  }
+
+  private async loadConversationMessages(
+    prisma: Awaited<ReturnType<TenantPrismaRegistry["getClient"]>>,
+    instanceId: string,
+    remoteJid: string
+  ): Promise<ChatMessage[]> {
+    const records = await prisma.message.findMany({
+      where: {
+        instanceId,
+        remoteJid
+      },
+      orderBy: {
+        createdAt: "asc"
+      },
+      select: {
+        direction: true,
+        payload: true
+      }
+    });
+
+    const messages: ChatMessage[] = [];
+
+    for (const record of records) {
+      const payload = record.payload as Record<string, unknown> | null;
+      const text = typeof payload?.text === "string" ? payload.text.trim() : "";
+
+      if (!text) {
+        continue;
+      }
+
+      messages.push({
+        role: record.direction === "INBOUND" ? "user" : "assistant",
+        content: text
+      });
+    }
+
+    return messages;
+  }
+
+  private async markConversationLeadSent(
+    prisma: Awaited<ReturnType<TenantPrismaRegistry["getClient"]>>,
+    conversationId: string,
+    session: ConversationSession
+  ): Promise<void> {
+    if (session.leadAlreadySent) {
+      return;
+    }
+
+    await prisma.conversation.update({
+      where: {
+        id: conversationId
+      },
+      data: {
+        leadSent: true
+      } as Prisma.ConversationUncheckedUpdateInput
+    });
+
+    session.leadAlreadySent = true;
   }
 
   private appendConversationHistory(session: ConversationSession, role: ChatMessage["role"], content: string): void {

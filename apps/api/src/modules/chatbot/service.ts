@@ -8,6 +8,7 @@ import type { PlatformPrisma, TenantPrismaRegistry } from "../../lib/database.js
 import { decrypt } from "../../lib/crypto.js";
 import { ApiError } from "../../lib/errors.js";
 import { assertValidPhoneNumber, normalizePhoneNumber } from "../../lib/phone.js";
+import type { ChatMessage } from "./agents/types.js";
 import { chatbotAiConfigSchema, chatbotRuleSchema, googleCalendarModuleSchema, upsertChatbotAiBodySchema } from "./schemas.js";
 import { GoogleCalendarTool } from "./tools/google-calendar.tool.js";
 import type { PlatformAlertService } from "../platform/alert.service.js";
@@ -35,6 +36,21 @@ interface ManagedAiProviderRuntime {
   isActive: boolean;
   isConfigured: boolean;
   apiKeyEncrypted: string | null;
+}
+
+type LeadPorte = "Pequeno" | "Médio" | "Grande" | "G.Especial";
+type LeadServiceLevel = "Essencial" | "Completa" | "Detalhada";
+type LeadDirtLevel = "Leve" | "Média" | "Pesada";
+
+interface ExtractedLeadFromConversation {
+  nome: string;
+  contato: string;
+  veiculo: string;
+  porte: LeadPorte;
+  servico: LeadServiceLevel;
+  horario: string | null;
+  sujeira: LeadDirtLevel | null;
+  valorEstimado: number;
 }
 
 interface OpenAiToolCall {
@@ -121,6 +137,14 @@ const formatTime = (date: Date): string =>
   }).format(date);
 
 const normalizeText = (value: string): string => value.normalize("NFKC").trim().toLowerCase();
+const normalizeLeadLookup = (value: string): string =>
+  value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .replace(/\s+/g, " ");
 
 const matchesRule = (rule: ChatbotRule, normalizedInput: string, isFirstContact: boolean): boolean => {
   if (!rule.isActive) {
@@ -215,6 +239,10 @@ export class ChatbotService {
       audioEnabled?: boolean;
       visionEnabled?: boolean;
       visionPrompt?: string | null;
+      leadAutoExtract?: boolean;
+      leadVehicleTable?: Record<string, unknown>;
+      leadPriceTable?: Record<string, unknown>;
+      leadSurchargeTable?: Record<string, unknown>;
       aiFallbackProvider?: string | null;
       aiFallbackApiKey?: string | null;
       aiFallbackModel?: string | null;
@@ -234,6 +262,19 @@ export class ChatbotService {
     const audioEnabled = input.audioEnabled ?? existingConfig?.audioEnabled ?? false;
     const visionEnabled = input.visionEnabled ?? existingConfig?.visionEnabled ?? false;
     const visionPrompt = input.visionPrompt?.trim() ?? existingConfig?.visionPrompt ?? null;
+    const leadAutoExtract = input.leadAutoExtract ?? existingConfig?.leadAutoExtract ?? false;
+    const leadVehicleTable =
+      input.leadVehicleTable !== undefined
+        ? input.leadVehicleTable
+        : ((existingConfig?.leadVehicleTable as Record<string, unknown> | null | undefined) ?? {});
+    const leadPriceTable =
+      input.leadPriceTable !== undefined
+        ? input.leadPriceTable
+        : ((existingConfig?.leadPriceTable as Record<string, unknown> | null | undefined) ?? {});
+    const leadSurchargeTable =
+      input.leadSurchargeTable !== undefined
+        ? input.leadSurchargeTable
+        : ((existingConfig?.leadSurchargeTable as Record<string, unknown> | null | undefined) ?? {});
 
     if (leadsPhoneNumberRaw && normalizedLeadsPhoneNumber) {
       assertValidPhoneNumber(normalizedLeadsPhoneNumber);
@@ -257,6 +298,10 @@ export class ChatbotService {
         audioEnabled,
         visionEnabled,
         visionPrompt,
+        leadAutoExtract,
+        leadVehicleTable: leadVehicleTable as unknown as Prisma.InputJsonValue,
+        leadPriceTable: leadPriceTable as unknown as Prisma.InputJsonValue,
+        leadSurchargeTable: leadSurchargeTable as unknown as Prisma.InputJsonValue,
         aiFallbackProvider: input.aiFallbackProvider ?? null,
         aiFallbackApiKey: input.aiFallbackApiKey?.trim() || null,
         aiFallbackModel: input.aiFallbackModel?.trim() || null,
@@ -275,6 +320,10 @@ export class ChatbotService {
         audioEnabled,
         visionEnabled,
         visionPrompt,
+        leadAutoExtract,
+        leadVehicleTable: leadVehicleTable as unknown as Prisma.InputJsonValue,
+        leadPriceTable: leadPriceTable as unknown as Prisma.InputJsonValue,
+        leadSurchargeTable: leadSurchargeTable as unknown as Prisma.InputJsonValue,
         aiFallbackProvider: input.aiFallbackProvider ?? null,
         aiFallbackApiKey: input.aiFallbackApiKey?.trim() || null,
         aiFallbackModel: input.aiFallbackModel?.trim() || null,
@@ -385,6 +434,10 @@ public async simulate(
             audioEnabled: false,
             visionEnabled: false,
             visionPrompt: null,
+            leadAutoExtract: false,
+            leadVehicleTable: {},
+            leadPriceTable: {},
+            leadSurchargeTable: {},
             rules: [],
             ai: this.buildRuntimeAiConfig(defaultAiSettings, managedAiProvider),
             aiFallbackProvider: null,
@@ -509,6 +562,10 @@ private async evaluateConfig(
       audioEnabled?: boolean | null;
       visionEnabled?: boolean | null;
       visionPrompt?: string | null;
+      leadAutoExtract?: boolean | null;
+      leadVehicleTable?: unknown;
+      leadPriceTable?: unknown;
+      leadSurchargeTable?: unknown;
       rules: unknown;
       aiSettings?: unknown;
       createdAt: Date;
@@ -539,6 +596,19 @@ private async evaluateConfig(
       audioEnabled: record.audioEnabled ?? false,
       visionEnabled: record.visionEnabled ?? false,
       visionPrompt: record.visionPrompt ?? null,
+      leadAutoExtract: record.leadAutoExtract ?? false,
+      leadVehicleTable:
+        record.leadVehicleTable && typeof record.leadVehicleTable === "object"
+          ? (record.leadVehicleTable as Record<string, unknown>)
+          : {},
+      leadPriceTable:
+        record.leadPriceTable && typeof record.leadPriceTable === "object"
+          ? (record.leadPriceTable as Record<string, unknown>)
+          : {},
+      leadSurchargeTable:
+        record.leadSurchargeTable && typeof record.leadSurchargeTable === "object"
+          ? (record.leadSurchargeTable as Record<string, unknown>)
+          : {},
       rules: chatbotRulesArraySchema.parse(record.rules),
       ai: this.buildRuntimeAiConfig(aiSettings, managedAiProvider),
       aiFallbackProvider: normalizeFallbackProvider(record.aiFallbackProvider),
@@ -571,6 +641,267 @@ private async evaluateConfig(
     });
 
     return parsed as unknown as Prisma.InputJsonValue;
+  }
+
+  public extractLeadFromConversation(
+    messages: ChatMessage[],
+    phoneNumber: string,
+    config: Pick<ChatbotConfig, "leadVehicleTable" | "leadPriceTable" | "leadSurchargeTable">
+  ): ExtractedLeadFromConversation | null {
+    const userMessages = messages
+      .filter((message) => message.role === "user")
+      .map((message) => message.content.trim())
+      .filter(Boolean);
+
+    if (userMessages.length === 0) {
+      return null;
+    }
+
+    const nome = this.extractLeadName(userMessages);
+    const vehicleMatch = this.extractLeadVehicle(userMessages, config.leadVehicleTable);
+    const servico = this.extractLeadService(userMessages);
+    const horario = this.extractLeadSchedule(userMessages);
+    const sujeira = this.inferLeadDirtLevel(userMessages);
+
+    if (!nome || !vehicleMatch || !servico) {
+      return null;
+    }
+
+    const basePrice = this.lookupLeadTableValue(config.leadPriceTable, vehicleMatch.porte, servico);
+
+    if (basePrice === null) {
+      return null;
+    }
+
+    const surcharge =
+      sujeira === "Média" || sujeira === "Pesada"
+        ? this.lookupLeadTableValue(config.leadSurchargeTable, vehicleMatch.porte, sujeira) ?? 0
+        : 0;
+
+    return {
+      nome,
+      contato: phoneNumber,
+      veiculo: vehicleMatch.model,
+      porte: vehicleMatch.porte,
+      servico,
+      horario,
+      sujeira,
+      valorEstimado: Number((basePrice + surcharge).toFixed(2))
+    };
+  }
+
+  private extractLeadName(userMessages: string[]): string | null {
+    const patterns = [
+      /(?:meu nome(?:\s+e|\s+é)?|me chamo|pode me chamar de)\s+([A-Za-zÀ-ÖØ-öø-ÿ' -]{2,80})/iu,
+      /(?:^|\b)sou\s+([A-Za-zÀ-ÖØ-öø-ÿ' -]{2,80})/iu
+    ];
+
+    for (const message of [...userMessages].reverse()) {
+      for (const pattern of patterns) {
+        const match = message.match(pattern);
+
+        if (!match?.[1]) {
+          continue;
+        }
+
+        const candidate = match[1]
+          .split(/[\n,.;!?]|(?:\s+(?:e|mas|porque|que|quero|preciso|tenho|estou)\b)/iu)[0]
+          ?.replace(/\s+/g, " ")
+          .trim();
+
+        if (!candidate || candidate.length < 2 || /\d/.test(candidate)) {
+          continue;
+        }
+
+        return candidate;
+      }
+    }
+
+    return null;
+  }
+
+  private extractLeadVehicle(
+    userMessages: string[],
+    leadVehicleTable: ChatbotConfig["leadVehicleTable"]
+  ): { model: string; porte: LeadPorte } | null {
+    const entries = Object.entries(leadVehicleTable ?? {})
+      .map(([model, porte]) => ({
+        model: model.trim(),
+        normalizedModel: normalizeLeadLookup(model),
+        porte: this.normalizeLeadPorte(porte)
+      }))
+      .filter(
+        (entry): entry is { model: string; normalizedModel: string; porte: LeadPorte } =>
+          Boolean(entry.model && entry.normalizedModel && entry.porte)
+      );
+
+    if (entries.length === 0) {
+      return null;
+    }
+
+    const normalizedMessages = userMessages.map((message) => normalizeLeadLookup(message));
+    let bestMatch: { model: string; porte: LeadPorte; score: number } | null = null;
+
+    for (const entry of entries) {
+      for (const normalizedMessage of normalizedMessages) {
+        if (normalizedMessage.includes(entry.normalizedModel)) {
+          const score = entry.normalizedModel.length;
+          if (!bestMatch || score > bestMatch.score) {
+            bestMatch = {
+              model: entry.model,
+              porte: entry.porte,
+              score
+            };
+          }
+          continue;
+        }
+
+        const tokens = entry.normalizedModel.split(" ").filter(Boolean);
+        if (tokens.length < 2 || !tokens.every((token) => normalizedMessage.includes(token))) {
+          continue;
+        }
+
+        const score = tokens.join(" ").length;
+        if (!bestMatch || score > bestMatch.score) {
+          bestMatch = {
+            model: entry.model,
+            porte: entry.porte,
+            score
+          };
+        }
+      }
+    }
+
+    return bestMatch
+      ? {
+          model: bestMatch.model,
+          porte: bestMatch.porte
+        }
+      : null;
+  }
+
+  private extractLeadService(userMessages: string[]): LeadServiceLevel | null {
+    for (const message of [...userMessages].reverse()) {
+      const normalized = normalizeLeadLookup(message);
+
+      if (/\bdetalhada\b/.test(normalized)) {
+        return "Detalhada";
+      }
+      if (/\bcompleta\b/.test(normalized)) {
+        return "Completa";
+      }
+      if (/\bessencial\b/.test(normalized)) {
+        return "Essencial";
+      }
+    }
+
+    return null;
+  }
+
+  private extractLeadSchedule(userMessages: string[]): string | null {
+    const patterns = [
+      /\b\d{1,2}\/\d{1,2}(?:\/\d{2,4})?(?:\s*(?:as|às|a)?\s*\d{1,2}(?::\d{2})?\s*(?:h|hs|horas?)?)?/i,
+      /\b\d{1,2}(?::\d{2})?\s*(?:h|hs|horas?)\b/i,
+      /\b(?:amanhã|amanha|hoje|segunda(?:-feira)?|ter[çc]a(?:-feira)?|quarta(?:-feira)?|quinta(?:-feira)?|sexta(?:-feira)?|s[aá]bado|domingo)(?:[^\n,.!?;]{0,40})?/i
+    ];
+
+    for (const message of [...userMessages].reverse()) {
+      for (const pattern of patterns) {
+        const match = message.match(pattern);
+        if (match?.[0]) {
+          return match[0].trim();
+        }
+      }
+    }
+
+    return null;
+  }
+
+  private inferLeadDirtLevel(userMessages: string[]): LeadDirtLevel | null {
+    const corpus = normalizeLeadLookup(userMessages.join(" "));
+
+    if (/\b(barro|lama|graxa|pesada|muito sujo|muito suja)\b/.test(corpus)) {
+      return "Pesada";
+    }
+    if (/\b(sujo|suja|sujeira|media|medio)\b/.test(corpus)) {
+      return "Média";
+    }
+    if (/\b(leve|levemente|pouca sujeira)\b/.test(corpus)) {
+      return "Leve";
+    }
+
+    return null;
+  }
+
+  private normalizeLeadPorte(value: unknown): LeadPorte | null {
+    const normalized = normalizeLeadLookup(String(value ?? ""));
+
+    if (normalized === "pequeno") {
+      return "Pequeno";
+    }
+    if (normalized === "medio") {
+      return "Médio";
+    }
+    if (normalized === "grande") {
+      return "Grande";
+    }
+    if (normalized === "g especial" || normalized === "gespecial") {
+      return "G.Especial";
+    }
+
+    return null;
+  }
+
+  private lookupLeadTableValue(table: unknown, rowKey: string, columnKey: string): number | null {
+    if (!table || typeof table !== "object") {
+      return null;
+    }
+
+    const normalizedRowKey = normalizeLeadLookup(rowKey);
+    const rowEntry = Object.entries(table as Record<string, unknown>).find(
+      ([key]) => normalizeLeadLookup(key) === normalizedRowKey
+    );
+
+    if (!rowEntry || !rowEntry[1] || typeof rowEntry[1] !== "object") {
+      return null;
+    }
+
+    const normalizedColumnKey = normalizeLeadLookup(columnKey);
+    const columnEntry = Object.entries(rowEntry[1] as Record<string, unknown>).find(
+      ([key]) => normalizeLeadLookup(key) === normalizedColumnKey
+    );
+
+    if (!columnEntry) {
+      return null;
+    }
+
+    return this.parseLeadMoneyValue(columnEntry[1]);
+  }
+
+  private parseLeadMoneyValue(value: unknown): number | null {
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return value;
+    }
+
+    if (typeof value !== "string") {
+      return null;
+    }
+
+    const sanitized = value.replace(/[^\d,.-]/g, "").trim();
+
+    if (!sanitized) {
+      return null;
+    }
+
+    const normalized =
+      sanitized.includes(",") && sanitized.includes(".")
+        ? sanitized.replace(/\./g, "").replace(",", ".")
+        : sanitized.includes(",")
+          ? sanitized.replace(",", ".")
+          : sanitized;
+
+    const parsed = Number(normalized);
+    return Number.isFinite(parsed) ? parsed : null;
   }
 
   private async evaluateWithAi(

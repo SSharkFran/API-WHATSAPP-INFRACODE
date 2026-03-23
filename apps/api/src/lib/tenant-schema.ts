@@ -106,11 +106,13 @@ export const buildTenantSchemaSql = (schemaName: string): string[] => {
       "assignedToUserId" TEXT,
       "status" TEXT NOT NULL DEFAULT 'OPEN',
       "tags" TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
+      "leadSent" BOOLEAN NOT NULL DEFAULT FALSE,
       "slaDeadlineAt" TIMESTAMPTZ,
       "lastMessageAt" TIMESTAMPTZ,
       "createdAt" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       "updatedAt" TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );`,
+    `ALTER TABLE ${schema}."Conversation" ADD COLUMN IF NOT EXISTS "leadSent" BOOLEAN NOT NULL DEFAULT FALSE;`,
     `CREATE INDEX IF NOT EXISTS "idx_${schemaName}_conversation_status" ON ${schema}."Conversation" ("status");`,
     `CREATE TABLE IF NOT EXISTS ${schema}."MessageTemplate" (
       "id" TEXT PRIMARY KEY,
@@ -140,6 +142,10 @@ export const buildTenantSchemaSql = (schemaName: string): string[] => {
       "audioEnabled" BOOLEAN NOT NULL DEFAULT FALSE,
       "visionEnabled" BOOLEAN NOT NULL DEFAULT FALSE,
       "visionPrompt" TEXT,
+      "leadAutoExtract" BOOLEAN NOT NULL DEFAULT FALSE,
+      "leadVehicleTable" JSONB NOT NULL DEFAULT '{}'::JSONB,
+      "leadPriceTable" JSONB NOT NULL DEFAULT '{}'::JSONB,
+      "leadSurchargeTable" JSONB NOT NULL DEFAULT '{}'::JSONB,
       "modules" JSONB NOT NULL DEFAULT '{}'::JSONB,
       "createdAt" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       "updatedAt" TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -157,6 +163,10 @@ export const buildTenantSchemaSql = (schemaName: string): string[] => {
     `ALTER TABLE ${schema}."ChatbotConfig" ADD COLUMN IF NOT EXISTS "audioEnabled" BOOLEAN NOT NULL DEFAULT FALSE;`,
     `ALTER TABLE ${schema}."ChatbotConfig" ADD COLUMN IF NOT EXISTS "visionEnabled" BOOLEAN NOT NULL DEFAULT FALSE;`,
     `ALTER TABLE ${schema}."ChatbotConfig" ADD COLUMN IF NOT EXISTS "visionPrompt" TEXT;`,
+    `ALTER TABLE ${schema}."ChatbotConfig" ADD COLUMN IF NOT EXISTS "leadAutoExtract" BOOLEAN NOT NULL DEFAULT FALSE;`,
+    `ALTER TABLE ${schema}."ChatbotConfig" ADD COLUMN IF NOT EXISTS "leadVehicleTable" JSONB NOT NULL DEFAULT '{}'::JSONB;`,
+    `ALTER TABLE ${schema}."ChatbotConfig" ADD COLUMN IF NOT EXISTS "leadPriceTable" JSONB NOT NULL DEFAULT '{}'::JSONB;`,
+    `ALTER TABLE ${schema}."ChatbotConfig" ADD COLUMN IF NOT EXISTS "leadSurchargeTable" JSONB NOT NULL DEFAULT '{}'::JSONB;`,
     `ALTER TABLE ${schema}."ChatbotConfig" ADD COLUMN IF NOT EXISTS "modules" JSONB NOT NULL DEFAULT '{}'::JSONB;`,
     `CREATE TABLE IF NOT EXISTS ${schema}."AuditLog" (
       "id" TEXT PRIMARY KEY,

@@ -126,6 +126,7 @@ model Conversation {
   assignedToUserId String?
   status           String   @default("OPEN")
   tags             String[] @default([])
+  leadSent         Boolean  @default(false)
   slaDeadlineAt    DateTime?
   lastMessageAt    DateTime?
   createdAt        DateTime @default(now())
@@ -165,6 +166,10 @@ model ChatbotConfig {
   audioEnabled     Boolean  @default(false)
   visionEnabled    Boolean  @default(false)
   visionPrompt     String?
+  leadAutoExtract  Boolean  @default(false)
+  leadVehicleTable Json     @default("{}")
+  leadPriceTable   Json     @default("{}")
+  leadSurchargeTable Json   @default("{}")
   modules          Json     @default("{}")
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt

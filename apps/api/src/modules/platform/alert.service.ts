@@ -111,15 +111,19 @@ export class PlatformAlertService {
     instanceName: string,
     leadSummary: string,
     senderPhoneNumber: string
-  ): Promise<void> {
+  ): Promise<boolean> {
+    const alertMessage = `📋 *Novo lead — InfraCode*\n\nTenant: ${tenantId}\nInstância: ${instanceName}\n\n${leadSummary}`;
+    return this.alertLeadMessage(alertMessage, senderPhoneNumber);
+  }
+
+  async alertLeadMessage(alertMessage: string, senderPhoneNumber: string): Promise<boolean> {
     const config = await this.getConfig();
-    if (!config?.adminAlertPhone || !config.alertNewLead) return;
+    if (!config?.adminAlertPhone || !config.alertNewLead) return false;
 
     const phone = config.adminAlertPhone;
-    let alertMessage = `📋 *Novo lead — InfraCode*\n\nTenant: ${tenantId}\nInstância: ${instanceName}\n\n${leadSummary}`;
-    alertMessage = alertMessage.replace(/\{\{numero\}\}/g, senderPhoneNumber);
+    const renderedMessage = alertMessage.replace(/\{\{numero\}\}/g, senderPhoneNumber);
 
-    await this.sendAdminAlert(phone, alertMessage);
+    return this.sendAdminAlert(phone, renderedMessage);
   }
 
   async alertCriticalError(
@@ -198,12 +202,12 @@ export class PlatformAlertService {
     };
   }
 
-  private async sendAdminAlert(phone: string, message: string): Promise<void> {
+  private async sendAdminAlert(phone: string, message: string): Promise<boolean> {
     try {
       const sender = await this.getAnyConnectedInstance();
       if (!sender) {
         console.warn("[alert] nenhuma instância disponível para enviar alerta admin");
-        return;
+        return false;
       }
 
       await this.instanceOrchestrator.sendMessage(sender.tenantId, sender.instanceId, {
@@ -212,8 +216,10 @@ export class PlatformAlertService {
         targetJid: `${phone}@s.whatsapp.net`,
         text: message
       });
+      return true;
     } catch (err) {
       console.error("[alert] erro ao enviar alerta admin:", err);
+      return false;
     }
   }
 }

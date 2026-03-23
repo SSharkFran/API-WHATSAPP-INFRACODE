@@ -32,6 +32,10 @@ interface ChatbotFormState {
   audioEnabled: boolean;
   visionEnabled: boolean;
   visionPrompt: string;
+  leadAutoExtract: boolean;
+  leadVehicleTable: string;
+  leadPriceTable: string;
+  leadSurchargeTable: string;
   rules: ChatbotRule[];
   ai: {
     isEnabled: boolean;
@@ -91,6 +95,10 @@ const buildDefaultFormState = (): ChatbotFormState => ({
   audioEnabled: false,
   visionEnabled: false,
   visionPrompt: "",
+  leadAutoExtract: false,
+  leadVehicleTable: "",
+  leadPriceTable: "",
+  leadSurchargeTable: "",
   rules: [],
   ai: {
     isEnabled: false,
@@ -118,6 +126,38 @@ const buildSimulationFormState = (): SimulationFormState => ({
   phoneNumber: "5511999999999"
 });
 
+const formatJsonTextarea = (value?: Record<string, unknown>): string => {
+  if (!value || Object.keys(value).length === 0) {
+    return "";
+  }
+
+  return JSON.stringify(value, null, 2);
+};
+
+const parseJsonTextarea = (value: string, label: string): Record<string, unknown> => {
+  const trimmed = value.trim();
+
+  if (!trimmed) {
+    return {};
+  }
+
+  try {
+    const parsed = JSON.parse(trimmed) as unknown;
+
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      throw new Error(`${label} deve ser um objeto JSON válido.`);
+    }
+
+    return parsed as Record<string, unknown>;
+  } catch (error) {
+    if (error instanceof Error && error.message.includes("deve ser um objeto JSON válido")) {
+      throw error;
+    }
+
+    throw new Error(`${label} deve ser um objeto JSON válido.`);
+  }
+};
+
 const mapConfigToFormState = (config: ChatbotConfig): ChatbotFormState => ({
   isEnabled: config.isEnabled,
   welcomeMessage: config.welcomeMessage ?? "",
@@ -128,6 +168,10 @@ const mapConfigToFormState = (config: ChatbotConfig): ChatbotFormState => ({
   audioEnabled: config.audioEnabled ?? false,
   visionEnabled: config.visionEnabled ?? false,
   visionPrompt: config.visionPrompt ?? "",
+  leadAutoExtract: config.leadAutoExtract ?? false,
+  leadVehicleTable: formatJsonTextarea(config.leadVehicleTable),
+  leadPriceTable: formatJsonTextarea(config.leadPriceTable),
+  leadSurchargeTable: formatJsonTextarea(config.leadSurchargeTable),
   rules: config.rules,
   ai: {
     isEnabled: config.ai.isEnabled,
@@ -269,6 +313,10 @@ export const ChatbotStudio = ({ initialInstances }: ChatbotStudioProps) => {
     if (!selectedInstance) return;
     setPendingAction("save"); setError(null); setSuccess(null);
     try {
+      const leadVehicleTable = parseJsonTextarea(formState.leadVehicleTable, "Tabela de Veículos (JSON)");
+      const leadPriceTable = parseJsonTextarea(formState.leadPriceTable, "Tabela de Preços (JSON)");
+      const leadSurchargeTable = parseJsonTextarea(formState.leadSurchargeTable, "Tabela de Acréscimos por Sujeira (JSON)");
+
       const saved = await requestClientApi<ChatbotConfig>(`/instances/${selectedInstance.id}/chatbot`, {
         method: "PUT",
         body: {
@@ -281,6 +329,10 @@ export const ChatbotStudio = ({ initialInstances }: ChatbotStudioProps) => {
           audioEnabled: formState.audioEnabled,
           visionEnabled: formState.visionEnabled,
           visionPrompt: formState.visionPrompt.trim() || null,
+          leadAutoExtract: formState.leadAutoExtract,
+          leadVehicleTable,
+          leadPriceTable,
+          leadSurchargeTable,
           rules: formState.rules.map((rule) => ({
             ...rule,
             matchValue: rule.triggerType === "FIRST_CONTACT" ? null : rule.matchValue?.trim() || null,
@@ -308,22 +360,6 @@ export const ChatbotStudio = ({ initialInstances }: ChatbotStudioProps) => {
     } finally {
       setPendingAction(null);
     }
-  };
-
-  const saveLeadsPhone = async () => {
-    if (!selectedInstance) return;
-    setPendingAction("save-leads-phone"); setError(null); setSuccess(null);
-    try {
-      const saved = await requestClientApi<ChatbotConfig>(`/instances/${selectedInstance.id}/chatbot/leads-phone`, {
-        method: "PATCH",
-        body: { leadsPhoneNumber: formState.leadsPhoneNumber.trim() || null, leadsEnabled: formState.leadsEnabled }
-      });
-      setLastSavedConfig(saved); setFormState(mapConfigToFormState(saved));
-      setSuccess("Configuração de leads salva.");
-      startTransition(() => { router.refresh(); });
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Falha ao salvar leads.");
-    } finally { setPendingAction(null); }
   };
 
   const clearFiado = async (phoneNumber: string) => {
@@ -770,6 +806,56 @@ export const ChatbotStudio = ({ initialInstances }: ChatbotStudioProps) => {
                 <span className="text-sm text-[var(--text-secondary)] select-none">Enviar resumo de leads</span>
               </label>
 
+              <div className="space-y-2">
+                <label className="flex items-center gap-2.5 cursor-pointer">
+                  <span className="relative inline-flex h-6 w-11 items-center rounded-full cursor-pointer transition-colors duration-200"
+                    style={{ background: formState.leadAutoExtract ? "var(--accent-green)" : "var(--bg-active)" }}>
+                    <input type="checkbox" className="sr-only" checked={formState.leadAutoExtract}
+                      onChange={(e) => setFormState((c) => ({ ...c, leadAutoExtract: e.target.checked }))} />
+                    <span className={["inline-block h-4 w-4 rounded-full bg-white shadow-sm transition-transform duration-200",
+                      formState.leadAutoExtract ? "translate-x-6" : "translate-x-1"].join(" ")} />
+                  </span>
+                  <span className="text-sm text-[var(--text-secondary)] select-none">Extração automática de lead</span>
+                </label>
+                <p className="text-xs leading-relaxed text-[var(--text-tertiary)]">
+                  O sistema detecta automaticamente Nome, Veículo e Serviço na conversa e envia o lead sem depender da IA gerar o bloco
+                </p>
+              </div>
+
+              {formState.leadAutoExtract && (
+                <>
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-medium text-[var(--text-secondary)]">Tabela de Veículos (JSON)</label>
+                    <textarea
+                      className={[textareaClass, "min-h-[180px]"].join(" ")}
+                      placeholder='{"civic": "Médio", "hilux": "Grande", "onix": "Pequeno"}'
+                      value={formState.leadVehicleTable}
+                      onChange={(e) => setFormState((c) => ({ ...c, leadVehicleTable: e.target.value }))}
+                    />
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-medium text-[var(--text-secondary)]">Tabela de Preços (JSON)</label>
+                    <textarea
+                      className={[textareaClass, "min-h-[180px]"].join(" ")}
+                      placeholder='{"Pequeno": {"Essencial": 120, "Completa": 150, "Detalhada": 360}, "Médio": {...}}'
+                      value={formState.leadPriceTable}
+                      onChange={(e) => setFormState((c) => ({ ...c, leadPriceTable: e.target.value }))}
+                    />
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-medium text-[var(--text-secondary)]">Tabela de Acréscimos por Sujeira (JSON)</label>
+                    <textarea
+                      className={[textareaClass, "min-h-[180px]"].join(" ")}
+                      placeholder='{"Pequeno": {"Média": 30, "Pesada": 60}, "Médio": {"Média": 50, "Pesada": 100}}'
+                      value={formState.leadSurchargeTable}
+                      onChange={(e) => setFormState((c) => ({ ...c, leadSurchargeTable: e.target.value }))}
+                    />
+                  </div>
+                </>
+              )}
+
               <label className="flex items-center gap-2.5 cursor-pointer">
                 <span className="relative inline-flex h-6 w-11 items-center rounded-full cursor-pointer transition-colors duration-200"
                   style={{ background: formState.fiadoEnabled ? "var(--accent-green)" : "var(--bg-active)" }}>
@@ -781,8 +867,8 @@ export const ChatbotStudio = ({ initialInstances }: ChatbotStudioProps) => {
                 <span className="text-sm text-[var(--text-secondary)] select-none">Ativar controle de fiado</span>
               </label>
 
-              <Button variant="primary" size="md" loading={pendingAction === "save-leads-phone"}
-                disabled={pendingAction !== null || !selectedInstance} onClick={() => void saveLeadsPhone()}>
+              <Button variant="primary" size="md" loading={pendingAction === "save"}
+                disabled={pendingAction !== null || !selectedInstance} onClick={() => void saveConfig()}>
                 <Save aria-hidden="true" className="h-3.5 w-3.5" /> Salvar configuração de leads
               </Button>
             </div>

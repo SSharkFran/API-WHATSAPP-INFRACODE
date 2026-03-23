@@ -53,6 +53,14 @@ interface ExtractedLeadFromConversation {
   valorEstimado: number;
 }
 
+interface ExtractedLeadAiPayload {
+  nome: string | null;
+  veiculo: string | null;
+  servico: LeadServiceLevel | null;
+  horario: string | null;
+  sujeira: LeadDirtLevel | null;
+}
+
 interface OpenAiToolCall {
   id: string;
   type?: string;
@@ -145,24 +153,37 @@ const normalizeLeadLookup = (value: string): string =>
     .replace(/[^a-z0-9]+/g, " ")
     .trim()
     .replace(/\s+/g, " ");
-const leadVehicleKeywordFallbacks: Array<{ pattern: RegExp; porte: LeadPorte }> = [
+const leadVehiclePorteKeywordFallbacks: Array<{ keywords: string[]; porte: LeadPorte }> = [
   {
-    pattern: /(?:^|[^\p{L}\p{N}])(caminhonete|picape|pickup)(?=$|[^\p{L}\p{N}])/iu,
+    keywords: ["caminhonete", "picape", "pickup"],
     porte: "Grande"
   },
   {
-    pattern: /(?:^|[^\p{L}\p{N}])(carro|sedan)(?=$|[^\p{L}\p{N}])/iu,
+    keywords: ["carro", "sedan", "hatch"],
     porte: "Médio"
   },
   {
-    pattern: /(?:^|[^\p{L}\p{N}])(mototaxi|moto)(?=$|[^\p{L}\p{N}])/iu,
-    porte: "Pequeno"
+    keywords: ["caminhao", "truck"],
+    porte: "G.Especial"
   },
   {
-    pattern: /(?:^|[^\p{L}\p{N}])(caminhao|caminhão|truck)(?=$|[^\p{L}\p{N}])/iu,
-    porte: "G.Especial"
+    keywords: ["moto"],
+    porte: "Pequeno"
   }
 ];
+const leadExtractionAiSystemPrompt = [
+  "You are a data extraction assistant. Analyze the conversation and return ONLY a valid JSON object with no extra text, no markdown, no explanation.",
+  "",
+  "Extract these fields:",
+  "- nome: the client's name (string or null)",
+  "- veiculo: the vehicle model or type mentioned (string or null)",
+  '- servico: the service chosen - must be exactly \"Essencial\", \"Completa\", or \"Detalhada\" (string or null)',
+  "- horario: any time or date preference mentioned (string or null)",
+  '- sujeira: dirt level inferred from conversation - \"Leve\", \"Média\", \"Pesada\", or null',
+  "",
+  "Return null for any field not clearly present in the conversation.",
+  "Return ONLY the JSON object, nothing else."
+].join("\n");
 
 const matchesRule = (rule: ChatbotRule, normalizedInput: string, isFirstContact: boolean): boolean => {
   if (!rule.isActive) {
@@ -661,218 +682,211 @@ private async evaluateConfig(
     return parsed as unknown as Prisma.InputJsonValue;
   }
 
-  public extractLeadFromConversation(
+  public async extractLeadWithAi(
     messages: ChatMessage[],
     phoneNumber: string,
-    config: Pick<ChatbotConfig, "leadVehicleTable" | "leadPriceTable" | "leadSurchargeTable">
-  ): ExtractedLeadFromConversation | null {
-    const userMessages = messages
-      .filter((message) => message.role === "user")
-      .map((message) => message.content.trim())
-      .filter(Boolean);
+    chatbotConfig: ChatbotConfig & { __tenantId?: string }
+  ): Promise<ExtractedLeadFromConversation | null> {
+    const transcript = this.buildLeadExtractionTranscript(messages);
+    const tenantId = chatbotConfig.__tenantId?.trim();
 
-    if (userMessages.length === 0) {
+    if (!tenantId || !transcript) {
       return null;
     }
 
-    const nome = this.extractLeadName(userMessages);
-    const vehicleMatch = this.extractLeadVehicle(userMessages, config.leadVehicleTable);
-    const servico = this.extractLeadService(userMessages);
-    const horario = this.extractLeadSchedule(userMessages);
-    const sujeira = this.inferLeadDirtLevel(userMessages);
+    const managedAiProvider = await this.getManagedAiProvider(tenantId);
 
-    if (!nome || !vehicleMatch || !servico) {
+    if (
+      !managedAiProvider.isConfigured ||
+      !managedAiProvider.isActive ||
+      !managedAiProvider.provider ||
+      !managedAiProvider.model.trim() ||
+      !managedAiProvider.apiKeyEncrypted
+    ) {
       return null;
     }
 
-    const basePrice = this.lookupLeadTableValue(config.leadPriceTable, vehicleMatch.porte, servico);
-
-    if (basePrice === null) {
-      return null;
-    }
-
-    const surcharge =
-      sujeira === "Média" || sujeira === "Pesada"
-        ? this.lookupLeadTableValue(config.leadSurchargeTable, vehicleMatch.porte, sujeira) ?? 0
-        : 0;
-
-    return {
-      nome,
-      contato: phoneNumber,
-      veiculo: vehicleMatch.model,
-      porte: vehicleMatch.porte,
-      servico,
-      horario,
-      sujeira,
-      valorEstimado: Number((basePrice + surcharge).toFixed(2))
-    };
-  }
-
-  private extractLeadName(userMessages: string[]): string | null {
-    const patterns = [
-      /(?:meu nome(?:\s+e|\s+é)?|me chamo|pode me chamar de)\s+([A-Za-zÀ-ÖØ-öø-ÿ' -]{2,80})/iu,
-      /(?:^|\b)sou\s+([A-Za-zÀ-ÖØ-öø-ÿ' -]{2,80})/iu
-    ];
-
-    for (const message of [...userMessages].reverse()) {
-      for (const pattern of patterns) {
-        const match = message.match(pattern);
-
-        if (!match?.[1]) {
-          continue;
-        }
-
-        const candidate = match[1]
-          .split(/[\n,.;!?]|(?:\s+(?:e|mas|porque|que|quero|preciso|tenho|estou)\b)/iu)[0]
-          ?.replace(/\s+/g, " ")
-          .trim();
-
-        if (!candidate || candidate.length < 2 || /\d/.test(candidate)) {
-          continue;
-        }
-
-        return candidate;
-      }
-    }
-
-    return null;
-  }
-
-  private extractLeadVehicle(
-    userMessages: string[],
-    leadVehicleTable: ChatbotConfig["leadVehicleTable"]
-  ): { model: string; porte: LeadPorte } | null {
-    const entries = Object.entries(leadVehicleTable ?? {})
-      .map(([model, porte]) => ({
-        model: model.trim(),
-        normalizedModel: normalizeLeadLookup(model),
-        porte: this.normalizeLeadPorte(porte)
-      }))
-      .filter(
-        (entry): entry is { model: string; normalizedModel: string; porte: LeadPorte } =>
-          Boolean(entry.model && entry.normalizedModel && entry.porte)
+    try {
+      const apiKey = decrypt(managedAiProvider.apiKeyEncrypted, this.config.API_ENCRYPTION_KEY);
+      const responseText = await this.callAiWithFallback(
+        tenantId,
+        managedAiProvider,
+        apiKey,
+        {
+          system: leadExtractionAiSystemPrompt,
+          messages: [
+            {
+              role: "user",
+              content: transcript
+            }
+          ]
+        },
+        0,
+        chatbotConfig
       );
 
-    const normalizedMessages = userMessages.map((message) => normalizeLeadLookup(message));
-    let bestMatch: { model: string; porte: LeadPorte; score: number } | null = null;
-
-    for (const entry of entries) {
-      for (const normalizedMessage of normalizedMessages) {
-        if (normalizedMessage.includes(entry.normalizedModel)) {
-          const score = entry.normalizedModel.length;
-          if (!bestMatch || score > bestMatch.score) {
-            bestMatch = {
-              model: entry.model,
-              porte: entry.porte,
-              score
-            };
-          }
-          continue;
-        }
-
-        const tokens = entry.normalizedModel.split(" ").filter(Boolean);
-        if (tokens.length < 2 || !tokens.every((token) => normalizedMessage.includes(token))) {
-          continue;
-        }
-
-        const score = tokens.join(" ").length;
-        if (!bestMatch || score > bestMatch.score) {
-          bestMatch = {
-            model: entry.model,
-            porte: entry.porte,
-            score
-          };
-        }
+      if (!responseText) {
+        return null;
       }
-    }
 
-    return bestMatch
-      ? {
-          model: bestMatch.model,
-          porte: bestMatch.porte
-        }
-      : this.extractLeadGenericVehicle(userMessages);
+      const extractedLead = this.parseLeadExtractionResponse(responseText);
+
+      if (!extractedLead?.nome || !extractedLead.veiculo || !extractedLead.servico) {
+        return null;
+      }
+
+      const porte =
+        this.lookupLeadVehiclePorte(extractedLead.veiculo, chatbotConfig.leadVehicleTable) ??
+        this.inferLeadPorteFromVehicle(extractedLead.veiculo);
+
+      if (!porte) {
+        return null;
+      }
+
+      const basePrice = this.lookupLeadTableValue(chatbotConfig.leadPriceTable, porte, extractedLead.servico);
+
+      if (basePrice === null) {
+        return null;
+      }
+
+      const surcharge =
+        extractedLead.sujeira === "Média" || extractedLead.sujeira === "Pesada"
+          ? this.lookupLeadTableValue(chatbotConfig.leadSurchargeTable, porte, extractedLead.sujeira) ?? 0
+          : 0;
+
+      return {
+        nome: extractedLead.nome,
+        contato: phoneNumber,
+        veiculo: extractedLead.veiculo,
+        porte,
+        servico: extractedLead.servico,
+        horario: extractedLead.horario,
+        sujeira: extractedLead.sujeira,
+        valorEstimado: Number((basePrice + surcharge).toFixed(2))
+      };
+    } catch (error) {
+      console.error("[chatbot:lead-ai] erro ao extrair lead:", error);
+      return null;
+    }
   }
 
-  private extractLeadGenericVehicle(userMessages: string[]): { model: string; porte: LeadPorte } | null {
-    for (const message of [...userMessages].reverse()) {
-      for (const fallback of leadVehicleKeywordFallbacks) {
-        const match = message.match(fallback.pattern);
+  private buildLeadExtractionTranscript(messages: ChatMessage[]): string {
+    return messages
+      .map((message) => {
+        const content = message.content.trim();
 
-        if (!match?.[1]) {
-          continue;
+        if (!content) {
+          return null;
         }
 
-        return {
-          model: this.formatLeadVehicleLabel(match[1]),
-          porte: fallback.porte
-        };
+        return `${message.role === "user" ? "Cliente" : "Atendente"}: ${content}`;
+      })
+      .filter((message): message is string => Boolean(message))
+      .join("\n");
+  }
+
+  private parseLeadExtractionResponse(responseText: string): ExtractedLeadAiPayload | null {
+    const sanitizedResponse = responseText
+      .trim()
+      .replace(/^```json\s*/i, "")
+      .replace(/^```\s*/i, "")
+      .replace(/\s*```$/i, "");
+
+    try {
+      const parsed = JSON.parse(sanitizedResponse) as Record<string, unknown> | null;
+
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        return null;
       }
+
+      return {
+        nome: this.parseNullableLeadString(parsed.nome),
+        veiculo: this.parseNullableLeadString(parsed.veiculo),
+        servico: this.normalizeLeadServiceValue(parsed.servico),
+        horario: this.parseNullableLeadString(parsed.horario),
+        sujeira: this.normalizeLeadDirtLevel(parsed.sujeira)
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  private parseNullableLeadString(value: unknown): string | null {
+    if (typeof value !== "string") {
+      return null;
+    }
+
+    const trimmed = value.replace(/\s+/g, " ").trim();
+
+    if (!trimmed) {
+      return null;
+    }
+
+    const normalized = normalizeLeadLookup(trimmed);
+    return normalized === "null" || normalized === "nao informado" ? null : trimmed;
+  }
+
+  private normalizeLeadServiceValue(value: unknown): LeadServiceLevel | null {
+    const normalized = normalizeLeadLookup(String(value ?? ""));
+
+    if (normalized === "essencial") {
+      return "Essencial";
+    }
+    if (normalized === "completa") {
+      return "Completa";
+    }
+    if (normalized === "detalhada") {
+      return "Detalhada";
     }
 
     return null;
   }
 
-  private formatLeadVehicleLabel(value: string): string {
-    const normalizedValue = value.replace(/\s+/g, " ").trim();
+  private normalizeLeadDirtLevel(value: unknown): LeadDirtLevel | null {
+    const normalized = normalizeLeadLookup(String(value ?? ""));
 
-    if (!normalizedValue) {
-      return normalizedValue;
+    if (normalized === "leve") {
+      return "Leve";
     }
-
-    return normalizedValue === normalizedValue.toLowerCase()
-      ? normalizedValue.charAt(0).toLocaleUpperCase("pt-BR") + normalizedValue.slice(1)
-      : normalizedValue;
-  }
-
-  private extractLeadService(userMessages: string[]): LeadServiceLevel | null {
-    for (const message of [...userMessages].reverse()) {
-      const normalized = normalizeLeadLookup(message);
-
-      if (/\bdetalhada\b/.test(normalized)) {
-        return "Detalhada";
-      }
-      if (/\bcompleta\b/.test(normalized)) {
-        return "Completa";
-      }
-      if (/\bessencial\b/.test(normalized)) {
-        return "Essencial";
-      }
-    }
-
-    return null;
-  }
-
-  private extractLeadSchedule(userMessages: string[]): string | null {
-    const patterns = [
-      /\b\d{1,2}\/\d{1,2}(?:\/\d{2,4})?(?:\s*(?:as|às|a)?\s*\d{1,2}(?::\d{2})?\s*(?:h|hs|horas?)?)?/i,
-      /\b\d{1,2}(?::\d{2})?\s*(?:h|hs|horas?)\b/i,
-      /\b(?:amanhã|amanha|hoje|segunda(?:-feira)?|ter[çc]a(?:-feira)?|quarta(?:-feira)?|quinta(?:-feira)?|sexta(?:-feira)?|s[aá]bado|domingo)(?:[^\n,.!?;]{0,40})?/i
-    ];
-
-    for (const message of [...userMessages].reverse()) {
-      for (const pattern of patterns) {
-        const match = message.match(pattern);
-        if (match?.[0]) {
-          return match[0].trim();
-        }
-      }
-    }
-
-    return null;
-  }
-
-  private inferLeadDirtLevel(userMessages: string[]): LeadDirtLevel | null {
-    const corpus = normalizeLeadLookup(userMessages.join(" "));
-
-    if (/\b(barro|lama|graxa|pesada|muito sujo|muito suja)\b/.test(corpus)) {
-      return "Pesada";
-    }
-    if (/\b(sujo|suja|sujeira|media|medio)\b/.test(corpus)) {
+    if (normalized === "media") {
       return "Média";
     }
-    if (/\b(leve|levemente|pouca sujeira)\b/.test(corpus)) {
-      return "Leve";
+    if (normalized === "pesada") {
+      return "Pesada";
+    }
+
+    return null;
+  }
+
+  private lookupLeadVehiclePorte(vehicle: string, leadVehicleTable: ChatbotConfig["leadVehicleTable"]): LeadPorte | null {
+    if (!leadVehicleTable || typeof leadVehicleTable !== "object") {
+      return null;
+    }
+
+    const normalizedVehicle = normalizeLeadLookup(vehicle);
+
+    if (!normalizedVehicle) {
+      return null;
+    }
+
+    const match = Object.entries(leadVehicleTable).find(
+      ([model]) => normalizeLeadLookup(model) === normalizedVehicle
+    );
+
+    return match ? this.normalizeLeadPorte(match[1]) : null;
+  }
+
+  private inferLeadPorteFromVehicle(vehicle: string): LeadPorte | null {
+    const normalizedVehicle = normalizeLeadLookup(vehicle);
+
+    if (!normalizedVehicle) {
+      return null;
+    }
+
+    for (const fallback of leadVehiclePorteKeywordFallbacks) {
+      if (fallback.keywords.some((keyword) => normalizedVehicle.includes(keyword))) {
+        return fallback.porte;
+      }
     }
 
     return null;

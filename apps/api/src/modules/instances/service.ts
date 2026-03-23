@@ -1340,13 +1340,10 @@ if (event.status === "CONNECTED") {
 
       if ((chatbotConfig?.leadAutoExtract ?? false) && !session.leadAlreadySent) {
         const conversationMessages = await this.loadConversationMessages(prisma, instance.id, event.remoteJid);
-        const extractedLead = this.chatbotService.extractLeadFromConversation(conversationMessages, resolvedContactNumber, {
-          leadVehicleTable:
-            (chatbotConfig?.leadVehicleTable as Record<string, unknown> | undefined) ?? {},
-          leadPriceTable:
-            (chatbotConfig?.leadPriceTable as Record<string, unknown> | undefined) ?? {},
-          leadSurchargeTable:
-            (chatbotConfig?.leadSurchargeTable as Record<string, unknown> | undefined) ?? {}
+        const resolvedChatbotConfig = await this.chatbotService.getConfig(tenantId, instance.id);
+        const extractedLead = await this.chatbotService.extractLeadWithAi(conversationMessages, resolvedContactNumber, {
+          ...resolvedChatbotConfig,
+          __tenantId: tenantId
         });
 
         if (extractedLead) {

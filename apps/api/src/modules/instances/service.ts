@@ -22,7 +22,7 @@ import { ConversationAgent } from "../chatbot/agents/conversation.agent.js";
 import { FiadoAgent } from "../chatbot/agents/fiado.agent.js";
 import { MemoryAgent } from "../chatbot/agents/memory.agent.js";
 import { AdminMemoryService } from "../chatbot/admin-memory.service.js";
-import type { ChatMessage, ConversationSession, LeadData } from "../chatbot/agents/types.js";
+import type { ChatMessage, ConversationSession as BaseConversationSession, LeadData } from "../chatbot/agents/types.js";
 import type { ClientMemoryService } from "../chatbot/memory.service.js";
 import type { ChatbotService } from "../chatbot/service.js";
 import type { PlanEnforcementService } from "../platform/plan-enforcement.service.js";
@@ -143,9 +143,40 @@ interface CreateInstanceInput {
   autoStart: boolean;
 }
 
+interface PendingConversationTurnContext {
+  tenantId: string;
+  instance: Instance;
+  targetJid: string;
+  remoteNumber: string;
+  resolvedContactNumber: string;
+  contactPhoneNumber: string;
+  contactDisplayName: string | null;
+  contactFields: Record<string, unknown> | null;
+  chatbotConfig: {
+    leadsPhoneNumber?: string | null;
+    leadsEnabled?: boolean | null;
+    fiadoEnabled?: boolean | null;
+    audioEnabled?: boolean | null;
+    visionEnabled?: boolean | null;
+    visionPrompt?: string | null;
+    leadAutoExtract?: boolean | null;
+  } | null;
+  conversationId: string;
+  conversationPhoneNumber: string | null;
+  isFirstContact: boolean;
+}
+
+interface ConversationSession extends BaseConversationSession {
+  pendingInputs: string[];
+  pendingContext: PendingConversationTurnContext | null;
+  debounceTimer: NodeJS.Timeout | null;
+  isProcessing: boolean;
+  flushAfterProcessing: boolean;
+}
+
 const buildWorkerKey = (tenantId: string, instanceId: string): string => `${tenantId}:${instanceId}`;
 const leadExtractionAwaitingTimeoutMs = 120_000;
-const initialAiResponseDelayMs = 15_000;
+const initialAiResponseDelayMs = 10_000;
 const formatCurrencyValue = (value: number): string =>
   new Intl.NumberFormat("pt-BR", {
     minimumFractionDigits: 2,
@@ -1189,7 +1220,7 @@ if (event.status === "CONNECTED") {
           remoteJid: event.remoteJid
         }
       });
-      this.conversationSessions.delete(sessionKey);
+      this.clearConversationSession(sessionKey);
 
       await this.sendAutomatedTextMessage(
         tenantId,
@@ -1537,13 +1568,13 @@ if (event.status === "CONNECTED") {
           remoteJid: event.remoteJid
         }
       });
-      this.conversationSessions.delete(sessionKey);
+      this.clearConversationSession(sessionKey);
 
       return;
     }
 
     if (isFirstContact) {
-      this.conversationSessions.delete(sessionKey);
+      this.clearConversationSession(sessionKey);
     }
 
     await prisma.message.create({
@@ -1749,11 +1780,6 @@ if (event.status === "CONNECTED") {
         return;
       }
 
-      const { contextString } = await this.memoryAgent.getContext({
-        tenantId,
-        phoneNumber: resolvedContactNumber
-      });
-
       if (!finalInputText) {
         if (imageMsg && (chatbotConfig?.visionEnabled ?? false)) {
           finalInputText = "[O cliente enviou uma imagem. Aguardando análise.]";
@@ -1762,6 +1788,23 @@ if (event.status === "CONNECTED") {
         }
       }
 
+      this.queueConversationTurn(session, finalInputText, {
+        tenantId,
+        instance,
+        targetJid: event.remoteJid,
+        remoteNumber,
+        resolvedContactNumber,
+        contactPhoneNumber: contact.phoneNumber ?? remoteNumber,
+        contactDisplayName: contact.displayName ?? null,
+        contactFields,
+        chatbotConfig,
+        conversationId: activeConversation.id,
+        conversationPhoneNumber: activeConversation.phoneNumber,
+        isFirstContact
+      });
+      return;
+
+      /*
       this.appendConversationHistory(session, "user", finalInputText);
 
       const fiadoResponse = await this.fiadoAgent.process({
@@ -2029,6 +2072,7 @@ if (event.status === "CONNECTED") {
           }
         })();
       }
+      */
     } catch (error) {
       this.emitLog(buildWorkerKey(tenantId, instance.id), {
         context: {
@@ -2054,6 +2098,17 @@ if (event.status === "CONNECTED") {
     return `${instanceId}:${remoteJid}`;
   }
 
+  private clearConversationSession(sessionKey: string): void {
+    const session = this.conversationSessions.get(sessionKey);
+
+    if (session?.debounceTimer) {
+      clearTimeout(session.debounceTimer);
+      session.debounceTimer = null;
+    }
+
+    this.conversationSessions.delete(sessionKey);
+  }
+
   private async getConversationSession(
     prisma: Awaited<ReturnType<TenantPrismaRegistry["getClient"]>>,
     sessionKey: string,
@@ -2072,7 +2127,12 @@ if (event.status === "CONNECTED") {
     if (!loadStoredHistory) {
       const session: ConversationSession = {
         history: [],
-        leadAlreadySent
+        leadAlreadySent,
+        pendingInputs: [],
+        pendingContext: null,
+        debounceTimer: null,
+        isProcessing: false,
+        flushAfterProcessing: false
       };
 
       this.conversationSessions.set(sessionKey, session);
@@ -2112,7 +2172,12 @@ if (event.status === "CONNECTED") {
 
     const session: ConversationSession = {
       history: history.slice(-20),
-      leadAlreadySent
+      leadAlreadySent,
+      pendingInputs: [],
+      pendingContext: null,
+      debounceTimer: null,
+      isProcessing: false,
+      flushAfterProcessing: false
     };
 
     this.conversationSessions.set(sessionKey, session);
@@ -2165,6 +2230,373 @@ if (event.status === "CONNECTED") {
     }
   }
 
+  private queueConversationTurn(
+    session: ConversationSession,
+    inputText: string,
+    context: PendingConversationTurnContext
+  ): void {
+    const trimmedInput = inputText.trim();
+
+    if (!trimmedInput) {
+      return;
+    }
+
+    session.pendingInputs.push(trimmedInput);
+    session.pendingContext = session.pendingContext
+      ? {
+          ...session.pendingContext,
+          ...context,
+          isFirstContact: session.pendingContext.isFirstContact || context.isFirstContact
+        }
+      : context;
+
+    if (session.debounceTimer) {
+      clearTimeout(session.debounceTimer);
+    }
+
+    session.debounceTimer = setTimeout(() => {
+      session.debounceTimer = null;
+
+      if (session.isProcessing) {
+        session.flushAfterProcessing = true;
+        return;
+      }
+
+      void this.processQueuedConversationTurn(session);
+    }, initialAiResponseDelayMs);
+  }
+
+  private async processQueuedConversationTurn(session: ConversationSession): Promise<void> {
+    if (session.isProcessing || session.pendingInputs.length === 0 || !session.pendingContext) {
+      return;
+    }
+
+    const combinedInput = session.pendingInputs.join("\n").trim();
+    const context = session.pendingContext;
+
+    session.pendingInputs = [];
+    session.pendingContext = null;
+    session.isProcessing = true;
+    session.flushAfterProcessing = false;
+
+    try {
+      await this.processConversationTurn({
+        ...context,
+        inputText: combinedInput,
+        session
+      });
+    } catch (error) {
+      this.emitLog(buildWorkerKey(context.tenantId, context.instance.id), {
+        context: {
+          error: error instanceof Error ? error.message : "unknown"
+        },
+        instanceId: context.instance.id,
+        level: "warn",
+        message: "Falha ao processar resposta automatica do chatbot",
+        timestamp: new Date().toISOString()
+      });
+
+      this.platformAlertService?.alertCriticalError(
+        context.tenantId,
+        context.instance.id,
+        error instanceof Error ? error.message : "Erro desconhecido no chatbot"
+      ).catch((err) => {
+        console.error("[orchestrator] erro ao alertar erro critico:", err);
+      });
+    } finally {
+      session.isProcessing = false;
+
+      if (session.flushAfterProcessing && session.pendingInputs.length > 0 && !session.debounceTimer) {
+        void this.processQueuedConversationTurn(session);
+      }
+    }
+  }
+
+  private async processConversationTurn(params: PendingConversationTurnContext & {
+    inputText: string;
+    session: ConversationSession;
+  }): Promise<void> {
+    const prisma = await this.tenantPrismaRegistry.getClient(params.tenantId);
+    const clientMemory = await this.clientMemoryService.findByPhone(params.tenantId, params.resolvedContactNumber);
+    const platformConfig = await this.platformPrisma.platformConfig.findUnique({
+      where: { id: "singleton" }
+    });
+    const adminPhone = platformConfig?.adminAlertPhone ?? null;
+
+    if (clientMemory?.tags.includes("paused_by_human")) {
+      return;
+    }
+
+    const { contextString } = await this.memoryAgent.getContext({
+      tenantId: params.tenantId,
+      phoneNumber: params.resolvedContactNumber
+    });
+
+    this.appendConversationHistory(params.session, "user", params.inputText);
+
+    const fiadoResponse = await this.fiadoAgent.process({
+      message: params.inputText,
+      phoneNumber: params.resolvedContactNumber,
+      tenantId: params.tenantId,
+      instanceId: params.instance.id,
+      displayName: params.contactDisplayName,
+      fiadoEnabled: params.chatbotConfig?.fiadoEnabled ?? false
+    });
+
+    if (fiadoResponse) {
+      await this.memoryAgent.update({
+        tenantId: params.tenantId,
+        phoneNumber: params.resolvedContactNumber,
+        clientMessage: params.inputText
+      });
+      await this.sendConversationWithDelay({
+        tenantId: params.tenantId,
+        instanceId: params.instance.id,
+        remoteNumber: params.resolvedContactNumber,
+        targetJid: params.targetJid,
+        text: fiadoResponse,
+        metadata: {
+          action: "fiado_agent",
+          kind: "chatbot"
+        },
+        session: params.session
+      });
+      return;
+    }
+
+    const chatbotResult = await this.conversationAgent.reply({
+      tenantId: params.tenantId,
+      instanceId: params.instance.id,
+      message: params.inputText,
+      history: params.session.history,
+      clientContext: contextString,
+      isFirstContact: params.isFirstContact,
+      contactName: undefined,
+      phoneNumber: params.contactPhoneNumber ?? params.remoteNumber,
+      remoteJid: params.targetJid
+    });
+
+    if (chatbotResult?.action === "HUMAN_HANDOFF") {
+      await this.clientMemoryService.upsert(params.tenantId, params.resolvedContactNumber, {
+        lastContactAt: new Date(),
+        tags: [...new Set<ClientMemoryTag>([...(clientMemory?.tags ?? []), "paused_by_human"])]
+      });
+
+      if (adminPhone) {
+        await this.sendMessage(params.tenantId, params.instance.id, {
+          type: "text",
+          to: adminPhone,
+          text: `Transbordo humano solicitado pelo cliente ${params.resolvedContactNumber}. O bot foi pausado para este contato.`
+        });
+      }
+      return;
+    }
+
+    const rawResponse = chatbotResult?.responseText ?? null;
+
+    if (!rawResponse) {
+      await this.memoryAgent.update({
+        tenantId: params.tenantId,
+        phoneNumber: params.resolvedContactNumber,
+        clientMessage: params.inputText
+      });
+      return;
+    }
+
+    const resumoMatch = rawResponse.match(/\[RESUMO_LEAD\][\s\S]*?\[\/RESUMO_LEAD\]/);
+    const resumoLead = resumoMatch ? resumoMatch[0] : null;
+    const clientText = rawResponse.replace(/\[RESUMO_LEAD\][\s\S]*?\[\/RESUMO_LEAD\]/, "").trim();
+
+    console.log("[chatbot] rawResponse:", rawResponse.slice(0, 300));
+    console.log("[chatbot] resumoDetectado:", !!resumoLead);
+    console.log("[chatbot] clientText:", clientText.slice(0, 300));
+
+    let leadData: LeadData | null = null;
+
+    if (resumoLead) {
+      const leadsPhone = params.chatbotConfig?.leadsPhoneNumber;
+      const leadsEnabled = params.chatbotConfig?.leadsEnabled ?? true;
+
+      const camposObrigatorios = [
+        /Nome:\s*(?!nÃ£o informado|nao informado|\(nome\))/i,
+        /ServiÃ§o de interesse:\s*(?!nÃ£o informado|nao informado)/i
+      ];
+      const camposOk = camposObrigatorios.every((r) => r.test(resumoLead));
+
+      if (camposOk) {
+        const nomeMatch = resumoLead.match(/Nome:\s*(.+)/i);
+        const contatoMatch = resumoLead.match(/Contato:\s*(.+)/i);
+        const emailMatch = resumoLead.match(/E-mail:\s*(.+)/i);
+        const empresaMatch = resumoLead.match(/Empresa:\s*(.+)/i);
+        const problemaMatch = resumoLead.match(/Problema:\s*(.+)/i);
+        const servicoMatch = resumoLead.match(/ServiÃ§o de interesse:\s*(.+)/i);
+        const horarioMatch = resumoLead.match(/HorÃ¡rio agendado:\s*(.+)/i);
+
+        leadData = {
+          rawSummary: resumoLead,
+          name: nomeMatch ? nomeMatch[1].trim() : null,
+          contact: contatoMatch ? contatoMatch[1].trim() : params.remoteNumber,
+          email: emailMatch ? emailMatch[1].trim() : null,
+          companyName: empresaMatch ? empresaMatch[1].trim() : null,
+          problemDescription: problemaMatch ? problemaMatch[1].trim() : null,
+          serviceInterest: servicoMatch ? servicoMatch[1].trim() : null,
+          scheduledText: horarioMatch ? horarioMatch[1].trim() : null,
+          scheduledAt: null,
+          isComplete: true
+        };
+      }
+
+      if (leadData?.isComplete && leadsPhone && leadsEnabled) {
+        const hashInput = [
+          leadData?.name ?? "",
+          leadData?.serviceInterest ?? "",
+          params.resolvedContactNumber
+        ].join("|");
+        const hash = Buffer.from(hashInput).toString("base64").slice(0, 32);
+        const dedupeKey = `leads:dedup:${params.instance.id}:${params.remoteNumber}:${hash}`;
+        const jaEnviado = await this.redis.get(dedupeKey).catch(() => null);
+
+        if (!jaEnviado) {
+          await this.redis.set(dedupeKey, "1", "EX", 86400);
+          const leadsJid = `${leadsPhone}@s.whatsapp.net`;
+          await this.sendAutomatedTextMessage(
+            params.tenantId,
+            params.instance.id,
+            leadsPhone,
+            leadsJid,
+            `ðŸ”” Novo lead agendado:\n\n${resumoLead}`,
+            { action: "lead_summary", kind: "chatbot" }
+          );
+
+          const summaryAlertSent =
+            (await this.platformAlertService?.alertNewLead(
+              params.tenantId,
+              params.instance.name,
+              resumoLead,
+              params.resolvedContactNumber
+            ).catch((err) => {
+              console.error("[orchestrator] erro ao alertar novo lead:", err);
+              return false;
+            })) ?? false;
+
+          if (summaryAlertSent) {
+            await this.markConversationLeadSent(prisma, params.conversationId, params.session);
+          }
+        } else {
+          console.log("[leads] resumo duplicado ignorado");
+        }
+      } else if (!leadData?.isComplete) {
+        console.log("[leads] resumo incompleto, nao enviado:", resumoLead.slice(0, 100));
+      }
+    }
+
+    await this.memoryAgent.update({
+      tenantId: params.tenantId,
+      phoneNumber: params.resolvedContactNumber,
+      clientMessage: params.inputText,
+      leadData
+    });
+
+    if (leadData?.isComplete && (!params.chatbotConfig?.leadsPhoneNumber || params.chatbotConfig.leadsEnabled === false)) {
+      this.emitLog(buildWorkerKey(params.tenantId, params.instance.id), {
+        context: {
+          instanceId: params.instance.id
+        },
+        instanceId: params.instance.id,
+        level: "warn",
+        message: "Resumo de lead gerado, mas leadsPhoneNumber nao configurado ou leadsEnabled=false",
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    if (!clientText.trim()) {
+      return;
+    }
+
+    if (clientText.includes("|||")) {
+      const partes = clientText.split("|||").map((p) => p.trim()).filter(Boolean);
+      for (const parte of partes) {
+        await this.sendAutomatedTextMessage(
+          params.tenantId,
+          params.instance.id,
+          params.remoteNumber,
+          params.targetJid,
+          parte,
+          { action: "conversation_agent", kind: "chatbot" }
+        );
+        this.appendConversationHistory(params.session, "assistant", parte);
+        const delayDigitacao = Math.floor(Math.random() * 1000) + 1500;
+        await new Promise((resolve) => setTimeout(resolve, delayDigitacao));
+      }
+    } else {
+      await this.sendAutomatedTextMessage(
+        params.tenantId,
+        params.instance.id,
+        params.remoteNumber,
+        params.targetJid,
+        clientText,
+        { action: "conversation_agent", kind: "chatbot" }
+      );
+      this.appendConversationHistory(params.session, "assistant", clientText);
+    }
+
+    const leadAutoExtractValue = params.chatbotConfig?.leadAutoExtract as unknown;
+    const leadAutoExtractEnabled = leadAutoExtractValue === true || leadAutoExtractValue === "true";
+    const responseText = clientText.replace(/\|\|\|/g, " ");
+    const isClosing = /consultor|agendamento|em instantes|encaminhei|entrar.{0,20}contato/i.test(responseText ?? "");
+
+    if (leadAutoExtractEnabled && isClosing && !params.session.leadAlreadySent) {
+      await prisma.conversation.update({
+        where: {
+          id: params.conversationId
+        },
+        data: {
+          awaitingLeadExtraction: true
+        } as Prisma.ConversationUncheckedUpdateInput
+      });
+
+      void (async () => {
+        try {
+          const resolvedChatbotConfig = await this.chatbotService.getConfig(params.tenantId, params.instance.id);
+          const senderRemoteJid =
+            /@(s\.whatsapp\.net|c\.us)$/i.test(params.targetJid)
+              ? params.targetJid
+              : typeof params.contactFields?.sharedPhoneJid === "string" && params.contactFields.sharedPhoneJid.trim()
+                ? params.contactFields.sharedPhoneJid.trim()
+                : params.conversationPhoneNumber
+                    ? toJid(params.conversationPhoneNumber)
+                    : "";
+          console.log("[lead:phone] source variable:", JSON.stringify(senderRemoteJid || params.targetJid));
+          const senderPhone =
+            String(senderRemoteJid ?? "")
+              .replace(/@s\.whatsapp\.net$/i, "")
+              .replace(/@c\.us$/i, "")
+              .replace(/@.*$/, "")
+              .replace(/\D/g, "");
+          console.log("[lead:phone] passing to processLead:", JSON.stringify(senderPhone));
+          await this.chatbotService.processLeadAfterConversation(
+            params.conversationId,
+            {
+              ...resolvedChatbotConfig,
+              __tenantId: params.tenantId
+            },
+            senderPhone
+          );
+        } catch (error) {
+          console.error("[lead] erro na extraÃ§Ã£o:", error);
+          await prisma.conversation.update({
+            where: {
+              id: params.conversationId
+            },
+            data: {
+              awaitingLeadExtraction: false
+            } as Prisma.ConversationUncheckedUpdateInput
+          });
+        }
+      })();
+    }
+  }
+
   private async sendConversationWithDelay(params: {
     tenantId: string;
     instanceId: string;
@@ -2182,8 +2614,6 @@ if (event.status === "CONNECTED") {
     if (responseParts.length === 0) {
       return;
     }
-
-    await new Promise((resolve) => setTimeout(resolve, initialAiResponseDelayMs));
 
     for (const [index, responsePart] of responseParts.entries()) {
       await this.sendAutomatedTextMessage(

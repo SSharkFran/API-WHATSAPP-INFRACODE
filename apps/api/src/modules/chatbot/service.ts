@@ -742,7 +742,10 @@ private async evaluateConfig(
         conversation.contact?.phoneNumber ||
         phoneNumber ||
         remoteJid;
-      const cleanPhone = (rawPhone ?? "").replace("@s.whatsapp.net", "").replace(/\D/g, "");
+      const cleanPhone = (rawPhone ?? "")
+        .replace(/@s\.whatsapp\.net$/i, "")
+        .replace(/@.*$/, "")
+        .replace(/\D/g, "");
       console.log("[lead] phoneNumber limpo:", cleanPhone);
       const messages = await this.loadLeadConversationMessages(prisma, conversation.instanceId, remoteJid);
       const extracted = await this.extractLeadWithAi(messages, cleanPhone, chatbotConfig);

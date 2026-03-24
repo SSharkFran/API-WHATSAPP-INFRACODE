@@ -1200,12 +1200,17 @@ if (event.status === "CONNECTED") {
           }
         });
 
+    if (isFirstContact) {
+      this.conversationSessions.delete(sessionKey);
+    }
+
     const session = await this.getConversationSession(
       prisma,
       sessionKey,
       instance.id,
       event.remoteJid,
-      activeConversation.leadSent
+      activeConversation.leadSent,
+      !isFirstContact
     );
 
     await prisma.message.create({
@@ -1683,13 +1688,24 @@ if (event.status === "CONNECTED") {
     sessionKey: string,
     instanceId: string,
     remoteJid: string,
-    leadAlreadySent: boolean
+    leadAlreadySent: boolean,
+    loadStoredHistory = true
   ): Promise<ConversationSession> {
     const existingSession = this.conversationSessions.get(sessionKey);
 
     if (existingSession) {
       existingSession.leadAlreadySent = existingSession.leadAlreadySent || leadAlreadySent;
       return existingSession;
+    }
+
+    if (!loadStoredHistory) {
+      const session: ConversationSession = {
+        history: [],
+        leadAlreadySent
+      };
+
+      this.conversationSessions.set(sessionKey, session);
+      return session;
     }
 
     const records = await prisma.message.findMany({

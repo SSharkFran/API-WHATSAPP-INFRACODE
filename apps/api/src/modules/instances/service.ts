@@ -331,7 +331,7 @@ export class InstanceOrchestrator {
   public async pauseInstance(tenantId: string, instanceId: string): Promise<InstanceSummary> {
     const prisma = await this.tenantPrismaRegistry.getClient(tenantId);
     await this.requireInstanceWithUsage(tenantId, instanceId);
-    await this.stopWorker(tenantId, instanceId, true);
+    await this.stopWorker(tenantId, instanceId, "pause");
 
     const updated = await prisma.instance.update({
       where: { id: instanceId },
@@ -355,28 +355,18 @@ export class InstanceOrchestrator {
   }
 
   /**
-   * Limpa a sessao persistida e reinicia a instancia para gerar um novo QR code.
+   * Desconecta a sessao ativa do WhatsApp e limpa os artefatos locais.
    */
-  public async resetSession(tenantId: string, instanceId: string): Promise<InstanceSummary> {
+  public async disconnectInstance(tenantId: string, instanceId: string): Promise<InstanceSummary> {
     const prisma = await this.tenantPrismaRegistry.getClient(tenantId);
     const instance = await this.requireInstanceWithUsage(tenantId, instanceId);
 
-    await this.stopWorker(tenantId, instanceId, false);
-
-    await rm(instance.authDirectory, {
-      recursive: true,
-      force: true
-    });
-    await rm(instance.sessionDbPath, {
-      force: true
-    });
-
-    await mkdir(instance.authDirectory, { recursive: true });
-    await mkdir(dirname(instance.sessionDbPath), { recursive: true });
+    await this.stopWorker(tenantId, instanceId, "logout");
+    await this.clearInstanceSessionStorage(instance);
 
     this.latestQrCodes.delete(buildWorkerKey(tenantId, instanceId));
 
-    const reset = await prisma.instance.update({
+    const updated = await prisma.instance.update({
       where: { id: instanceId },
       data: {
         status: "DISCONNECTED",
@@ -390,9 +380,23 @@ export class InstanceOrchestrator {
       include: { usage: true }
     });
 
-    this.metricsService.setInstanceStatus(reset.id, tenantId, reset.status);
+    this.metricsService.setInstanceStatus(updated.id, tenantId, updated.status);
+    return this.mapInstanceSummary(tenantId, updated);
+  }
 
+  /**
+   * Limpa a sessao persistida e reinicia a instancia para gerar um novo QR code.
+   */
+  public async reconnectInstance(tenantId: string, instanceId: string): Promise<InstanceSummary> {
+    await this.disconnectInstance(tenantId, instanceId);
     return this.startInstance(tenantId, instanceId);
+  }
+
+  /**
+   * Limpa a sessao persistida e reinicia a instancia para gerar um novo QR code.
+   */
+  public async resetSession(tenantId: string, instanceId: string): Promise<InstanceSummary> {
+    return this.reconnectInstance(tenantId, instanceId);
   }
 
   /**
@@ -401,7 +405,7 @@ export class InstanceOrchestrator {
   public async deleteInstance(tenantId: string, instanceId: string): Promise<void> {
     const prisma = await this.tenantPrismaRegistry.getClient(tenantId);
     await this.requireInstanceWithUsage(tenantId, instanceId);
-    await this.stopWorker(tenantId, instanceId, false);
+    await this.stopWorker(tenantId, instanceId, "shutdown");
     await prisma.instance.delete({
       where: { id: instanceId }
     });
@@ -675,7 +679,7 @@ export class InstanceOrchestrator {
   public async close(): Promise<void> {
     for (const workerKey of [...this.workers.keys()]) {
       const [tenantId, instanceId] = workerKey.split(":");
-      await this.stopWorker(tenantId ?? "", instanceId ?? "", false);
+      await this.stopWorker(tenantId ?? "", instanceId ?? "", "shutdown");
     }
   }
 
@@ -750,7 +754,24 @@ export class InstanceOrchestrator {
     });
   }
 
-  private async stopWorker(tenantId: string, instanceId: string, paused: boolean): Promise<void> {
+  private async clearInstanceSessionStorage(instance: Pick<Instance, "authDirectory" | "sessionDbPath">): Promise<void> {
+    await rm(instance.authDirectory, {
+      recursive: true,
+      force: true
+    });
+    await rm(instance.sessionDbPath, {
+      force: true
+    });
+
+    await mkdir(instance.authDirectory, { recursive: true });
+    await mkdir(dirname(instance.sessionDbPath), { recursive: true });
+  }
+
+  private async stopWorker(
+    tenantId: string,
+    instanceId: string,
+    mode: "pause" | "shutdown" | "logout"
+  ): Promise<void> {
     const workerKey = buildWorkerKey(tenantId, instanceId);
     const managedWorker = this.workers.get(workerKey);
 
@@ -758,7 +779,7 @@ export class InstanceOrchestrator {
       return;
     }
 
-    managedWorker.paused = paused;
+    managedWorker.paused = mode === "pause";
 
     await new Promise<void>((resolve) => {
       let finished = false;
@@ -774,7 +795,7 @@ export class InstanceOrchestrator {
 
       managedWorker.worker.once("exit", finish);
       managedWorker.worker.postMessage({
-        type: paused ? "pause" : "shutdown"
+        type: mode
       });
 
       setTimeout(() => {

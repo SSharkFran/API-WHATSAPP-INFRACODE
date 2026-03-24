@@ -45,7 +45,7 @@ interface DownloadMediaCommand {
 }
 
 interface LifecycleCommand {
-  type: "pause" | "shutdown";
+  type: "pause" | "shutdown" | "logout";
 }
 
 type IncomingCommand = RpcCommand | DownloadMediaCommand | LifecycleCommand;
@@ -701,11 +701,24 @@ parentPort?.on("message", async (command: IncomingCommand) => {
   }
 
   stopping = true;
+
+  if (command.type === "logout") {
+    try {
+      await socket?.logout();
+    } catch (error) {
+      log("warn", "Falha ao executar logout do Baileys", {
+        error: error instanceof Error ? error.message : "unknown"
+      });
+    }
+  }
+
   await disconnectSocket();
   closeAuthStore?.();
 
   if (command.type === "pause") {
     emitStatus("PAUSED");
+  } else {
+    emitStatus("DISCONNECTED");
   }
 
   process.exit(0);

@@ -160,6 +160,88 @@ export const registerInstanceRoutes = async (app: FastifyInstance): Promise<void
   );
 
   app.post(
+    "/instances/:instanceId/disconnect",
+    {
+      config: {
+        auth: "tenant",
+        allowApiKey: true,
+        requiredScopes: ["write"]
+      },
+      schema: {
+        tags: ["Instances"],
+        summary: "Desconecta a sessao do WhatsApp e limpa os arquivos locais",
+        params: instanceResetSessionParamsSchema
+      }
+    },
+    async (request) => {
+      const tenantId = requireTenantId(request);
+      const params = instanceResetSessionParamsSchema.parse(request.params);
+      const instance = await app.instanceOrchestrator.disconnectInstance(tenantId, params.instanceId);
+      const tenantPrisma = await app.tenantPrismaRegistry.getClient(tenantId);
+      await recordPlatformAuditLog(
+        app.platformPrisma,
+        request,
+        "instance.disconnect",
+        "Instance",
+        params.instanceId,
+        {},
+        app.config.JWT_SECRET
+      );
+      await recordTenantAuditLog(
+        tenantPrisma,
+        request,
+        "instance.disconnect",
+        "Instance",
+        params.instanceId,
+        {},
+        app.config.JWT_SECRET
+      );
+      return instance;
+    }
+  );
+
+  app.post(
+    "/instances/:instanceId/reconnect",
+    {
+      config: {
+        auth: "tenant",
+        allowApiKey: true,
+        requiredScopes: ["write"]
+      },
+      schema: {
+        tags: ["Instances"],
+        summary: "Limpa a sessao da instancia e gera um novo QR code",
+        params: instanceResetSessionParamsSchema
+      }
+    },
+    async (request) => {
+      const tenantId = requireTenantId(request);
+      const params = instanceResetSessionParamsSchema.parse(request.params);
+      const instance = await app.instanceOrchestrator.reconnectInstance(tenantId, params.instanceId);
+      const tenantPrisma = await app.tenantPrismaRegistry.getClient(tenantId);
+      await recordPlatformAuditLog(
+        app.platformPrisma,
+        request,
+        "instance.reconnect",
+        "Instance",
+        params.instanceId,
+        {},
+        app.config.JWT_SECRET
+      );
+      await recordTenantAuditLog(
+        tenantPrisma,
+        request,
+        "instance.reconnect",
+        "Instance",
+        params.instanceId,
+        {},
+        app.config.JWT_SECRET
+      );
+      return instance;
+    }
+  );
+
+  app.post(
     "/instances/:instanceId/reset-session",
     {
       config: {

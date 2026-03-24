@@ -8,7 +8,7 @@ import { QrModal } from "./qr-modal";
 import { Badge } from "../ui/Badge";
 import { Button } from "../ui/Button";
 import { EmptyState } from "../ui/EmptyState";
-import { Server, QrCode, Play, RotateCcw, Pause, Trash2, MessageSquare, Clock, AlertCircle } from "lucide-react";
+import { Server, QrCode, Play, RotateCcw, RefreshCcw, Pause, Trash2, MessageSquare, Clock, AlertCircle, LogOut } from "lucide-react";
 
 interface InstanceGridProps {
   instances: InstanceSummary[];
@@ -68,7 +68,10 @@ export const InstanceGrid = ({ instances }: InstanceGridProps) => {
     [instances]
   );
 
-  const runAction = async (instanceId: string, action: "start" | "pause" | "restart" | "delete") => {
+  const runAction = async (
+    instanceId: string,
+    action: "start" | "pause" | "restart" | "disconnect" | "reconnect" | "delete"
+  ) => {
     setPendingInstanceId(instanceId);
     try {
       if (action === "delete") {
@@ -191,6 +194,12 @@ export const InstanceGrid = ({ instances }: InstanceGridProps) => {
                 </Button>
                 <Button variant="ghost" size="sm" disabled={isPending} onClick={() => void runAction(instance.id, "restart")}>
                   <RotateCcw aria-hidden="true" className="h-3.5 w-3.5" /> Reiniciar
+                </Button>
+                <Button variant="ghost" size="sm" disabled={isPending} onClick={() => void runAction(instance.id, "disconnect")}>
+                  <LogOut aria-hidden="true" className="h-3.5 w-3.5" /> Desconectar
+                </Button>
+                <Button variant="ghost" size="sm" disabled={isPending} onClick={() => void runAction(instance.id, "reconnect")}>
+                  <RefreshCcw aria-hidden="true" className="h-3.5 w-3.5" /> Reconectar
                 </Button>
                 <Button variant="ghost" size="sm" disabled={isPending} onClick={() => void runAction(instance.id, "pause")}>
                   <Pause aria-hidden="true" className="h-3.5 w-3.5" /> Pausar

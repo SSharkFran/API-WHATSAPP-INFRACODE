@@ -165,7 +165,7 @@ export const TenantOnboardingWorkbench = ({
     }
   };
 
-  const runInstanceAction = async (action: "start" | "restart" | "pause") => {
+  const runInstanceAction = async (action: "start" | "restart" | "pause" | "disconnect" | "reconnect") => {
     if (!selectedInstance) {
       return;
     }
@@ -183,7 +183,19 @@ export const TenantOnboardingWorkbench = ({
       const nextHealth = await requestClientApi<InstanceHealthReport>(`/instances/${selectedInstance.id}/health`);
       setHealth(nextHealth);
       await refreshOnboarding();
-      setSuccess(`Instancia ${action === "start" ? "iniciada" : action === "restart" ? "reiniciada" : "pausada"} com sucesso.`);
+      setSuccess(
+        `Instancia ${
+          action === "start"
+            ? "iniciada"
+            : action === "restart"
+              ? "reiniciada"
+              : action === "pause"
+                ? "pausada"
+                : action === "disconnect"
+                  ? "desconectada"
+                  : "reconectada"
+        } com sucesso.`
+      );
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Falha ao executar a acao.");
     } finally {
@@ -364,6 +376,12 @@ export const TenantOnboardingWorkbench = ({
                       </Button>
                       <Button className="rounded-2xl" disabled={pendingAction !== null} onClick={() => void runInstanceAction("restart")} variant="ghost">
                         Reiniciar
+                      </Button>
+                      <Button className="rounded-2xl" disabled={pendingAction !== null} onClick={() => void runInstanceAction("disconnect")} variant="ghost">
+                        Desconectar
+                      </Button>
+                      <Button className="rounded-2xl" disabled={pendingAction !== null} onClick={() => void runInstanceAction("reconnect")} variant="ghost">
+                        Reconectar
                       </Button>
                       <Button className="rounded-2xl" disabled={pendingAction !== null} onClick={() => void runInstanceAction("pause")} variant="ghost">
                         Pausar

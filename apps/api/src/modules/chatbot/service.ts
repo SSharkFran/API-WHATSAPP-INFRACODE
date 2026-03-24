@@ -742,11 +742,12 @@ private async evaluateConfig(
         conversation.contact?.phoneNumber ||
         phoneNumber ||
         remoteJid;
-      const cleanPhone = (rawPhone ?? "")
-        .replace(/@s\.whatsapp\.net$/i, "")
+      const cleanPhone = String(rawPhone ?? "")
+        .replace(/@s\.whatsapp\.net/gi, "")
+        .replace(/@c\.us/gi, "")
         .replace(/@.*$/, "")
-        .replace(/\D/g, "");
-      console.log("[lead] phoneNumber limpo:", cleanPhone);
+        .replace(/[^\d]/g, "");
+      console.log("[lead:phone] cleanPhone:", cleanPhone);
       const messages = await this.loadLeadConversationMessages(prisma, conversation.instanceId, remoteJid);
       const extracted = await this.extractLeadWithAi(messages, cleanPhone, chatbotConfig);
 
@@ -1249,11 +1250,10 @@ private async evaluateConfig(
     const systemParts = [
       systemPrompt.trim() || defaultAiSettings.systemPrompt,
       `Data atual: ${formatDate(new Date())} ${formatTime(new Date())}.`,
-      `Nome do perfil: ${input.contactName?.trim() || "cliente"}.`,
       `Numero exato do cliente: ${normalizedPhoneNumber}.`,
       "### REGRAS GERAIS ###",
       "1. Responda em 1 a 3 frases no maximo. Seja direto.",
-      '2. O cliente dita o nome: Se ele disser "me chamo X", use X e ignore o Nome do perfil.'
+      '2. O cliente dita o nome: Se ele disser "me chamo X", use X.'
     ];
 
     const memoryFilePath = join(this.config.DATA_DIR, "tenants", tenantId, "instances", instanceId, "memory.md");

@@ -1306,6 +1306,18 @@ if (event.status === "CONNECTED") {
             chatbotConfig?.visionPrompt
           );
           if (analysis) {
+            await prisma.message.create({
+              data: {
+                instanceId: instance.id,
+                remoteJid: event.remoteJid,
+                direction: "SYSTEM",
+                type: "SYSTEM",
+                status: "DELIVERED",
+                payload: {
+                  text: `[Análise de imagem do veículo]: ${analysis}`
+                } as Prisma.InputJsonValue
+              }
+            });
             finalInputText = `[O cliente enviou uma imagem. Analise: ${analysis}]${caption ? ` Legenda: ${caption}` : ""}`;
           }
         } catch (err) {
@@ -1391,8 +1403,7 @@ if (event.status === "CONNECTED") {
 
       const { contextString } = await this.memoryAgent.getContext({
         tenantId,
-        phoneNumber: resolvedContactNumber,
-        name: contact.displayName
+        phoneNumber: resolvedContactNumber
       });
 
       if (!finalInputText) {
@@ -1418,8 +1429,7 @@ if (event.status === "CONNECTED") {
         await this.memoryAgent.update({
           tenantId,
           phoneNumber: resolvedContactNumber,
-          clientMessage: finalInputText,
-          name: contact.displayName
+          clientMessage: finalInputText
         });
         await this.sendConversationWithDelay({
           tenantId,
@@ -1450,7 +1460,6 @@ if (event.status === "CONNECTED") {
 
       if (chatbotResult?.action === "HUMAN_HANDOFF") {
         await this.clientMemoryService.upsert(tenantId, resolvedContactNumber, {
-          name: contact.displayName,
           lastContactAt: new Date(),
           tags: [...new Set<ClientMemoryTag>([...(clientMemory?.tags ?? []), "paused_by_human"])]
         });
@@ -1471,8 +1480,7 @@ if (event.status === "CONNECTED") {
         await this.memoryAgent.update({
           tenantId,
           phoneNumber: resolvedContactNumber,
-          clientMessage: finalInputText,
-          name: contact.displayName
+          clientMessage: finalInputText
         });
         return;
       }
@@ -1569,8 +1577,7 @@ if (event.status === "CONNECTED") {
         tenantId,
         phoneNumber: resolvedContactNumber,
         clientMessage: finalInputText,
-        leadData,
-        name: contact.displayName
+        leadData
       });
 
       if (leadData?.isComplete && (!chatbotConfig?.leadsPhoneNumber || chatbotConfig.leadsEnabled === false)) {

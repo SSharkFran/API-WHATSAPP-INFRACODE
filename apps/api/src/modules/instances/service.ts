@@ -137,7 +137,7 @@ interface CreateInstanceInput {
 }
 
 const buildWorkerKey = (tenantId: string, instanceId: string): string => `${tenantId}:${instanceId}`;
-const leadExtractionAwaitingTimeoutMs = 60_000;
+const leadExtractionAwaitingTimeoutMs = 120_000;
 const formatCurrencyValue = (value: number): string =>
   new Intl.NumberFormat("pt-BR", {
     minimumFractionDigits: 2,
@@ -1031,7 +1031,8 @@ if (event.status === "CONNECTED") {
             id: resetConversation.id
           },
           data: {
-            awaitingLeadExtraction: false
+            awaitingLeadExtraction: false,
+            leadSent: false
           } as Prisma.ConversationUncheckedUpdateInput
         });
         console.log("[lead] awaitingLeadExtraction reset para conversa:", resetConversation.id);
@@ -1616,7 +1617,7 @@ if (event.status === "CONNECTED") {
       const leadAutoExtractValue = chatbotConfig?.leadAutoExtract as unknown;
       const leadAutoExtractEnabled = leadAutoExtractValue === true || leadAutoExtractValue === "true";
       const responseText = clientText.replace(/\|\|\|/g, " ");
-      const isClosing = /encaminhei.*consultor|consultor.*contato|em instantes.*contato/i.test(responseText);
+      const isClosing = /consultor|agendamento|em instantes|encaminhei|entrar.{0,20}contato/i.test(responseText ?? "");
 
       if (leadAutoExtractEnabled && isClosing && !session.leadAlreadySent && !activeConversation.awaitingLeadExtraction) {
         await prisma.conversation.update({

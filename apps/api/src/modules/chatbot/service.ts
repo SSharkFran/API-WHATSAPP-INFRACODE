@@ -736,12 +736,13 @@ private async evaluateConfig(
       const remoteJid =
         (typeof contactFields?.lastRemoteJid === "string" && contactFields.lastRemoteJid.trim()) ||
         toJid(conversation.contact?.phoneNumber ?? phoneNumber);
-      const cleanPhone = this.resolveLeadContactPhoneNumber(
-        typeof contactFields?.sharedPhoneJid === "string" ? contactFields.sharedPhoneJid : null,
-        conversation.contact?.phoneNumber ?? null,
-        phoneNumber,
-        remoteJid
-      );
+      const rawPhone =
+        (typeof contactFields?.sharedPhoneJid === "string" && contactFields.sharedPhoneJid) ||
+        (typeof contactFields?.lastRemoteJid === "string" && contactFields.lastRemoteJid) ||
+        conversation.contact?.phoneNumber ||
+        phoneNumber ||
+        remoteJid;
+      const cleanPhone = (rawPhone ?? "").replace("@s.whatsapp.net", "").replace(/\D/g, "");
       console.log("[lead] phoneNumber limpo:", cleanPhone);
       const messages = await this.loadLeadConversationMessages(prisma, conversation.instanceId, remoteJid);
       const extracted = await this.extractLeadWithAi(messages, cleanPhone, chatbotConfig);

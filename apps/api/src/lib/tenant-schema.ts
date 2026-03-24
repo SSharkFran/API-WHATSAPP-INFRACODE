@@ -103,6 +103,7 @@ export const buildTenantSchemaSql = (schemaName: string): string[] => {
       "id" TEXT PRIMARY KEY,
       "instanceId" TEXT NOT NULL REFERENCES ${schema}."Instance"("id") ON DELETE CASCADE,
       "contactId" TEXT NOT NULL REFERENCES ${schema}."Contact"("id") ON DELETE CASCADE,
+      "phoneNumber" TEXT,
       "assignedToUserId" TEXT,
       "status" TEXT NOT NULL DEFAULT 'OPEN',
       "tags" TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
@@ -113,6 +114,7 @@ export const buildTenantSchemaSql = (schemaName: string): string[] => {
       "createdAt" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       "updatedAt" TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );`,
+    `ALTER TABLE ${schema}."Conversation" ADD COLUMN IF NOT EXISTS "phoneNumber" TEXT;`,
     `ALTER TABLE ${schema}."Conversation" ADD COLUMN IF NOT EXISTS "leadSent" BOOLEAN NOT NULL DEFAULT FALSE;`,
     `ALTER TABLE ${schema}."Conversation" ADD COLUMN IF NOT EXISTS "awaitingLeadExtraction" BOOLEAN NOT NULL DEFAULT FALSE;`,
     `CREATE INDEX IF NOT EXISTS "idx_${schemaName}_conversation_status" ON ${schema}."Conversation" ("status");`,

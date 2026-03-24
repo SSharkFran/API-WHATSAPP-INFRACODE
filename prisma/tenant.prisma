@@ -123,6 +123,7 @@ model Conversation {
   id               String   @id @default(cuid())
   instanceId       String
   contactId        String
+  phoneNumber      String?
   assignedToUserId String?
   status           String   @default("OPEN")
   tags             String[] @default([])

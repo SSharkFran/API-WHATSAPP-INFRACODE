@@ -702,6 +702,7 @@ private async evaluateConfig(
         select: {
           id: true,
           instanceId: true,
+          phoneNumber: true,
           leadSent: true,
           awaitingLeadExtraction: true,
           contact: {
@@ -746,6 +747,7 @@ private async evaluateConfig(
       const rawPhone =
         sharedPhoneJid ||
         (lastRemoteJid && /@(s\.whatsapp\.net|c\.us)$/i.test(lastRemoteJid) ? lastRemoteJid : null) ||
+        conversation.phoneNumber ||
         phoneNumber ||
         conversation.contact?.phoneNumber ||
         remoteJid;
@@ -762,7 +764,12 @@ private async evaluateConfig(
           )
         )
       );
-      const messages = await this.loadLeadConversationMessages(prisma, conversation.instanceId, leadRemoteJids);
+      const messages = await this.loadLeadConversationMessages(
+        prisma,
+        conversationId,
+        conversation.instanceId,
+        leadRemoteJids
+      );
       const extracted = await this.extractLeadWithAi(messages, cleanPhone, chatbotConfig);
 
       console.log("[lead] dados extraídos:", JSON.stringify(extracted));
@@ -917,19 +924,27 @@ private async evaluateConfig(
 
   private async loadLeadConversationMessages(
     prisma: Awaited<ReturnType<TenantPrismaRegistry["getClient"]>>,
+    conversationId: string,
     instanceId: string,
     remoteJids: string[]
   ): Promise<ChatMessage[]> {
-    if (remoteJids.length === 0) {
+    if (remoteJids.length === 0 && !conversationId) {
       return [];
     }
 
     const records = await prisma.message.findMany({
       where: {
         instanceId,
-        remoteJid: {
-          in: remoteJids
-        }
+        OR: [
+          {
+            traceId: conversationId
+          },
+          {
+            remoteJid: {
+              in: remoteJids
+            }
+          }
+        ]
       },
       orderBy: {
         createdAt: "asc"

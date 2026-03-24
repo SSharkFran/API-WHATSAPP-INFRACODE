@@ -985,9 +985,14 @@ if (event.status === "CONNECTED") {
   ): Promise<void> {
     await this.tenantPrismaRegistry.ensureSchema(this.platformPrisma, tenantId);
     const prisma = await this.tenantPrismaRegistry.getClient(tenantId);
+    const cleanPhoneFromRemoteJid = String(event.remoteJid ?? "")
+      .replace(/@s\.whatsapp\.net$/i, "")
+      .replace(/@c\.us$/i, "")
+      .replace(/@.*$/, "")
+      .replace(/\D/g, "");
     const remotePhoneFromJid = normalizeWhatsAppPhoneNumber(event.remoteJid);
     const realPhoneFromRemoteJid = /@(s\.whatsapp\.net|c\.us)$/i.test(event.remoteJid)
-      ? event.remoteJid.replace(/@.*$/, "").replace(/\D/g, "")
+      ? cleanPhoneFromRemoteJid
       : null;
     const remoteNumber = remotePhoneFromJid ?? normalizePhoneNumber(event.remoteJid.split("@")[0] ?? "");
     const sessionKey = this.buildConversationSessionKey(instance.id, event.remoteJid);
@@ -1146,7 +1151,8 @@ if (event.status === "CONNECTED") {
         id: true,
         leadSent: true,
         awaitingLeadExtraction: true,
-        updatedAt: true
+        updatedAt: true,
+        phoneNumber: true
       }
     });
 
@@ -1169,7 +1175,8 @@ if (event.status === "CONNECTED") {
           id: true,
           leadSent: true,
           awaitingLeadExtraction: true,
-          updatedAt: true
+          updatedAt: true,
+          phoneNumber: true
         }
       });
       console.log("[lead] awaitingLeadExtraction reset para conversa:", resolvedConversation.id);
@@ -1180,6 +1187,7 @@ if (event.status === "CONNECTED") {
           data: {
             instanceId: instance.id,
             contactId: contact.id,
+            phoneNumber: cleanPhoneFromRemoteJid || resolvedContactNumber,
             lastMessageAt: new Date(),
             awaitingLeadExtraction: false
           },
@@ -1187,7 +1195,8 @@ if (event.status === "CONNECTED") {
             id: true,
             leadSent: true,
             awaitingLeadExtraction: true,
-            updatedAt: true
+            updatedAt: true,
+            phoneNumber: true
           }
         })
       : resolvedConversation.awaitingLeadExtraction
@@ -1195,13 +1204,15 @@ if (event.status === "CONNECTED") {
         : await prisma.conversation.update({
           where: { id: resolvedConversation.id },
           data: {
-            lastMessageAt: new Date()
+            lastMessageAt: new Date(),
+            ...(cleanPhoneFromRemoteJid ? { phoneNumber: cleanPhoneFromRemoteJid } : {})
           },
           select: {
             id: true,
             leadSent: true,
             awaitingLeadExtraction: true,
-            updatedAt: true
+            updatedAt: true,
+            phoneNumber: true
           }
         });
 
@@ -1226,7 +1237,8 @@ if (event.status === "CONNECTED") {
         direction: "INBOUND",
         type: event.messageType,
         status: "DELIVERED",
-        payload: event.payload as Prisma.InputJsonValue
+        payload: event.payload as Prisma.InputJsonValue,
+        traceId: activeConversation.id
       }
     });
 
@@ -1318,6 +1330,7 @@ if (event.status === "CONNECTED") {
                 direction: "SYSTEM",
                 type: "SYSTEM",
                 status: "DELIVERED",
+                traceId: activeConversation.id,
                 payload: {
                   text: `[Análise de imagem do veículo]: ${visionResult}`
                 } as Prisma.InputJsonValue
@@ -1649,18 +1662,16 @@ if (event.status === "CONNECTED") {
         void (async () => {
           try {
             const resolvedChatbotConfig = await this.chatbotService.getConfig(tenantId, instance.id);
-            const senderPhoneSource =
-              (typeof contactFields?.sharedPhoneJid === "string" && contactFields.sharedPhoneJid) ||
-              realPhoneFromRemoteJid ||
-              contact.phoneNumber ||
-              event.remoteJid;
-            console.log("[lead:phone] source variable:", JSON.stringify(senderPhoneSource));
+            const senderRemoteJid = event.remoteJid;
+            console.log("[lead:phone] source variable:", JSON.stringify(senderRemoteJid));
             const senderPhone =
-              String(senderPhoneSource ?? "")
+              String(senderRemoteJid ?? "")
                 .replace(/@s\.whatsapp\.net$/i, "")
                 .replace(/@c\.us$/i, "")
                 .replace(/@.*$/, "")
-                .replace(/\D/g, "") || resolvedContactNumber;
+                .replace(/\D/g, "") ||
+              activeConversation.phoneNumber ||
+              resolvedContactNumber;
             console.log("[lead:phone] passing to processLead:", JSON.stringify(senderPhone));
             await this.chatbotService.processLeadAfterConversation(
               activeConversation.id,

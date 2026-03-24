@@ -129,6 +129,9 @@ model Conversation {
   tags             String[] @default([])
   leadSent         Boolean  @default(false)
   awaitingLeadExtraction Boolean @default(false)
+  humanTakeover    Boolean  @default(false)
+  humanTakeoverAt  DateTime?
+  aiDisabledPermanent Boolean @default(false)
   slaDeadlineAt    DateTime?
   lastMessageAt    DateTime?
   createdAt        DateTime @default(now())

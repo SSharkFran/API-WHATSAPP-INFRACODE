@@ -725,6 +725,7 @@ private async evaluateConfig(
             awaitingLeadExtraction: false
           } as Prisma.ConversationUncheckedUpdateInput
         });
+        console.log("[lead] awaitingLeadExtraction reset para conversa:", conversationId);
         return;
       }
 
@@ -735,14 +736,15 @@ private async evaluateConfig(
       const remoteJid =
         (typeof contactFields?.lastRemoteJid === "string" && contactFields.lastRemoteJid.trim()) ||
         toJid(conversation.contact?.phoneNumber ?? phoneNumber);
-      const leadPhoneNumber = this.resolveLeadContactPhoneNumber(
+      const cleanPhone = this.resolveLeadContactPhoneNumber(
         typeof contactFields?.sharedPhoneJid === "string" ? contactFields.sharedPhoneJid : null,
         conversation.contact?.phoneNumber ?? null,
         phoneNumber,
         remoteJid
       );
+      console.log("[lead] phoneNumber limpo:", cleanPhone);
       const messages = await this.loadLeadConversationMessages(prisma, conversation.instanceId, remoteJid);
-      const extracted = await this.extractLeadWithAi(messages, leadPhoneNumber, chatbotConfig);
+      const extracted = await this.extractLeadWithAi(messages, cleanPhone, chatbotConfig);
 
       console.log("[lead] dados extraídos:", JSON.stringify(extracted));
 
@@ -800,7 +802,8 @@ private async evaluateConfig(
           awaitingLeadExtraction: false
         } as Prisma.ConversationUncheckedUpdateInput
       });
-      console.log("[lead] lead enviado para:", leadPhoneNumber);
+      console.log("[lead] awaitingLeadExtraction reset para conversa:", conversationId);
+      console.log("[lead] lead enviado para:", cleanPhone);
     } catch (error) {
       console.error("[lead] erro na extração:", error);
       await prisma.conversation.update({
@@ -811,6 +814,7 @@ private async evaluateConfig(
           awaitingLeadExtraction: false
         } as Prisma.ConversationUncheckedUpdateInput
       }).catch(() => undefined);
+      console.log("[lead] awaitingLeadExtraction reset para conversa:", conversationId);
     }
   }
 

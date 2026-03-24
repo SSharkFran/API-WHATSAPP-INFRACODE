@@ -137,6 +137,7 @@ interface CreateInstanceInput {
 }
 
 const buildWorkerKey = (tenantId: string, instanceId: string): string => `${tenantId}:${instanceId}`;
+const leadExtractionAwaitingTimeoutMs = 60_000;
 const formatCurrencyValue = (value: number): string =>
   new Intl.NumberFormat("pt-BR", {
     minimumFractionDigits: 2,
@@ -990,6 +991,52 @@ if (event.status === "CONNECTED") {
     const msgText = typeof event.payload.text === "string" ? event.payload.text.trim().toLowerCase() : "";
 
     if (msgText === "/reset") {
+      const resetContact = await prisma.contact.findFirst({
+        where: {
+          instanceId: instance.id,
+          OR: [
+            {
+              fields: {
+                path: ["lastRemoteJid"],
+                equals: event.remoteJid
+              }
+            },
+            {
+              phoneNumber: remoteNumber
+            }
+          ]
+        },
+        select: {
+          id: true
+        }
+      });
+      const resetConversation = resetContact
+        ? await prisma.conversation.findFirst({
+            where: {
+              instanceId: instance.id,
+              contactId: resetContact.id,
+              status: {
+                in: ["OPEN", "PENDING", "TRANSFERRED"]
+              }
+            },
+            select: {
+              id: true
+            }
+          })
+        : null;
+
+      if (resetConversation) {
+        await prisma.conversation.update({
+          where: {
+            id: resetConversation.id
+          },
+          data: {
+            awaitingLeadExtraction: false
+          } as Prisma.ConversationUncheckedUpdateInput
+        });
+        console.log("[lead] awaitingLeadExtraction reset para conversa:", resetConversation.id);
+      }
+
       await prisma.message.deleteMany({
         where: {
           instanceId: instance.id,
@@ -1092,33 +1139,63 @@ if (event.status === "CONNECTED") {
       select: {
         id: true,
         leadSent: true,
-        awaitingLeadExtraction: true
+        awaitingLeadExtraction: true,
+        updatedAt: true
       }
     });
 
     const isFirstContact = !conversation;
-    const activeConversation = !conversation
+    let resolvedConversation = conversation;
+
+    if (
+      resolvedConversation?.awaitingLeadExtraction &&
+      !resolvedConversation.leadSent &&
+      Date.now() - resolvedConversation.updatedAt.getTime() > leadExtractionAwaitingTimeoutMs
+    ) {
+      resolvedConversation = await prisma.conversation.update({
+        where: {
+          id: resolvedConversation.id
+        },
+        data: {
+          awaitingLeadExtraction: false
+        } as Prisma.ConversationUncheckedUpdateInput,
+        select: {
+          id: true,
+          leadSent: true,
+          awaitingLeadExtraction: true,
+          updatedAt: true
+        }
+      });
+      console.log("[lead] awaitingLeadExtraction reset para conversa:", resolvedConversation.id);
+    }
+
+    const activeConversation = !resolvedConversation
       ? await prisma.conversation.create({
           data: {
             instanceId: instance.id,
             contactId: contact.id,
-            lastMessageAt: new Date()
+            lastMessageAt: new Date(),
+            awaitingLeadExtraction: false
           },
           select: {
             id: true,
             leadSent: true,
-            awaitingLeadExtraction: true
+            awaitingLeadExtraction: true,
+            updatedAt: true
           }
         })
-      : await prisma.conversation.update({
-          where: { id: conversation.id },
+      : resolvedConversation.awaitingLeadExtraction
+        ? resolvedConversation
+        : await prisma.conversation.update({
+          where: { id: resolvedConversation.id },
           data: {
             lastMessageAt: new Date()
           },
           select: {
             id: true,
             leadSent: true,
-            awaitingLeadExtraction: true
+            awaitingLeadExtraction: true,
+            updatedAt: true
           }
         });
 

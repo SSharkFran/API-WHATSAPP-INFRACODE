@@ -13,6 +13,10 @@ export const instanceParamsSchema = z.object({
   id: z.string().min(1)
 });
 
+export const instanceResetSessionParamsSchema = z.object({
+  instanceId: z.string().min(1)
+});
+
 export const createInstanceBodySchema = z.object({
   name: z.string().min(3).max(80),
   proxyUrl: z.string().url().optional(),

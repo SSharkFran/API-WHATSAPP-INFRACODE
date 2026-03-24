@@ -6,6 +6,7 @@ import {
   createInstanceBodySchema,
   instanceHealthSchema,
   instanceParamsSchema,
+  instanceResetSessionParamsSchema,
   instanceSummarySchema
 } from "./schemas.js";
 import { raw2NextJobData } from "bullmq";
@@ -154,6 +155,47 @@ export const registerInstanceRoutes = async (app: FastifyInstance): Promise<void
       const tenantPrisma = await app.tenantPrismaRegistry.getClient(tenantId);
       await recordPlatformAuditLog(app.platformPrisma, request, "instance.restart", "Instance", params.id, {}, app.config.JWT_SECRET);
       await recordTenantAuditLog(tenantPrisma, request, "instance.restart", "Instance", params.id, {}, app.config.JWT_SECRET);
+      return instance;
+    }
+  );
+
+  app.post(
+    "/instances/:instanceId/reset-session",
+    {
+      config: {
+        auth: "tenant",
+        allowApiKey: true,
+        requiredScopes: ["write"]
+      },
+      schema: {
+        tags: ["Instances"],
+        summary: "Limpa a sessao da instancia e gera um novo QR code",
+        params: instanceResetSessionParamsSchema
+      }
+    },
+    async (request) => {
+      const tenantId = requireTenantId(request);
+      const params = instanceResetSessionParamsSchema.parse(request.params);
+      const instance = await app.instanceOrchestrator.resetSession(tenantId, params.instanceId);
+      const tenantPrisma = await app.tenantPrismaRegistry.getClient(tenantId);
+      await recordPlatformAuditLog(
+        app.platformPrisma,
+        request,
+        "instance.reset_session",
+        "Instance",
+        params.instanceId,
+        {},
+        app.config.JWT_SECRET
+      );
+      await recordTenantAuditLog(
+        tenantPrisma,
+        request,
+        "instance.reset_session",
+        "Instance",
+        params.instanceId,
+        {},
+        app.config.JWT_SECRET
+      );
       return instance;
     }
   );

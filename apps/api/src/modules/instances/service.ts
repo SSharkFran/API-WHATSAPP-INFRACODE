@@ -355,6 +355,47 @@ export class InstanceOrchestrator {
   }
 
   /**
+   * Limpa a sessao persistida e reinicia a instancia para gerar um novo QR code.
+   */
+  public async resetSession(tenantId: string, instanceId: string): Promise<InstanceSummary> {
+    const prisma = await this.tenantPrismaRegistry.getClient(tenantId);
+    const instance = await this.requireInstanceWithUsage(tenantId, instanceId);
+
+    await this.stopWorker(tenantId, instanceId, false);
+
+    await rm(instance.authDirectory, {
+      recursive: true,
+      force: true
+    });
+    await rm(instance.sessionDbPath, {
+      force: true
+    });
+
+    await mkdir(instance.authDirectory, { recursive: true });
+    await mkdir(dirname(instance.sessionDbPath), { recursive: true });
+
+    this.latestQrCodes.delete(buildWorkerKey(tenantId, instanceId));
+
+    const reset = await prisma.instance.update({
+      where: { id: instanceId },
+      data: {
+        status: "DISCONNECTED",
+        pausedAt: null,
+        connectedAt: null,
+        lastError: null,
+        reconnectAttempts: 0,
+        phoneNumber: null,
+        avatarUrl: null
+      },
+      include: { usage: true }
+    });
+
+    this.metricsService.setInstanceStatus(reset.id, tenantId, reset.status);
+
+    return this.startInstance(tenantId, instanceId);
+  }
+
+  /**
    * Remove a instancia, dados de sessao e registros associados.
    */
   public async deleteInstance(tenantId: string, instanceId: string): Promise<void> {

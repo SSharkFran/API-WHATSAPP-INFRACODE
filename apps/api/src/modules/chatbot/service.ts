@@ -1,6 +1,7 @@
 import type { ChatbotAiProvider, ChatbotConfig, ChatbotModules, ChatbotRule, ChatbotSimulationResult } from "@infracode/types";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import { z } from "zod";
 import type { Prisma } from "../../../../../prisma/generated/tenant-client/index.js";
 import type { AppConfig } from "../../config.js";
@@ -67,6 +68,18 @@ interface ExtractedLeadAiPayload {
   horario: string | null;
   endereco: string | null;
   sujeira: LeadDirtLevel | null;
+}
+
+interface LeadConversationRecord {
+  id: string;
+  instanceId: string;
+  phoneNumber: string | null;
+  leadSent: boolean;
+  awaitingLeadExtraction: boolean;
+  contact: {
+    phoneNumber: string;
+    fields: Prisma.JsonValue | null;
+  } | null;
 }
 
 interface OpenAiToolCall {
@@ -679,6 +692,96 @@ private async evaluateConfig(
     return parsed as unknown as Prisma.InputJsonValue;
   }
 
+  private async getLeadConversationForExtraction(
+    prisma: Awaited<ReturnType<TenantPrismaRegistry["getClient"]>>,
+    conversationId: string
+  ): Promise<LeadConversationRecord | null> {
+    return prisma.conversation.findUnique({
+      where: {
+        id: conversationId
+      },
+      select: {
+        id: true,
+        instanceId: true,
+        phoneNumber: true,
+        leadSent: true,
+        awaitingLeadExtraction: true,
+        contact: {
+          select: {
+            phoneNumber: true,
+            fields: true
+          }
+        }
+      }
+    });
+  }
+
+  private cleanLeadPhoneValue(value?: string | null): string {
+    return String(value ?? "")
+      .replace(/@s\.whatsapp\.net$/i, "")
+      .replace(/@c\.us$/i, "")
+      .replace(/@.*$/, "")
+      .replace(/\D/g, "");
+  }
+
+  private resolveLeadPhoneFromConversation(
+    conversation: LeadConversationRecord,
+    fallbackPhone: string
+  ): { cleanPhone: string; unresolvedLid: boolean } {
+    const contactFields =
+      conversation.contact?.fields && typeof conversation.contact.fields === "object"
+        ? (conversation.contact.fields as Record<string, unknown>)
+        : null;
+    const lastRemoteJid =
+      typeof contactFields?.lastRemoteJid === "string" && contactFields.lastRemoteJid.trim()
+        ? contactFields.lastRemoteJid.trim()
+        : null;
+    const sharedPhoneJid =
+      typeof contactFields?.sharedPhoneJid === "string" && contactFields.sharedPhoneJid.trim()
+        ? contactFields.sharedPhoneJid.trim()
+        : null;
+    const lidDigits = lastRemoteJid?.endsWith("@lid") ? this.cleanLeadPhoneValue(lastRemoteJid) : null;
+
+    const cleanPhone =
+      this.cleanLeadPhoneValue(sharedPhoneJid) ||
+      (lastRemoteJid && /@(s\.whatsapp\.net|c\.us)$/i.test(lastRemoteJid)
+        ? this.cleanLeadPhoneValue(lastRemoteJid)
+        : "") ||
+      (conversation.phoneNumber && conversation.phoneNumber !== lidDigits
+        ? this.cleanLeadPhoneValue(conversation.phoneNumber)
+        : "") ||
+      (conversation.contact?.phoneNumber && conversation.contact.phoneNumber !== lidDigits
+        ? this.cleanLeadPhoneValue(conversation.contact.phoneNumber)
+        : "") ||
+      (fallbackPhone && fallbackPhone !== lidDigits ? this.cleanLeadPhoneValue(fallbackPhone) : "");
+
+    return {
+      cleanPhone,
+      unresolvedLid: Boolean(lidDigits && !cleanPhone && !sharedPhoneJid)
+    };
+  }
+
+  private async waitForLeadPhoneResolution(
+    prisma: Awaited<ReturnType<TenantPrismaRegistry["getClient"]>>,
+    conversationId: string,
+    fallbackPhone: string
+  ): Promise<LeadConversationRecord | null> {
+    let conversation = await this.getLeadConversationForExtraction(prisma, conversationId);
+
+    for (let attempt = 0; conversation && attempt < 6; attempt += 1) {
+      const phoneResolution = this.resolveLeadPhoneFromConversation(conversation, fallbackPhone);
+
+      if (!phoneResolution.unresolvedLid) {
+        return conversation;
+      }
+
+      await delay(500);
+      conversation = await this.getLeadConversationForExtraction(prisma, conversationId);
+    }
+
+    return conversation;
+  }
+
   public async processLeadAfterConversation(
     conversationId: string,
     chatbotConfig: ChatbotConfig & { __tenantId?: string },
@@ -695,24 +798,7 @@ private async evaluateConfig(
     console.log("[lead] iniciando extração para conversa:", conversationId);
 
     try {
-      const conversation = await prisma.conversation.findUnique({
-        where: {
-          id: conversationId
-        },
-        select: {
-          id: true,
-          instanceId: true,
-          phoneNumber: true,
-          leadSent: true,
-          awaitingLeadExtraction: true,
-          contact: {
-            select: {
-              phoneNumber: true,
-              fields: true
-            }
-          }
-        }
-      });
+      const conversation = await this.waitForLeadPhoneResolution(prisma, conversationId, phoneNumber);
 
       if (!conversation) {
         throw new Error("Conversa nao encontrada");
@@ -744,18 +830,7 @@ private async evaluateConfig(
           ? contactFields.sharedPhoneJid.trim()
           : null;
       const remoteJid = lastRemoteJid || toJid(conversation.contact?.phoneNumber ?? phoneNumber);
-      const rawPhone =
-        sharedPhoneJid ||
-        (lastRemoteJid && /@(s\.whatsapp\.net|c\.us)$/i.test(lastRemoteJid) ? lastRemoteJid : null) ||
-        conversation.phoneNumber ||
-        phoneNumber ||
-        conversation.contact?.phoneNumber ||
-        remoteJid;
-      const cleanPhone = String(rawPhone ?? "")
-        .replace(/@s\.whatsapp\.net$/i, "")
-        .replace(/@c\.us$/i, "")
-        .replace(/@.*$/, "")
-        .replace(/\D/g, "");
+      const cleanPhone = this.resolveLeadPhoneFromConversation(conversation, phoneNumber).cleanPhone;
       console.log("[lead:phone] cleanPhone:", cleanPhone);
       const leadRemoteJids = Array.from(
         new Set(
@@ -781,7 +856,7 @@ private async evaluateConfig(
       const alertMessage = [
         "🔔 Novo lead detectado:",
         `Nome: ${extracted.nome}`,
-        `Contato: ${extracted.contato}`,
+        `Contato: ${extracted.contato || "a confirmar pelo consultor"}`,
         `Veículo: ${extracted.veiculo} - ${extracted.porte}`,
         `Serviço de interesse: Zelo ${extracted.servico}`,
         `Sujeira Identificada: ${extracted.sujeira ?? "não avaliada"}`,

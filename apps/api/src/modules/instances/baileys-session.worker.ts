@@ -70,6 +70,12 @@ interface UpsertMessageEvent {
   }>;
 }
 
+interface ChatMappingPayload {
+  id?: string | null;
+  pnJid?: string | null;
+  lidJid?: string | null;
+}
+
 const init = workerData as WorkerInitPayload;
 let socket: WASocket | null = null;
 let saveCreds: (() => Promise<void>) | null = null;
@@ -151,6 +157,35 @@ const serializeIncomingPayload = (rawMessage: Record<string, unknown>): Record<s
   }
 
   return rawMessage;
+};
+
+const emitChatPhoneMapping = (chat: ChatMappingPayload | null | undefined): void => {
+  if (!chat) {
+    return;
+  }
+
+  const lid =
+    typeof chat.lidJid === "string" && chat.lidJid.trim()
+      ? chat.lidJid.trim()
+      : typeof chat.id === "string" && chat.id.endsWith("@lid")
+        ? chat.id
+        : null;
+  const jid =
+    typeof chat.pnJid === "string" && chat.pnJid.trim()
+      ? chat.pnJid.trim()
+      : typeof chat.id === "string" && /@(s\.whatsapp\.net|c\.us)$/i.test(chat.id)
+        ? chat.id
+        : null;
+
+  if (!lid || !jid) {
+    return;
+  }
+
+  parentPort?.postMessage({
+    type: "chat-phone-mapping",
+    lid,
+    jid
+  });
 };
 
 const resolveMediaBuffer = async (media: { base64?: string; url?: string }): Promise<Buffer> => {
@@ -482,6 +517,24 @@ const startSocket = async (): Promise<void> => {
         lid,
         jid
       });
+    });
+
+    nextSocket.ev.on("messaging-history.set", ({ chats }) => {
+      for (const chat of chats) {
+        emitChatPhoneMapping(chat as ChatMappingPayload);
+      }
+    });
+
+    nextSocket.ev.on("chats.upsert", (chats) => {
+      for (const chat of chats) {
+        emitChatPhoneMapping(chat as ChatMappingPayload);
+      }
+    });
+
+    nextSocket.ev.on("chats.update", (chats) => {
+      for (const chat of chats) {
+        emitChatPhoneMapping(chat as ChatMappingPayload);
+      }
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Falha inesperada ao iniciar o worker";

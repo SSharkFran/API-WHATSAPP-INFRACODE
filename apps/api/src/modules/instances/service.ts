@@ -106,6 +106,12 @@ interface PhoneNumberShareWorkerEvent {
   jid: string;
 }
 
+interface ChatPhoneMappingWorkerEvent {
+  type: "chat-phone-mapping";
+  lid: string;
+  jid: string;
+}
+
 type WorkerEvent =
   | StatusWorkerEvent
   | LogWorkerEvent
@@ -113,6 +119,7 @@ type WorkerEvent =
   | ProfileWorkerEvent
   | InboundMessageWorkerEvent
   | PhoneNumberShareWorkerEvent
+  | ChatPhoneMappingWorkerEvent
   | RpcResultWorkerEvent
   | RpcErrorWorkerEvent;
 
@@ -814,6 +821,11 @@ export class InstanceOrchestrator {
       return;
     }
 
+    if (event.type === "chat-phone-mapping") {
+      await this.handleChatPhoneMappingEvent(prisma, instance.id, event);
+      return;
+    }
+
     if (event.type === "status") {
       managedWorker.currentStatus = event.status;
       this.metricsService.setInstanceStatus(instance.id, tenantId, event.status);
@@ -876,18 +888,19 @@ if (event.status === "CONNECTED") {
     }
   }
 
-  private async handlePhoneNumberShareEvent(
+  private async persistLidPhoneMapping(
     prisma: Awaited<ReturnType<TenantPrismaRegistry["getClient"]>>,
     instanceId: string,
-    event: PhoneNumberShareWorkerEvent
+    lid: string,
+    jid: string
   ): Promise<void> {
-    const sharedPhoneNumber = normalizeWhatsAppPhoneNumber(event.jid);
+    const sharedPhoneNumber = normalizeWhatsAppPhoneNumber(jid);
 
     if (!sharedPhoneNumber) {
       return;
     }
 
-    const lidDigits = normalizePhoneNumber(event.lid.split("@")[0] ?? event.lid);
+    const lidDigits = normalizePhoneNumber(lid.split("@")[0] ?? lid);
     const contactByLid = await prisma.contact.findFirst({
       where: {
         instanceId,
@@ -895,19 +908,21 @@ if (event.status === "CONNECTED") {
           {
             fields: {
               path: ["lastRemoteJid"],
-              equals: event.lid
+              equals: lid
             }
           },
           {
             phoneNumber: lidDigits
+          },
+          {
+            fields: {
+              path: ["sharedPhoneJid"],
+              equals: jid
+            }
           }
         ]
       }
     });
-
-    if (!contactByLid) {
-      return;
-    }
 
     const sharedPhoneContact = await prisma.contact.findUnique({
       where: {
@@ -918,12 +933,16 @@ if (event.status === "CONNECTED") {
       }
     });
 
+    if (!contactByLid && !sharedPhoneContact) {
+      return;
+    }
+
     const lidFields =
-      contactByLid.fields && typeof contactByLid.fields === "object"
+      contactByLid?.fields && typeof contactByLid.fields === "object"
         ? (contactByLid.fields as Record<string, unknown>)
         : {};
 
-    if (sharedPhoneContact && sharedPhoneContact.id !== contactByLid.id) {
+    if (sharedPhoneContact && contactByLid && sharedPhoneContact.id !== contactByLid.id) {
       const sharedPhoneFields =
         sharedPhoneContact.fields && typeof sharedPhoneContact.fields === "object"
           ? (sharedPhoneContact.fields as Record<string, unknown>)
@@ -939,8 +958,8 @@ if (event.status === "CONNECTED") {
             fields: {
               ...lidFields,
               ...sharedPhoneFields,
-              lastRemoteJid: event.lid,
-              sharedPhoneJid: event.jid
+              lastRemoteJid: lid,
+              sharedPhoneJid: jid
             } as Prisma.InputJsonValue
           }
         }),
@@ -950,7 +969,17 @@ if (event.status === "CONNECTED") {
             contactId: contactByLid.id
           },
           data: {
+            contactId: sharedPhoneContact.id,
+            phoneNumber: sharedPhoneNumber
+          }
+        }),
+        prisma.conversation.updateMany({
+          where: {
+            instanceId,
             contactId: sharedPhoneContact.id
+          },
+          data: {
+            phoneNumber: sharedPhoneNumber
           }
         }),
         prisma.contact.delete({
@@ -963,19 +992,58 @@ if (event.status === "CONNECTED") {
       return;
     }
 
+    const targetContact = sharedPhoneContact ?? contactByLid ?? null;
+    const targetContactId = targetContact?.id;
+
+    if (!targetContactId) {
+      return;
+    }
+
+    const targetFields =
+      targetContact?.fields && typeof targetContact.fields === "object"
+        ? (targetContact.fields as Record<string, unknown>)
+        : {};
+
     await prisma.contact.update({
       where: {
-        id: contactByLid.id
+        id: targetContactId
       },
       data: {
         phoneNumber: sharedPhoneNumber,
         fields: {
+          ...targetFields,
           ...lidFields,
-          lastRemoteJid: event.lid,
-          sharedPhoneJid: event.jid
+          lastRemoteJid: lid,
+          sharedPhoneJid: jid
         } as Prisma.InputJsonValue
       }
     });
+
+    await prisma.conversation.updateMany({
+      where: {
+        instanceId,
+        contactId: targetContactId
+      },
+      data: {
+        phoneNumber: sharedPhoneNumber
+      }
+    });
+  }
+
+  private async handlePhoneNumberShareEvent(
+    prisma: Awaited<ReturnType<TenantPrismaRegistry["getClient"]>>,
+    instanceId: string,
+    event: PhoneNumberShareWorkerEvent
+  ): Promise<void> {
+    await this.persistLidPhoneMapping(prisma, instanceId, event.lid, event.jid);
+  }
+
+  private async handleChatPhoneMappingEvent(
+    prisma: Awaited<ReturnType<TenantPrismaRegistry["getClient"]>>,
+    instanceId: string,
+    event: ChatPhoneMappingWorkerEvent
+  ): Promise<void> {
+    await this.persistLidPhoneMapping(prisma, instanceId, event.lid, event.jid);
   }
 
   private async handleInboundMessage(
@@ -1662,16 +1730,22 @@ if (event.status === "CONNECTED") {
         void (async () => {
           try {
             const resolvedChatbotConfig = await this.chatbotService.getConfig(tenantId, instance.id);
-            const senderRemoteJid = event.remoteJid;
-            console.log("[lead:phone] source variable:", JSON.stringify(senderRemoteJid));
+            const senderRemoteJid =
+              /@(s\.whatsapp\.net|c\.us)$/i.test(event.remoteJid)
+                ? event.remoteJid
+                : typeof contactFields?.sharedPhoneJid === "string" && contactFields.sharedPhoneJid.trim()
+                  ? contactFields.sharedPhoneJid.trim()
+                  : activeConversation.phoneNumber &&
+                      activeConversation.phoneNumber !== cleanPhoneFromRemoteJid
+                    ? toJid(activeConversation.phoneNumber)
+                    : "";
+            console.log("[lead:phone] source variable:", JSON.stringify(senderRemoteJid || event.remoteJid));
             const senderPhone =
               String(senderRemoteJid ?? "")
                 .replace(/@s\.whatsapp\.net$/i, "")
                 .replace(/@c\.us$/i, "")
                 .replace(/@.*$/, "")
-                .replace(/\D/g, "") ||
-              activeConversation.phoneNumber ||
-              resolvedContactNumber;
+                .replace(/\D/g, "");
             console.log("[lead:phone] passing to processLead:", JSON.stringify(senderPhone));
             await this.chatbotService.processLeadAfterConversation(
               activeConversation.id,

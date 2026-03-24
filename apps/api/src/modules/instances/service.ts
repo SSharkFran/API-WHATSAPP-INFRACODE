@@ -1297,7 +1297,7 @@ if (event.status === "CONNECTED") {
         console.log("[vision] imagem detectada, analisando...");
         try {
           const caption = (imageMsg as { caption?: string })?.caption ?? "";
-          const analysis = await this.analyzeImage(
+          const visionResult = await this.analyzeImage(
             tenantId,
             instance.id,
             rawMessage ?? {},
@@ -1305,7 +1305,7 @@ if (event.status === "CONNECTED") {
             caption,
             chatbotConfig?.visionPrompt
           );
-          if (analysis) {
+          if (visionResult) {
             await prisma.message.create({
               data: {
                 instanceId: instance.id,
@@ -1314,11 +1314,11 @@ if (event.status === "CONNECTED") {
                 type: "SYSTEM",
                 status: "DELIVERED",
                 payload: {
-                  text: `[Análise de imagem do veículo]: ${analysis}`
+                  text: `[Análise de imagem do veículo]: ${visionResult}`
                 } as Prisma.InputJsonValue
               }
             });
-            finalInputText = `[O cliente enviou uma imagem. Analise: ${analysis}]${caption ? ` Legenda: ${caption}` : ""}`;
+            finalInputText = `[O cliente enviou uma imagem. Analise: ${visionResult}]${caption ? ` Legenda: ${caption}` : ""}`;
           }
         } catch (err) {
           console.error("[vision] erro na analise:", err);
@@ -1644,13 +1644,23 @@ if (event.status === "CONNECTED") {
         void (async () => {
           try {
             const resolvedChatbotConfig = await this.chatbotService.getConfig(tenantId, instance.id);
+            const senderJid =
+              (typeof contactFields?.sharedPhoneJid === "string" && contactFields.sharedPhoneJid) ||
+              event.remoteJid;
+            const senderPhone =
+              String(senderJid ?? "")
+                .replace(/@s\.whatsapp\.net$/i, "")
+                .replace(/@c\.us$/i, "")
+                .replace(/@.*$/, "")
+                .replace(/\D/g, "") || resolvedContactNumber;
+            console.log("[lead:phone] passing to processLead:", JSON.stringify(senderPhone));
             await this.chatbotService.processLeadAfterConversation(
               activeConversation.id,
               {
                 ...resolvedChatbotConfig,
                 __tenantId: tenantId
               },
-              resolvedContactNumber
+              senderPhone
             );
           } catch (error) {
             console.error("[lead] erro na extração:", error);

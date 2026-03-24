@@ -685,6 +685,7 @@ private async evaluateConfig(
     phoneNumber: string
   ): Promise<void> {
     const tenantId = chatbotConfig.__tenantId?.trim();
+    console.log("[lead:phone] raw phoneNumber received:", JSON.stringify(phoneNumber));
 
     if (!tenantId) {
       return;
@@ -737,16 +738,16 @@ private async evaluateConfig(
         (typeof contactFields?.lastRemoteJid === "string" && contactFields.lastRemoteJid.trim()) ||
         toJid(conversation.contact?.phoneNumber ?? phoneNumber);
       const rawPhone =
+        phoneNumber ||
         (typeof contactFields?.sharedPhoneJid === "string" && contactFields.sharedPhoneJid) ||
         (typeof contactFields?.lastRemoteJid === "string" && contactFields.lastRemoteJid) ||
         conversation.contact?.phoneNumber ||
-        phoneNumber ||
         remoteJid;
       const cleanPhone = String(rawPhone ?? "")
-        .replace(/@s\.whatsapp\.net/gi, "")
-        .replace(/@c\.us/gi, "")
+        .replace(/@s\.whatsapp\.net$/i, "")
+        .replace(/@c\.us$/i, "")
         .replace(/@.*$/, "")
-        .replace(/[^\d]/g, "");
+        .replace(/\D/g, "");
       console.log("[lead:phone] cleanPhone:", cleanPhone);
       const messages = await this.loadLeadConversationMessages(prisma, conversation.instanceId, remoteJid);
       const extracted = await this.extractLeadWithAi(messages, cleanPhone, chatbotConfig);

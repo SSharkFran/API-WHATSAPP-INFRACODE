@@ -7,7 +7,12 @@ import type { AppConfig } from "../../config.js";
 import type { PlatformPrisma, TenantPrismaRegistry } from "../../lib/database.js";
 import { decrypt } from "../../lib/crypto.js";
 import { ApiError } from "../../lib/errors.js";
-import { assertValidPhoneNumber, normalizePhoneNumber, toJid } from "../../lib/phone.js";
+import {
+  assertValidPhoneNumber,
+  normalizePhoneNumber,
+  normalizeWhatsAppPhoneNumber,
+  toJid
+} from "../../lib/phone.js";
 import type { ChatMessage } from "./agents/types.js";
 import { chatbotAiConfigSchema, chatbotRuleSchema, googleCalendarModuleSchema, upsertChatbotAiBodySchema } from "./schemas.js";
 import { GoogleCalendarTool } from "./tools/google-calendar.tool.js";
@@ -49,6 +54,7 @@ interface ExtractedLeadFromConversation {
   porte: LeadPorte;
   servico: LeadServiceLevel;
   horario: string | null;
+  endereco: string | null;
   sujeira: LeadDirtLevel | null;
   valorEstimado: number;
 }
@@ -59,6 +65,7 @@ interface ExtractedLeadAiPayload {
   porte: LeadPorte | null;
   servico: LeadServiceLevel | null;
   horario: string | null;
+  endereco: string | null;
   sujeira: LeadDirtLevel | null;
 }
 
@@ -169,6 +176,7 @@ const leadExtractionAiSystemPrompt = [
   "  Return null only if no vehicle mentioned.",
   "- servico: exactly 'Essencial', 'Completa', or 'Detalhada' (or null)",
   "- horario: any time or date preference (string or null)",
+  "- endereco: the address or location where the service should be performed (string or null)",
   "- sujeira: 'Leve', 'Média', 'Pesada', or null",
   "",
   "Return ONLY the JSON object, nothing else."
@@ -727,8 +735,14 @@ private async evaluateConfig(
       const remoteJid =
         (typeof contactFields?.lastRemoteJid === "string" && contactFields.lastRemoteJid.trim()) ||
         toJid(conversation.contact?.phoneNumber ?? phoneNumber);
+      const leadPhoneNumber = this.resolveLeadContactPhoneNumber(
+        typeof contactFields?.sharedPhoneJid === "string" ? contactFields.sharedPhoneJid : null,
+        conversation.contact?.phoneNumber ?? null,
+        phoneNumber,
+        remoteJid
+      );
       const messages = await this.loadLeadConversationMessages(prisma, conversation.instanceId, remoteJid);
-      const extracted = await this.extractLeadWithAi(messages, phoneNumber, chatbotConfig);
+      const extracted = await this.extractLeadWithAi(messages, leadPhoneNumber, chatbotConfig);
 
       console.log("[lead] dados extraídos:", JSON.stringify(extracted));
 
@@ -744,7 +758,8 @@ private async evaluateConfig(
         `Serviço de interesse: Zelo ${extracted.servico}`,
         `Sujeira Identificada: ${extracted.sujeira ?? "não avaliada"}`,
         `Valor Estimado: R$ ${extracted.valorEstimado.toFixed(2).replace(".", ",")}`,
-        `Horário agendado: ${extracted.horario ?? "a confirmar pelo consultor"}`
+        `Horário agendado: ${extracted.horario ?? "a confirmar pelo consultor"}`,
+        `Endereço: ${extracted.endereco ?? "a confirmar pelo consultor"}`
       ].join("\n");
       const instanceAlertPhone = chatbotConfig.leadsPhoneNumber?.trim() || null;
       const adminAlertPhone =
@@ -785,7 +800,7 @@ private async evaluateConfig(
           awaitingLeadExtraction: false
         } as Prisma.ConversationUncheckedUpdateInput
       });
-      console.log("[lead] lead enviado para:", phoneNumber);
+      console.log("[lead] lead enviado para:", leadPhoneNumber);
     } catch (error) {
       console.error("[lead] erro na extração:", error);
       await prisma.conversation.update({
@@ -871,6 +886,7 @@ private async evaluateConfig(
       porte,
       servico: extractedLead.servico,
       horario: extractedLead.horario,
+      endereco: extractedLead.endereco,
       sujeira: extractedLead.sujeira,
       valorEstimado: Number((basePrice + surcharge).toFixed(2))
     };
@@ -949,11 +965,24 @@ private async evaluateConfig(
         porte: this.normalizeLeadPorte(parsed.porte) ?? (this.parseNullableLeadString(parsed.veiculo) ? "Médio" : null),
         servico: this.normalizeLeadServiceValue(parsed.servico),
         horario: this.parseNullableLeadString(parsed.horario),
+        endereco: this.parseNullableLeadString(parsed.endereco),
         sujeira: this.normalizeLeadDirtLevel(parsed.sujeira)
       };
     } catch {
       return null;
     }
+  }
+
+  private resolveLeadContactPhoneNumber(...candidates: Array<string | null | undefined>): string {
+    for (const candidate of candidates) {
+      const normalized = normalizeWhatsAppPhoneNumber(candidate);
+
+      if (normalized) {
+        return normalized;
+      }
+    }
+
+    return normalizePhoneNumber(candidates.find((candidate): candidate is string => typeof candidate === "string") ?? "");
   }
 
   private parseNullableLeadString(value: unknown): string | null {

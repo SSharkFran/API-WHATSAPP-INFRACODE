@@ -475,6 +475,14 @@ const startSocket = async (): Promise<void> => {
         });
       }
     });
+
+    nextSocket.ev.on("chats.phoneNumberShare", ({ lid, jid }) => {
+      parentPort?.postMessage({
+        type: "phone-number-share",
+        lid,
+        jid
+      });
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Falha inesperada ao iniciar o worker";
     log("error", "Falha ao iniciar o socket da instancia", {

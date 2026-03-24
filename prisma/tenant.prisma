@@ -157,6 +157,8 @@ model ChatbotConfig {
   isEnabled       Boolean  @default(false)
   welcomeMessage  String?
   fallbackMessage String?
+  humanTakeoverStartMessage String?
+  humanTakeoverEndMessage String?
   rules           Json
   aiSettings      Json?
   aiApiKeyEncrypted   String?

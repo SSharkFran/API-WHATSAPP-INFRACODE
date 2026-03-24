@@ -129,6 +129,8 @@ export const registerChatbotRoutes = async (app: FastifyInstance): Promise<void>
         isEnabled: currentConfig.isEnabled,
         welcomeMessage: currentConfig.welcomeMessage ?? null,
         fallbackMessage: currentConfig.fallbackMessage ?? null,
+        humanTakeoverStartMessage: currentConfig.humanTakeoverStartMessage ?? null,
+        humanTakeoverEndMessage: currentConfig.humanTakeoverEndMessage ?? null,
         rules: currentConfig.rules,
         ai: {
           isEnabled: currentConfig.ai.isEnabled,

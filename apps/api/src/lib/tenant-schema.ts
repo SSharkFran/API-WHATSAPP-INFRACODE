@@ -138,6 +138,8 @@ export const buildTenantSchemaSql = (schemaName: string): string[] => {
       "isEnabled" BOOLEAN NOT NULL DEFAULT FALSE,
       "welcomeMessage" TEXT,
       "fallbackMessage" TEXT,
+      "humanTakeoverStartMessage" TEXT,
+      "humanTakeoverEndMessage" TEXT,
       "rules" JSONB NOT NULL DEFAULT '[]'::JSONB,
       "aiSettings" JSONB NOT NULL DEFAULT '{}'::JSONB,
       "aiApiKeyEncrypted" TEXT,
@@ -161,6 +163,8 @@ export const buildTenantSchemaSql = (schemaName: string): string[] => {
       "updatedAt" TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );`,
     `ALTER TABLE ${schema}."ChatbotConfig" ADD COLUMN IF NOT EXISTS "aiSettings" JSONB NOT NULL DEFAULT '{}'::JSONB;`,
+    `ALTER TABLE ${schema}."ChatbotConfig" ADD COLUMN IF NOT EXISTS "humanTakeoverStartMessage" TEXT;`,
+    `ALTER TABLE ${schema}."ChatbotConfig" ADD COLUMN IF NOT EXISTS "humanTakeoverEndMessage" TEXT;`,
     `ALTER TABLE ${schema}."ChatbotConfig" ADD COLUMN IF NOT EXISTS "aiApiKeyEncrypted" TEXT;`,
     `ALTER TABLE ${schema}."ChatbotConfig" ADD COLUMN IF NOT EXISTS "aiFallbackProvider" TEXT;`,
     `ALTER TABLE ${schema}."ChatbotConfig" ADD COLUMN IF NOT EXISTS "aiFallbackApiKey" TEXT;`,

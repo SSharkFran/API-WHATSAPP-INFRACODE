@@ -26,6 +26,8 @@ interface ChatbotFormState {
   isEnabled: boolean;
   welcomeMessage: string;
   fallbackMessage: string;
+  humanTakeoverStartMessage: string;
+  humanTakeoverEndMessage: string;
   leadsPhoneNumber: string;
   leadsEnabled: boolean;
   fiadoEnabled: boolean;
@@ -89,6 +91,8 @@ const buildDefaultFormState = (): ChatbotFormState => ({
   isEnabled: false,
   welcomeMessage: "",
   fallbackMessage: "",
+  humanTakeoverStartMessage: "",
+  humanTakeoverEndMessage: "",
   leadsPhoneNumber: "",
   leadsEnabled: true,
   fiadoEnabled: false,
@@ -162,6 +166,8 @@ const mapConfigToFormState = (config: ChatbotConfig): ChatbotFormState => ({
   isEnabled: config.isEnabled,
   welcomeMessage: config.welcomeMessage ?? "",
   fallbackMessage: config.fallbackMessage ?? "",
+  humanTakeoverStartMessage: config.humanTakeoverStartMessage ?? "",
+  humanTakeoverEndMessage: config.humanTakeoverEndMessage ?? "",
   leadsPhoneNumber: config.leadsPhoneNumber ?? "",
   leadsEnabled: config.leadsEnabled ?? true,
   fiadoEnabled: config.fiadoEnabled ?? false,
@@ -323,6 +329,8 @@ export const ChatbotStudio = ({ initialInstances }: ChatbotStudioProps) => {
           isEnabled: formState.isEnabled,
           welcomeMessage: formState.welcomeMessage.trim() || null,
           fallbackMessage: formState.fallbackMessage.trim() || null,
+          humanTakeoverStartMessage: formState.humanTakeoverStartMessage.trim() || null,
+          humanTakeoverEndMessage: formState.humanTakeoverEndMessage.trim() || null,
           leadsPhoneNumber: formState.leadsPhoneNumber.trim() || null,
           leadsEnabled: formState.leadsEnabled,
           fiadoEnabled: formState.fiadoEnabled,
@@ -498,6 +506,30 @@ export const ChatbotStudio = ({ initialInstances }: ChatbotStudioProps) => {
                     value={formState.fallbackMessage}
                     onChange={(e) => setFormState((c) => ({ ...c, fallbackMessage: e.target.value }))}
                     placeholder="Não encontrei resposta. Digite suporte para falar com o time."
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-[var(--text-secondary)]">
+                    Mensagem ao ativar atendimento humano
+                  </label>
+                  <textarea
+                    className={[textareaClass, "min-h-[100px]"].join(" ")}
+                    value={formState.humanTakeoverStartMessage}
+                    onChange={(e) => setFormState((c) => ({ ...c, humanTakeoverStartMessage: e.target.value }))}
+                    placeholder="A partir de agora, seu atendimento será realizado por um especialista da sua empresa..."
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-[var(--text-secondary)]">
+                    Mensagem ao reativar o bot
+                  </label>
+                  <textarea
+                    className={[textareaClass, "min-h-[100px]"].join(" ")}
+                    value={formState.humanTakeoverEndMessage}
+                    onChange={(e) => setFormState((c) => ({ ...c, humanTakeoverEndMessage: e.target.value }))}
+                    placeholder="Olá! Estou de volta para te ajudar. Como posso te atender?"
                   />
                 </div>
 

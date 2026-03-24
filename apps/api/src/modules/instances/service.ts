@@ -1280,6 +1280,18 @@ if (event.status === "CONNECTED") {
         instanceId: instance.id
       }
     });
+    const chatbotConfigWithTakeoverMessages = chatbotConfig as
+      | (typeof chatbotConfig & {
+          humanTakeoverStartMessage?: string | null;
+          humanTakeoverEndMessage?: string | null;
+        })
+      | null;
+    const humanTakeoverStartMessage =
+      chatbotConfigWithTakeoverMessages?.humanTakeoverStartMessage?.trim() ||
+      "A partir de agora, seu atendimento será realizado por um especialista. Em instantes ele entrará em contato. 🚗✨";
+    const humanTakeoverEndMessage =
+      chatbotConfigWithTakeoverMessages?.humanTakeoverEndMessage?.trim() ||
+      "Olá! Estou de volta para te ajudar. Como posso te atender? 🚗";
     const instanceAdminPhone = normalizePhoneNumber(chatbotConfig?.leadsPhoneNumber ?? "");
     const isAdminSender = Boolean(instanceAdminPhone && normalizePhoneNumber(resolvedContactNumber) === instanceAdminPhone);
 
@@ -1412,9 +1424,7 @@ if (event.status === "CONNECTED") {
         instance.id,
         resolvedContactNumber,
         event.remoteJid,
-        nextHumanTakeover
-          ? "A partir de agora, seu atendimento será realizado por um especialista da Zelo. Em instantes ele entrará em contato. 🚗✨"
-          : "Olá! Estou de volta para te ajudar. Como posso te atender? 🚗",
+        nextHumanTakeover ? humanTakeoverStartMessage : humanTakeoverEndMessage,
         {
           action: nextHumanTakeover ? "human_takeover_enabled" : "human_takeover_disabled",
           kind: "chatbot"
@@ -1463,7 +1473,7 @@ if (event.status === "CONNECTED") {
           instance.id,
           resolvedContactNumber,
           event.remoteJid,
-          "Olá! Estou de volta para te ajudar. Como posso te atender? 🚗",
+          humanTakeoverEndMessage,
           {
             action: "human_takeover_disabled",
             kind: "chatbot"
@@ -1496,7 +1506,7 @@ if (event.status === "CONNECTED") {
         instance.id,
         resolvedContactNumber,
         event.remoteJid,
-        "A partir de agora, seu atendimento será realizado por um especialista da Zelo. Em instantes ele entrará em contato. 🚗✨",
+        humanTakeoverStartMessage,
         {
           action: "human_takeover_enabled",
           kind: "chatbot"

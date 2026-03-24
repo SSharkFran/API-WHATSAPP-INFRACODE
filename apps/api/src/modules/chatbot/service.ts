@@ -280,6 +280,8 @@ export class ChatbotService {
       isEnabled: boolean;
       welcomeMessage?: string | null;
       fallbackMessage?: string | null;
+      humanTakeoverStartMessage?: string | null;
+      humanTakeoverEndMessage?: string | null;
       rules: ChatbotRule[];
       ai?: z.infer<typeof chatbotAiUpsertSchema>;
       leadsPhoneNumber?: string | null;
@@ -338,6 +340,8 @@ export class ChatbotService {
         isEnabled: input.isEnabled,
         welcomeMessage: input.welcomeMessage?.trim() || null,
         fallbackMessage: input.fallbackMessage?.trim() || null,
+        humanTakeoverStartMessage: input.humanTakeoverStartMessage?.trim() || null,
+        humanTakeoverEndMessage: input.humanTakeoverEndMessage?.trim() || null,
         rules,
         aiSettings: this.buildPersistedAiSettings(aiInput),
         aiApiKeyEncrypted: null,
@@ -360,6 +364,8 @@ export class ChatbotService {
         isEnabled: input.isEnabled,
         welcomeMessage: input.welcomeMessage?.trim() || null,
         fallbackMessage: input.fallbackMessage?.trim() || null,
+        humanTakeoverStartMessage: input.humanTakeoverStartMessage?.trim() || null,
+        humanTakeoverEndMessage: input.humanTakeoverEndMessage?.trim() || null,
         rules,
         aiSettings: this.buildPersistedAiSettings(aiInput),
         aiApiKeyEncrypted: null,
@@ -401,6 +407,8 @@ export class ChatbotService {
         isEnabled: false,
         welcomeMessage: null,
         fallbackMessage: null,
+        humanTakeoverStartMessage: null,
+        humanTakeoverEndMessage: null,
         rules: [] as Prisma.InputJsonValue,
         aiSettings: this.buildPersistedAiSettings(defaultAiSettings),
         aiApiKeyEncrypted: null,
@@ -475,6 +483,8 @@ public async simulate(
             isEnabled: false,
             welcomeMessage: null,
             fallbackMessage: null,
+            humanTakeoverStartMessage: null,
+            humanTakeoverEndMessage: null,
             leadsGroupJid: null,
             leadsGroupName: null,
             leadsPhoneNumber: null,
@@ -603,6 +613,8 @@ private async evaluateConfig(
       isEnabled: boolean;
       welcomeMessage: string | null;
       fallbackMessage: string | null;
+      humanTakeoverStartMessage?: string | null;
+      humanTakeoverEndMessage?: string | null;
       leadsGroupJid?: string | null;
       leadsGroupName?: string | null;
       leadsPhoneNumber?: string | null;
@@ -637,6 +649,8 @@ private async evaluateConfig(
       isEnabled: record.isEnabled,
       welcomeMessage: record.welcomeMessage,
       fallbackMessage: record.fallbackMessage,
+      humanTakeoverStartMessage: record.humanTakeoverStartMessage ?? null,
+      humanTakeoverEndMessage: record.humanTakeoverEndMessage ?? null,
       leadsGroupJid: record.leadsGroupJid ?? null,
       leadsGroupName: record.leadsGroupName ?? null,
       leadsPhoneNumber: record.leadsPhoneNumber ?? null,

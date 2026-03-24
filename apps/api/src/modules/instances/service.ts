@@ -1163,6 +1163,7 @@ if (event.status === "CONNECTED") {
     const isPermanentDisableCommand = msgText === "**";
     const isResetCommand = msgText === "/reset";
     const isControlCommand = isTemporaryTakeoverCommand || isPermanentDisableCommand || isResetCommand;
+    const isInstanceControlCommand = event.messageKey?.fromMe === true && isControlCommand;
 
     if (false && msgText === "/reset") {
       const resetContact = await prisma.contact.findFirst({
@@ -1324,7 +1325,9 @@ if (event.status === "CONNECTED") {
       chatbotConfigWithTakeoverMessages?.humanTakeoverEndMessage?.trim() ||
       "Olá! Estou de volta para te ajudar. Como posso te atender? 🚗";
     const instanceAdminPhone = normalizePhoneNumber(chatbotConfig?.leadsPhoneNumber ?? "");
-    const isAdminSender = Boolean(instanceAdminPhone && normalizePhoneNumber(resolvedContactNumber) === instanceAdminPhone);
+    const isAdminSender =
+      isInstanceControlCommand ||
+      Boolean(instanceAdminPhone && normalizePhoneNumber(resolvedContactNumber) === instanceAdminPhone);
 
     const conversation = await prisma.conversation.findFirst({
       where: {

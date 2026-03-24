@@ -483,7 +483,15 @@ const startSocket = async (): Promise<void> => {
       try {
         const { messages } = payload as UpsertMessageEvent;
         for (const message of messages) {
-          if (message.key.fromMe || !message.key.remoteJid || !message.message) {
+          if (!message.key.remoteJid || !message.message) {
+            continue;
+          }
+
+          const serializedPayload = serializeIncomingPayload(message.message as Record<string, unknown>);
+          const text = typeof serializedPayload.text === "string" ? serializedPayload.text.trim().toLowerCase() : "";
+          const isControlCommand = text === "*" || text === "**" || text === "/reset";
+
+          if (message.key.fromMe && !isControlCommand) {
             continue;
           }
 
@@ -492,7 +500,7 @@ const startSocket = async (): Promise<void> => {
             remoteJid: message.key.remoteJid,
             externalMessageId: message.key.id,
             payload: {
-              ...serializeIncomingPayload(message.message as Record<string, unknown>),
+              ...serializedPayload,
               pushName: message.pushName ?? null
             },
             messageType: detectMessageType(message.message as Record<string, unknown>),

@@ -734,13 +734,19 @@ private async evaluateConfig(
         conversation.contact?.fields && typeof conversation.contact.fields === "object"
           ? (conversation.contact.fields as Record<string, unknown>)
           : null;
-      const remoteJid =
-        (typeof contactFields?.lastRemoteJid === "string" && contactFields.lastRemoteJid.trim()) ||
-        toJid(conversation.contact?.phoneNumber ?? phoneNumber);
+      const lastRemoteJid =
+        typeof contactFields?.lastRemoteJid === "string" && contactFields.lastRemoteJid.trim()
+          ? contactFields.lastRemoteJid.trim()
+          : null;
+      const sharedPhoneJid =
+        typeof contactFields?.sharedPhoneJid === "string" && contactFields.sharedPhoneJid.trim()
+          ? contactFields.sharedPhoneJid.trim()
+          : null;
+      const remoteJid = lastRemoteJid || toJid(conversation.contact?.phoneNumber ?? phoneNumber);
       const rawPhone =
+        sharedPhoneJid ||
+        (lastRemoteJid && /@(s\.whatsapp\.net|c\.us)$/i.test(lastRemoteJid) ? lastRemoteJid : null) ||
         phoneNumber ||
-        (typeof contactFields?.sharedPhoneJid === "string" && contactFields.sharedPhoneJid) ||
-        (typeof contactFields?.lastRemoteJid === "string" && contactFields.lastRemoteJid) ||
         conversation.contact?.phoneNumber ||
         remoteJid;
       const cleanPhone = String(rawPhone ?? "")
@@ -749,7 +755,14 @@ private async evaluateConfig(
         .replace(/@.*$/, "")
         .replace(/\D/g, "");
       console.log("[lead:phone] cleanPhone:", cleanPhone);
-      const messages = await this.loadLeadConversationMessages(prisma, conversation.instanceId, remoteJid);
+      const leadRemoteJids = Array.from(
+        new Set(
+          [lastRemoteJid, sharedPhoneJid, remoteJid, cleanPhone ? toJid(cleanPhone) : null].filter(
+            (value): value is string => Boolean(value)
+          )
+        )
+      );
+      const messages = await this.loadLeadConversationMessages(prisma, conversation.instanceId, leadRemoteJids);
       const extracted = await this.extractLeadWithAi(messages, cleanPhone, chatbotConfig);
 
       console.log("[lead] dados extraídos:", JSON.stringify(extracted));
@@ -905,12 +918,18 @@ private async evaluateConfig(
   private async loadLeadConversationMessages(
     prisma: Awaited<ReturnType<TenantPrismaRegistry["getClient"]>>,
     instanceId: string,
-    remoteJid: string
+    remoteJids: string[]
   ): Promise<ChatMessage[]> {
+    if (remoteJids.length === 0) {
+      return [];
+    }
+
     const records = await prisma.message.findMany({
       where: {
         instanceId,
-        remoteJid
+        remoteJid: {
+          in: remoteJids
+        }
       },
       orderBy: {
         createdAt: "asc"

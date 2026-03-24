@@ -986,6 +986,9 @@ if (event.status === "CONNECTED") {
     await this.tenantPrismaRegistry.ensureSchema(this.platformPrisma, tenantId);
     const prisma = await this.tenantPrismaRegistry.getClient(tenantId);
     const remotePhoneFromJid = normalizeWhatsAppPhoneNumber(event.remoteJid);
+    const realPhoneFromRemoteJid = /@(s\.whatsapp\.net|c\.us)$/i.test(event.remoteJid)
+      ? event.remoteJid.replace(/@.*$/, "").replace(/\D/g, "")
+      : null;
     const remoteNumber = remotePhoneFromJid ?? normalizePhoneNumber(event.remoteJid.split("@")[0] ?? "");
     const sessionKey = this.buildConversationSessionKey(instance.id, event.remoteJid);
     const msgText = typeof event.payload.text === "string" ? event.payload.text.trim().toLowerCase() : "";
@@ -1079,6 +1082,7 @@ if (event.status === "CONNECTED") {
     );
     const storedContactPhoneNumber =
       sharedPhoneNumber ??
+      realPhoneFromRemoteJid ??
       existingContactByRemoteJid?.phoneNumber ??
       remoteNumber;
     const existingContactByPhoneNumber =
@@ -1096,7 +1100,7 @@ if (event.status === "CONNECTED") {
         ? (existingContactByPhoneNumber.fields as Record<string, unknown>)
         : {}),
       lastRemoteJid: event.remoteJid,
-      ...(remotePhoneFromJid ? { sharedPhoneJid: event.remoteJid } : {})
+      ...(realPhoneFromRemoteJid ? { sharedPhoneJid: event.remoteJid } : {})
     } as Prisma.InputJsonValue;
     const contact = await prisma.contact.upsert({
       where: {
@@ -1124,6 +1128,7 @@ if (event.status === "CONNECTED") {
       normalizeWhatsAppPhoneNumber(
         typeof contactFields?.sharedPhoneJid === "string" ? contactFields.sharedPhoneJid : null
       ) ??
+      realPhoneFromRemoteJid ??
       normalizeWhatsAppPhoneNumber(contact.phoneNumber) ??
       remotePhoneFromJid ??
       contact.phoneNumber ??
@@ -1644,11 +1649,14 @@ if (event.status === "CONNECTED") {
         void (async () => {
           try {
             const resolvedChatbotConfig = await this.chatbotService.getConfig(tenantId, instance.id);
-            const senderJid =
+            const senderPhoneSource =
               (typeof contactFields?.sharedPhoneJid === "string" && contactFields.sharedPhoneJid) ||
+              realPhoneFromRemoteJid ||
+              contact.phoneNumber ||
               event.remoteJid;
+            console.log("[lead:phone] source variable:", JSON.stringify(senderPhoneSource));
             const senderPhone =
-              String(senderJid ?? "")
+              String(senderPhoneSource ?? "")
                 .replace(/@s\.whatsapp\.net$/i, "")
                 .replace(/@c\.us$/i, "")
                 .replace(/@.*$/, "")

@@ -75,6 +75,7 @@ interface ProfileWorkerEvent {
 interface InboundMessageWorkerEvent {
   type: "inbound-message";
   remoteJid: string;
+  senderJid?: string | null;
   externalMessageId?: string;
   payload: Record<string, unknown>;
   messageType: MessageType;
@@ -1163,7 +1164,30 @@ if (event.status === "CONNECTED") {
     const isPermanentDisableCommand = msgText === "**";
     const isResetCommand = msgText === "/reset";
     const isControlCommand = isTemporaryTakeoverCommand || isPermanentDisableCommand || isResetCommand;
-    const isInstanceControlCommand = event.messageKey?.fromMe === true && isControlCommand;
+    if (event.messageKey?.fromMe && event.externalMessageId) {
+      const echoedOutboundMessage = await prisma.message.findFirst({
+        where: {
+          instanceId: instance.id,
+          externalMessageId: event.externalMessageId,
+          direction: "OUTBOUND"
+        },
+        select: {
+          payload: true
+        }
+      });
+      const outboundPayload =
+        echoedOutboundMessage?.payload && typeof echoedOutboundMessage.payload === "object"
+          ? (echoedOutboundMessage.payload as Record<string, unknown>)
+          : null;
+      const automationPayload =
+        outboundPayload?.automation && typeof outboundPayload.automation === "object"
+          ? (outboundPayload.automation as Record<string, unknown>)
+          : null;
+
+      if (automationPayload?.kind === "chatbot") {
+        return;
+      }
+    }
 
     if (false && msgText === "/reset") {
       const resetContact = await prisma.contact.findFirst({
@@ -1307,11 +1331,21 @@ if (event.status === "CONNECTED") {
       remotePhoneFromJid ??
       contact.phoneNumber ??
       remoteNumber;
-    const chatbotConfig = await prisma.chatbotConfig.findUnique({
-      where: {
-        instanceId: instance.id
-      }
-    });
+    const [chatbotConfig, currentInstance] = await Promise.all([
+      prisma.chatbotConfig.findUnique({
+        where: {
+          instanceId: instance.id
+        }
+      }),
+      prisma.instance.findUnique({
+        where: {
+          id: instance.id
+        },
+        select: {
+          phoneNumber: true
+        }
+      })
+    ]);
     const chatbotConfigWithTakeoverMessages = chatbotConfig as
       | (typeof chatbotConfig & {
           humanTakeoverStartMessage?: string | null;
@@ -1320,14 +1354,19 @@ if (event.status === "CONNECTED") {
       | null;
     const humanTakeoverStartMessage =
       chatbotConfigWithTakeoverMessages?.humanTakeoverStartMessage?.trim() ||
-      "A partir de agora, seu atendimento será realizado por um especialista. Em instantes ele entrará em contato. 🚗✨";
+      "A partir de agora, seu atendimento será realizado por um especialista da Zelo. Em instantes ele entrará em contato. 🚗✨";
     const humanTakeoverEndMessage =
       chatbotConfigWithTakeoverMessages?.humanTakeoverEndMessage?.trim() ||
       "Olá! Estou de volta para te ajudar. Como posso te atender? 🚗";
-    const instanceAdminPhone = normalizePhoneNumber(chatbotConfig?.leadsPhoneNumber ?? "");
-    const isAdminSender =
-      isInstanceControlCommand ||
-      Boolean(instanceAdminPhone && normalizePhoneNumber(resolvedContactNumber) === instanceAdminPhone);
+    const senderJid = event.senderJid ?? event.remoteJid;
+    const senderNumber =
+      normalizeWhatsAppPhoneNumber(senderJid) ??
+      normalizePhoneNumber(String(senderJid ?? "").split("@")[0]?.split(":")[0] ?? "");
+    const instanceAlertPhone = normalizePhoneNumber(chatbotConfig?.leadsPhoneNumber ?? "");
+    const instanceOwnPhone = normalizePhoneNumber(currentInstance?.phoneNumber ?? instance.phoneNumber ?? "");
+    const isAdminSender = Boolean(instanceAlertPhone && senderNumber === instanceAlertPhone);
+    const isInstanceSender = Boolean(instanceOwnPhone && senderNumber === instanceOwnPhone);
+    const isAdminOrInstanceSender = isAdminSender || isInstanceSender;
 
     const conversation = await prisma.conversation.findFirst({
       where: {
@@ -1438,37 +1477,9 @@ if (event.status === "CONNECTED") {
       activeConversation.humanTakeoverAt = null;
     }
 
-    if (false && msgText === "*" && isAdminSender) {
-      const nextHumanTakeover = !activeConversation.humanTakeover;
-      await prisma.conversation.update({
-        where: {
-          id: activeConversation.id
-        },
-        data: {
-          humanTakeover: nextHumanTakeover,
-          humanTakeoverAt: nextHumanTakeover ? new Date() : null
-        } as Prisma.ConversationUncheckedUpdateInput
-      });
+    if (isAdminOrInstanceSender && isPermanentDisableCommand) {
+      this.clearConversationSession(sessionKey);
 
-      activeConversation.humanTakeover = nextHumanTakeover;
-      activeConversation.humanTakeoverAt = nextHumanTakeover ? new Date() : null;
-
-      await this.sendAutomatedTextMessage(
-        tenantId,
-        instance.id,
-        resolvedContactNumber,
-        event.remoteJid,
-        nextHumanTakeover ? humanTakeoverStartMessage : humanTakeoverEndMessage,
-        {
-          action: nextHumanTakeover ? "human_takeover_enabled" : "human_takeover_disabled",
-          kind: "chatbot"
-        }
-      );
-
-      return;
-    }
-
-    if (isAdminSender && isPermanentDisableCommand) {
       await prisma.conversation.update({
         where: {
           id: activeConversation.id
@@ -1487,7 +1498,9 @@ if (event.status === "CONNECTED") {
       return;
     }
 
-    if (isAdminSender && isTemporaryTakeoverCommand) {
+    if (isAdminOrInstanceSender && isTemporaryTakeoverCommand) {
+      this.clearConversationSession(sessionKey);
+
       if (activeConversation.humanTakeover) {
         await prisma.conversation.update({
           where: {
@@ -1550,7 +1563,7 @@ if (event.status === "CONNECTED") {
       return;
     }
 
-    if (isAdminSender && isResetCommand) {
+    if (isAdminOrInstanceSender && isResetCommand) {
       await prisma.conversation.update({
         where: {
           id: activeConversation.id
@@ -1572,6 +1585,28 @@ if (event.status === "CONNECTED") {
         }
       });
       this.clearConversationSession(sessionKey);
+
+      return;
+    }
+
+    if (isAdminOrInstanceSender && !isControlCommand) {
+      this.clearConversationSession(sessionKey);
+
+      if (!activeConversation.aiDisabledPermanent) {
+        const humanTakeoverAt = new Date();
+        await prisma.conversation.update({
+          where: {
+            id: activeConversation.id
+          },
+          data: {
+            humanTakeover: true,
+            humanTakeoverAt
+          } as Prisma.ConversationUncheckedUpdateInput
+        });
+
+        activeConversation.humanTakeover = true;
+        activeConversation.humanTakeoverAt = humanTakeoverAt;
+      }
 
       return;
     }
@@ -1629,11 +1664,11 @@ if (event.status === "CONNECTED") {
 
     const isAiBlocked = activeConversation.aiDisabledPermanent || activeConversation.humanTakeover;
 
-    if (isControlCommand && !isAdminSender) {
+    if (isControlCommand && !isAdminOrInstanceSender) {
       return;
     }
 
-    if (isAiBlocked && !isAdminSender) {
+    if (isAiBlocked && !isAdminOrInstanceSender && !isControlCommand) {
       return;
     }
 
@@ -2315,6 +2350,23 @@ if (event.status === "CONNECTED") {
     }
   }
 
+  private async isConversationAiBlocked(
+    prisma: Awaited<ReturnType<TenantPrismaRegistry["getClient"]>>,
+    conversationId: string
+  ): Promise<boolean> {
+    const conversation = await prisma.conversation.findUnique({
+      where: {
+        id: conversationId
+      },
+      select: {
+        humanTakeover: true,
+        aiDisabledPermanent: true
+      }
+    });
+
+    return Boolean(conversation?.humanTakeover || conversation?.aiDisabledPermanent);
+  }
+
   private async processConversationTurn(params: PendingConversationTurnContext & {
     inputText: string;
     session: ConversationSession;
@@ -2327,6 +2379,10 @@ if (event.status === "CONNECTED") {
     const adminPhone = platformConfig?.adminAlertPhone ?? null;
 
     if (clientMemory?.tags.includes("paused_by_human")) {
+      return;
+    }
+
+    if (await this.isConversationAiBlocked(prisma, params.conversationId)) {
       return;
     }
 
@@ -2352,6 +2408,11 @@ if (event.status === "CONNECTED") {
         phoneNumber: params.resolvedContactNumber,
         clientMessage: params.inputText
       });
+
+      if (await this.isConversationAiBlocked(prisma, params.conversationId)) {
+        return;
+      }
+
       await this.sendConversationWithDelay({
         tenantId: params.tenantId,
         instanceId: params.instance.id,
@@ -2362,6 +2423,7 @@ if (event.status === "CONNECTED") {
           action: "fiado_agent",
           kind: "chatbot"
         },
+        conversationId: params.conversationId,
         session: params.session
       });
       return;
@@ -2516,9 +2578,17 @@ if (event.status === "CONNECTED") {
       return;
     }
 
+    if (await this.isConversationAiBlocked(prisma, params.conversationId)) {
+      return;
+    }
+
     if (clientText.includes("|||")) {
       const partes = clientText.split("|||").map((p) => p.trim()).filter(Boolean);
       for (const parte of partes) {
+        if (await this.isConversationAiBlocked(prisma, params.conversationId)) {
+          return;
+        }
+
         await this.sendAutomatedTextMessage(
           params.tenantId,
           params.instance.id,
@@ -2607,8 +2677,10 @@ if (event.status === "CONNECTED") {
     targetJid: string;
     text: string;
     metadata: Record<string, unknown>;
+    conversationId: string;
     session: ConversationSession;
   }): Promise<void> {
+    const prisma = await this.tenantPrismaRegistry.getClient(params.tenantId);
     const responseParts = params.text
       .split("|||")
       .map((part) => part.trim())
@@ -2619,6 +2691,10 @@ if (event.status === "CONNECTED") {
     }
 
     for (const [index, responsePart] of responseParts.entries()) {
+      if (await this.isConversationAiBlocked(prisma, params.conversationId)) {
+        return;
+      }
+
       await this.sendAutomatedTextMessage(
         params.tenantId,
         params.instanceId,

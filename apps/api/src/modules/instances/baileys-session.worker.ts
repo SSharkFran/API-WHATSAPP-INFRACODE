@@ -64,6 +64,7 @@ interface UpsertMessageEvent {
       fromMe?: boolean | null;
       remoteJid?: string | null;
       id?: string | null;
+      participant?: string | null;
     };
     message?: Record<string, unknown> | null;
     pushName?: string | null;
@@ -488,16 +489,16 @@ const startSocket = async (): Promise<void> => {
           }
 
           const serializedPayload = serializeIncomingPayload(message.message as Record<string, unknown>);
-          const text = typeof serializedPayload.text === "string" ? serializedPayload.text.trim().toLowerCase() : "";
-          const isControlCommand = text === "*" || text === "**" || text === "/reset";
-
-          if (message.key.fromMe && !isControlCommand) {
-            continue;
-          }
+          const senderJid =
+            message.key.participant ??
+            (message.key.fromMe
+              ? socket?.user?.id ?? null
+              : message.key.remoteJid);
 
           parentPort?.postMessage({
             type: "inbound-message",
             remoteJid: message.key.remoteJid,
+            senderJid,
             externalMessageId: message.key.id,
             payload: {
               ...serializedPayload,

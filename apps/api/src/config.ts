@@ -46,8 +46,8 @@ const envSchema = z.object({
   DATA_DIR: z.string().default(defaultDataDir),
   PUBLIC_API_BASE_URL: z.string().url().default(defaultPublicApiBaseUrl),
   SMTP_FROM: z.string().email().default("noreply@infracode.local"),
-  GROQ_API_KEY: z.string().min(1),
-  GEMINI_API_KEY: z.string().min(1),
+  GROQ_API_KEY: z.string().min(1).optional(),
+  GEMINI_API_KEY: z.string().min(1).optional(),
   OLLAMA_HOST: z.string().optional()
 });
 
@@ -64,6 +64,14 @@ export const loadConfig = (): AppConfig => {
       "ENABLE_AUTH must be set to true in production. " +
       "Running with authentication disabled in production is not allowed."
     );
+  }
+
+  if (parsed.NODE_ENV === "production" && parsed.JWT_SECRET.length < 32) {
+    throw new Error("JWT_SECRET deve ter no minimo 32 caracteres em producao.");
+  }
+
+  if (parsed.NODE_ENV === "production" && parsed.API_ENCRYPTION_KEY === "0123456789abcdef0123456789abcdef") {
+    console.warn("[config] API_ENCRYPTION_KEY parece ser o valor de exemplo padrao. Use uma chave de alta entropia em producao.");
   }
 
   return {

@@ -47,7 +47,13 @@ export const getBrowserSession = (): PanelSession => {
 };
 
 const persistCookie = (name: string, value: string, maxAgeSeconds: number): void => {
-  document.cookie = `${name}=${encodeURIComponent(value)}; Max-Age=${maxAgeSeconds}; Path=/; SameSite=Lax`;
+  // Estes cookies precisam continuar legiveis no cliente para SSR leve e refresh no browser,
+  // entao nao usamos HttpOnly aqui. Em troca, reforcamos SameSite e habilitamos Secure em HTTPS.
+  const secureFlag =
+    typeof window !== "undefined" && window.location.protocol === "https:"
+      ? "; Secure"
+      : "";
+  document.cookie = `${name}=${encodeURIComponent(value)}; Max-Age=${maxAgeSeconds}; Path=/; SameSite=Lax${secureFlag}`;
 };
 
 /**
@@ -84,7 +90,11 @@ export const clearBrowserSession = (): void => {
   }
 
   for (const name of Object.values(PANEL_COOKIE_NAMES)) {
-    document.cookie = `${name}=; Max-Age=0; Path=/; SameSite=Lax`;
+    const secureFlag =
+      typeof window !== "undefined" && window.location.protocol === "https:"
+        ? "; Secure"
+        : "";
+    document.cookie = `${name}=; Max-Age=0; Path=/; SameSite=Lax${secureFlag}`;
   }
 };
 

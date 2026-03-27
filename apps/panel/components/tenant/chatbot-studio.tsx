@@ -246,6 +246,13 @@ export const ChatbotStudio = ({ initialInstances }: ChatbotStudioProps) => {
     () => instances.find((instance) => instance.id === selectedInstanceId) ?? null,
     [instances, selectedInstanceId]
   );
+  const googleCalendarModule = formState.modules.googleCalendar ?? {
+    isEnabled: false,
+    clientId: "",
+    clientSecret: "",
+    refreshToken: "",
+    calendarId: ""
+  };
 
   useEffect(() => {
     if (!selectedInstanceId) {
@@ -373,7 +380,10 @@ export const ChatbotStudio = ({ initialInstances }: ChatbotStudioProps) => {
   const clearFiado = async (phoneNumber: string) => {
     if (!selectedInstance) return;
     try {
-      await requestClientApi(`/instances/${selectedInstance.id}/fiado/${phoneNumber}`, { method: "DELETE" });
+      await requestClientApi(`/instances/${selectedInstance.id}/fiado/${phoneNumber}`, {
+        method: "DELETE",
+        expectNoContent: true
+      });
       setFiadoTabs((current) => current.filter((t) => t.phoneNumber !== phoneNumber));
       setSuccess("Fiado limpo.");
     } catch (caught) {
@@ -1229,6 +1239,110 @@ export const ChatbotStudio = ({ initialInstances }: ChatbotStudioProps) => {
                   </div>
                 ))}
               </div>
+
+              {googleCalendarModule.isEnabled ? (
+                <div className="border-t border-[var(--border-subtle)] p-5">
+                  <div className="mb-4">
+                    <p className="text-xs font-medium uppercase tracking-[0.18em] text-[var(--text-tertiary)]">
+                      Credenciais Google Calendar
+                    </p>
+                    <p className="mt-1 text-sm text-[var(--text-secondary)]">
+                      Preencha as credenciais OAuth e o calendário onde os eventos devem ser criados.
+                    </p>
+                  </div>
+
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-medium text-[var(--text-secondary)]">Client ID</label>
+                      <input
+                        type="text"
+                        className={[fieldClass, "h-11"].join(" ")}
+                        value={googleCalendarModule.clientId}
+                        onChange={(e) =>
+                          setFormState((current) => ({
+                            ...current,
+                            modules: {
+                              ...current.modules,
+                              googleCalendar: {
+                                ...googleCalendarModule,
+                                clientId: e.target.value,
+                                isEnabled: true
+                              }
+                            }
+                          }))
+                        }
+                      />
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-medium text-[var(--text-secondary)]">Client Secret</label>
+                      <input
+                        type="password"
+                        className={[fieldClass, "h-11"].join(" ")}
+                        value={googleCalendarModule.clientSecret}
+                        onChange={(e) =>
+                          setFormState((current) => ({
+                            ...current,
+                            modules: {
+                              ...current.modules,
+                              googleCalendar: {
+                                ...googleCalendarModule,
+                                clientSecret: e.target.value,
+                                isEnabled: true
+                              }
+                            }
+                          }))
+                        }
+                      />
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-medium text-[var(--text-secondary)]">Refresh Token</label>
+                      <input
+                        type="password"
+                        className={[fieldClass, "h-11"].join(" ")}
+                        value={googleCalendarModule.refreshToken}
+                        onChange={(e) =>
+                          setFormState((current) => ({
+                            ...current,
+                            modules: {
+                              ...current.modules,
+                              googleCalendar: {
+                                ...googleCalendarModule,
+                                refreshToken: e.target.value,
+                                isEnabled: true
+                              }
+                            }
+                          }))
+                        }
+                      />
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-medium text-[var(--text-secondary)]">Calendar ID</label>
+                      <input
+                        type="text"
+                        className={[fieldClass, "h-11"].join(" ")}
+                        placeholder="primary ou email do calendário"
+                        value={googleCalendarModule.calendarId}
+                        onChange={(e) =>
+                          setFormState((current) => ({
+                            ...current,
+                            modules: {
+                              ...current.modules,
+                              googleCalendar: {
+                                ...googleCalendarModule,
+                                calendarId: e.target.value,
+                                isEnabled: true
+                              }
+                            }
+                          }))
+                        }
+                      />
+                    </div>
+                  </div>
+                </div>
+              ) : null}
             </div>
 
             {/* 🛡️ Controle */}
@@ -1366,4 +1480,3 @@ export const ChatbotStudio = ({ initialInstances }: ChatbotStudioProps) => {
     </div>
   );
 };
-

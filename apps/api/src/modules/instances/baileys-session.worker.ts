@@ -84,6 +84,36 @@ let closeAuthStore: (() => void) | null = null;
 let reconnectAttempts = 0;
 let stopping = false;
 const store = makeInMemoryStore({});
+const RESOLVED_JID_CACHE_TTL_MS = 5 * 60 * 1000;
+const resolvedJidCache = new Map<string, { jid: string; timeout: NodeJS.Timeout }>();
+
+const clearResolvedJidCache = (): void => {
+  for (const entry of resolvedJidCache.values()) {
+    clearTimeout(entry.timeout);
+  }
+
+  resolvedJidCache.clear();
+};
+
+const getCachedResolvedJid = (phoneNumber: string): string | null => resolvedJidCache.get(phoneNumber)?.jid ?? null;
+
+const setCachedResolvedJid = (phoneNumber: string, jid: string): void => {
+  const existing = resolvedJidCache.get(phoneNumber);
+
+  if (existing) {
+    clearTimeout(existing.timeout);
+  }
+
+  const timeout = setTimeout(() => {
+    resolvedJidCache.delete(phoneNumber);
+  }, RESOLVED_JID_CACHE_TTL_MS);
+  timeout.unref?.();
+
+  resolvedJidCache.set(phoneNumber, {
+    jid,
+    timeout
+  });
+};
 
 const scheduleReconnect = async (message: string): Promise<void> => {
   if (stopping) {
@@ -206,7 +236,7 @@ const resolveMediaBuffer = async (media: { base64?: string; url?: string }): Pro
     return Buffer.from(await response.arrayBuffer());
   }
 
-  throw new Error("Midia ausente");
+  throw new Error("Media payload missing both base64 and url");
 };
 
 const convertAudioToOpus = async (inputBuffer: Buffer): Promise<Buffer> => {
@@ -385,6 +415,7 @@ const disconnectSocket = async (): Promise<void> => {
   }
 
   socket = null;
+  clearResolvedJidCache();
 };
 
 const handleConnectionClose = async (error?: Error): Promise<void> => {
@@ -565,16 +596,32 @@ const handleSendMessage = async (command: RpcCommand): Promise<void> => {
     const payload = command.payload;
     const jid = payload.targetJid ?? toJid(payload.to);
     let resolvedJid = jid;
+    const normalizedPhone = payload.to.replace(/[^\d]/g, "");
+
     if (!jid.endsWith("@g.us") && !jid.endsWith("@lid")) {
-      try {
-        const onWhatsAppResult = await activeSocket.onWhatsApp(payload.to);
-        const result = Array.isArray(onWhatsAppResult) ? onWhatsAppResult[0] : undefined;
-        if (result?.exists && result.jid) {
-          resolvedJid = result.jid;
-          log("info", `JID resolvido via onWhatsApp: ${resolvedJid}`);
+      const cachedResolvedJid = normalizedPhone ? getCachedResolvedJid(normalizedPhone) : null;
+
+      if (cachedResolvedJid) {
+        resolvedJid = cachedResolvedJid;
+      } else if (payload.targetJid?.trim()) {
+        resolvedJid = payload.targetJid.trim();
+        if (normalizedPhone) {
+          setCachedResolvedJid(normalizedPhone, resolvedJid);
         }
-      } catch {
-        log("warn", "Falha ao resolver JID via onWhatsApp, usando JID padrao");
+      } else {
+        try {
+          const onWhatsAppResult = await activeSocket.onWhatsApp(payload.to);
+          const result = Array.isArray(onWhatsAppResult) ? onWhatsAppResult[0] : undefined;
+          if (result?.exists && result.jid) {
+            resolvedJid = result.jid;
+            if (normalizedPhone) {
+              setCachedResolvedJid(normalizedPhone, resolvedJid);
+            }
+            log("info", `JID resolvido via onWhatsApp: ${resolvedJid}`);
+          }
+        } catch {
+          log("warn", "Falha ao resolver JID via onWhatsApp, usando JID padrao");
+        }
       }
     }
     const mentionJids = payload.mentionNumbers?.map((number) => toJid(number)) ?? [];

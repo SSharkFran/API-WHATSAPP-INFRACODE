@@ -12,6 +12,16 @@ interface PlatformConfigRecord {
 export class PlatformAlertService {
   private readonly platformPrisma: PlatformPrisma;
   private readonly instanceOrchestrator: InstanceOrchestrator;
+  private connectedInstanceCache:
+    | {
+        expiresAt: number;
+        value: {
+          tenantId: string;
+          instanceId: string;
+          name: string;
+        } | null;
+      }
+    | null = null;
 
   public constructor(
     platformPrisma: PlatformPrisma,
@@ -38,6 +48,10 @@ export class PlatformAlertService {
     instanceId: string;
     name: string;
   } | null> {
+    if (this.connectedInstanceCache && this.connectedInstanceCache.expiresAt > Date.now()) {
+      return this.connectedInstanceCache.value;
+    }
+
     const tenants = await this.platformPrisma.tenant.findMany({
       where: {
         status: "ACTIVE",
@@ -51,16 +65,29 @@ export class PlatformAlertService {
         const instances = await this.instanceOrchestrator.listInstances(tenant.id);
         const connected = instances.find((i) => i.status === "CONNECTED");
         if (connected) {
-          return {
+          const resolved = {
             tenantId: tenant.id,
             instanceId: connected.id,
             name: connected.name
           };
+
+          this.connectedInstanceCache = {
+            expiresAt: Date.now() + 30_000,
+            value: resolved
+          };
+
+          return resolved;
         }
       } catch {
         continue;
       }
     }
+
+    this.connectedInstanceCache = {
+      expiresAt: Date.now() + 30_000,
+      value: null
+    };
+
     return null;
   }
 

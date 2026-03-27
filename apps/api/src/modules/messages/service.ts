@@ -8,6 +8,7 @@ import type { PlatformPrisma, TenantPrismaRegistry } from "../../lib/database.js
 import { ApiError } from "../../lib/errors.js";
 import type { MetricsService } from "../../lib/metrics.js";
 import { assertValidPhoneNumber } from "../../lib/phone.js";
+import { incrementExpiringCounter } from "../../lib/redis-rate-limit.js";
 import { QUEUE_NAMES } from "../../queues/queue-names.js";
 import type { InstanceOrchestrator } from "../instances/service.js";
 import type { PlanEnforcementService } from "../platform/plan-enforcement.service.js";
@@ -365,11 +366,7 @@ export class MessageService {
     const now = new Date();
     const bucket = `${now.getUTCFullYear()}-${now.getUTCMonth()}-${now.getUTCDate()}-${now.getUTCHours()}-${now.getUTCMinutes()}`;
     const key = `rate:${tenantId}:${instanceId}:${bucket}`;
-    const current = await this.workerConnection.incr(key);
-
-    if (current === 1) {
-      await this.workerConnection.expire(key, 60);
-    }
+    const current = await incrementExpiringCounter(this.workerConnection, key, 60);
 
     if (current > limitPerMinute) {
       throw new ApiError(429, "INSTANCE_RATE_LIMIT_EXCEEDED", "Limite de mensagens por minuto excedido", {

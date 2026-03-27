@@ -235,7 +235,10 @@ export const TenantManager = ({ initialPlans, initialTenants }: TenantManagerPro
     if (!window.confirm(`Excluir o tenant ${tenant.name}? Essa ação remove o schema dedicado.`)) return;
     setPendingAction("delete"); setError(null);
     try {
-      await requestClientApi(`/admin/tenants/${tenant.id}`, { method: "DELETE" });
+      await requestClientApi(`/admin/tenants/${tenant.id}`, {
+        method: "DELETE",
+        expectNoContent: true
+      });
       setTenants((c) => c.filter((t) => t.id !== tenant.id));
       startTransition(() => { router.refresh(); });
     } catch (caught) {

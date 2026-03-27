@@ -97,6 +97,18 @@ export class ClientMemoryService {
     });
   }
 
+  public async removeTag(tenantId: string, phoneNumber: string, tag: ClientMemoryTag): Promise<void> {
+    const existing = await this.findByPhone(tenantId, phoneNumber);
+
+    if (!existing || !existing.tags.includes(tag)) {
+      return;
+    }
+
+    await this.upsert(tenantId, phoneNumber, {
+      tags: existing.tags.filter((existingTag) => existingTag !== tag)
+    });
+  }
+
   public async listForFollowUp(tenantId: string, daysSinceLastContact = 7): Promise<ClientMemory[]> {
     const prisma = await this.tenantPrismaRegistry.getClient(tenantId);
     const cutoff = new Date(Date.now() - daysSinceLastContact * 24 * 60 * 60 * 1000);

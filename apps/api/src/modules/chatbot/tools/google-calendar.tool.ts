@@ -43,7 +43,9 @@ export class GoogleCalendarTool {
       return credentials.access_token ?? "";
     } catch (error) {
       console.error("[GoogleCalendar] Erro ao gerar access token:", error);
-      throw new Error("Falha ao autenticar com Google Calendar");
+      throw new Error(
+        `Falha ao autenticar com Google Calendar: ${error instanceof Error ? error.message : String(error)}`
+      );
     }
   }
 

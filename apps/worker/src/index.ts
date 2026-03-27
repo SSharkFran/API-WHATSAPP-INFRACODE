@@ -22,7 +22,7 @@ interface WebhookJobPayload {
 
 interface TenantClientEntry {
   client: TenantPrismaClient;
-  timer: NodeJS.Timeout;
+  timer?: NodeJS.Timeout;
 }
 
 const withSchema = (value: string, schema: string): string => {
@@ -42,6 +42,7 @@ const platformPrisma = new PlatformPrismaClient({
 const TENANT_CLIENT_MAX = 32;
 const TENANT_CLIENT_TTL_MS = 10 * 60 * 1000;
 const tenantClients = new Map<string, TenantClientEntry>();
+const tenantClientCreationLocks = new Map<string, Promise<TenantPrismaClient>>();
 const redisUrl = new URL(config.REDIS_URL);
 const redisConnection = {
   host: redisUrl.hostname,
@@ -55,13 +56,17 @@ const redisConnection = {
 const disposeTenantClient = async (tenantId: string): Promise<void> => {
   const entry = tenantClients.get(tenantId);
   if (!entry) return;
-  clearTimeout(entry.timer);
+  if (entry.timer) {
+    clearTimeout(entry.timer);
+  }
   tenantClients.delete(tenantId);
   await entry.client.$disconnect().catch(() => {});
 };
 
 const touchTenantClient = (tenantId: string, entry: TenantClientEntry): void => {
-  clearTimeout(entry.timer);
+  if (entry.timer) {
+    clearTimeout(entry.timer);
+  }
   tenantClients.delete(tenantId);
   tenantClients.set(tenantId, entry);
   entry.timer = setTimeout(() => {
@@ -75,7 +80,7 @@ const decrypt = (ciphertext: string, key: string): string => {
   const [ivBase64, tagBase64, encryptedBase64] = ciphertext.split(".");
 
   if (!ivBase64 || !tagBase64 || !encryptedBase64) {
-    throw new Error("Payload criptografado invalido");
+    throw new Error("Payload criptografado inválido");
   }
 
   const decipher = createDecipheriv("aes-256-gcm", normalizedKey, Buffer.from(ivBase64, "base64"));
@@ -94,29 +99,46 @@ const getTenantPrisma = async (tenantId: string): Promise<TenantPrismaClient> =>
     return existing.client;
   }
 
-  const tenant = await platformPrisma.tenant.findUnique({
-    where: {
-      id: tenantId
+  const pendingCreation = tenantClientCreationLocks.get(tenantId);
+  if (pendingCreation) {
+    return pendingCreation;
+  }
+
+  const creationPromise = (async () => {
+    const tenant = await platformPrisma.tenant.findUnique({
+      where: {
+        id: tenantId
+      }
+    });
+
+    if (!tenant) {
+      throw new Error(`Tenant ${tenantId} nao encontrado`);
     }
-  });
 
-  if (!tenant) {
-    throw new Error(`Tenant ${tenantId} nao encontrado`);
+    const client = new TenantPrismaClient({
+      datasourceUrl: withSchema(tenantBaseUrl, tenant.schemaName)
+    });
+
+    while (tenantClients.size >= TENANT_CLIENT_MAX) {
+      const oldest = tenantClients.keys().next().value as string | undefined;
+      if (oldest) {
+        await disposeTenantClient(oldest);
+      }
+    }
+
+    const entry: TenantClientEntry = { client };
+    tenantClients.set(tenantId, entry);
+    touchTenantClient(tenantId, entry);
+    return client;
+  })();
+
+  tenantClientCreationLocks.set(tenantId, creationPromise);
+
+  try {
+    return await creationPromise;
+  } finally {
+    tenantClientCreationLocks.delete(tenantId);
   }
-
-  const client = new TenantPrismaClient({
-    datasourceUrl: withSchema(tenantBaseUrl, tenant.schemaName)
-  });
-
-  while (tenantClients.size >= TENANT_CLIENT_MAX) {
-    const oldest = tenantClients.keys().next().value as string | undefined;
-    if (oldest) await disposeTenantClient(oldest);
-  }
-
-  const entry: TenantClientEntry = { client, timer: undefined as unknown as NodeJS.Timeout };
-  tenantClients.set(tenantId, entry);
-  touchTenantClient(tenantId, entry);
-  return client;
 };
 
 const markDelivery = async (

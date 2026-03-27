@@ -11,7 +11,6 @@ import { ApiError } from "../../lib/errors.js";
 import {
   assertValidPhoneNumber,
   normalizePhoneNumber,
-  normalizeWhatsAppPhoneNumber,
   toJid
 } from "../../lib/phone.js";
 import type { ChatMessage } from "./agents/types.js";
@@ -255,7 +254,15 @@ export class ChatbotService {
   private readonly config: AppConfig;
   private readonly platformPrisma: PlatformPrisma;
   private readonly tenantPrismaRegistry: TenantPrismaRegistry;
-  private readonly platformAlertService?: PlatformAlertService;
+  private platformAlertService?: PlatformAlertService;
+  private readonly memoryFileCache = new Map<
+    string,
+    {
+      cachedAt: number;
+      content: string | null;
+    }
+  >();
+  private readonly normalizedLeadTableCache = new WeakMap<object, Map<string, Map<string, number | null>>>();
 
   public constructor(deps: ChatbotServiceDeps) {
     this.config = deps.config;
@@ -265,7 +272,107 @@ export class ChatbotService {
   }
 
   public setPlatformAlertService(service: PlatformAlertService): void {
-    (this as unknown as { platformAlertService: PlatformAlertService }).platformAlertService = service;
+    this.platformAlertService = service;
+  }
+
+  private primeNormalizedLeadTable(table: unknown): void {
+    if (!table || typeof table !== "object" || Array.isArray(table)) {
+      return;
+    }
+
+    if (this.normalizedLeadTableCache.has(table)) {
+      return;
+    }
+
+    const normalizedRows = new Map<string, Map<string, number | null>>();
+
+    for (const [rowKey, rowValue] of Object.entries(table as Record<string, unknown>)) {
+      if (!rowValue || typeof rowValue !== "object" || Array.isArray(rowValue)) {
+        continue;
+      }
+
+      const normalizedColumns = new Map<string, number | null>();
+
+      for (const [columnKey, columnValue] of Object.entries(rowValue as Record<string, unknown>)) {
+        normalizedColumns.set(normalizeLeadLookup(columnKey), this.parseLeadMoneyValue(columnValue));
+      }
+
+      normalizedRows.set(normalizeLeadLookup(rowKey), normalizedColumns);
+    }
+
+    this.normalizedLeadTableCache.set(table, normalizedRows);
+  }
+
+  private readNormalizedLeadTable(table: unknown): Map<string, Map<string, number | null>> | null {
+    if (!table || typeof table !== "object" || Array.isArray(table)) {
+      return null;
+    }
+
+    this.primeNormalizedLeadTable(table);
+    return this.normalizedLeadTableCache.get(table) ?? null;
+  }
+
+  private async readCachedMemoryFile(filePath: string): Promise<string | null> {
+    const cached = this.memoryFileCache.get(filePath);
+
+    if (cached && Date.now() - cached.cachedAt < 30_000) {
+      return cached.content;
+    }
+
+    try {
+      const content = await readFile(filePath, "utf-8");
+      const normalizedContent = content.trim() || null;
+      this.memoryFileCache.set(filePath, {
+        cachedAt: Date.now(),
+        content: normalizedContent
+      });
+      return normalizedContent;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+        throw error;
+      }
+
+      this.memoryFileCache.set(filePath, {
+        cachedAt: Date.now(),
+        content: null
+      });
+      return null;
+    }
+  }
+
+  private shouldUseFallbackForError(error: unknown): boolean {
+    const fetchError = error as { status?: number; statusCode?: number; message?: string; name?: string };
+    const status = fetchError?.status ?? fetchError?.statusCode;
+
+    if (status === 429 || (status !== undefined && status >= 500)) {
+      return true;
+    }
+
+    if (!(error instanceof Error)) {
+      return false;
+    }
+
+    return (
+      error.name === "AbortError" ||
+      error.name === "TypeError" ||
+      /fetch failed|network|timeout|econn|enotfound|socket/i.test(error.message)
+    );
+  }
+
+  private async withOpenAiCompatibleTimeout<T>(
+    task: (signal: AbortSignal) => Promise<T>
+  ): Promise<T> {
+    const abortController = new AbortController();
+    const timeout = setTimeout(() => {
+      abortController.abort(new Error("Timeout ao consultar provider OpenAI-compatible"));
+    }, 30_000);
+    timeout.unref?.();
+
+    try {
+      return await task(abortController.signal);
+    } finally {
+      clearTimeout(timeout);
+    }
   }
 
   public async getConfig(tenantId: string, instanceId: string): Promise<ChatbotConfig> {
@@ -352,13 +459,13 @@ export class ChatbotService {
         visionEnabled,
         visionPrompt,
         leadAutoExtract,
-        leadVehicleTable: leadVehicleTable as unknown as Prisma.InputJsonValue,
-        leadPriceTable: leadPriceTable as unknown as Prisma.InputJsonValue,
-        leadSurchargeTable: leadSurchargeTable as unknown as Prisma.InputJsonValue,
+        leadVehicleTable: leadVehicleTable as Prisma.InputJsonValue,
+        leadPriceTable: leadPriceTable as Prisma.InputJsonValue,
+        leadSurchargeTable: leadSurchargeTable as Prisma.InputJsonValue,
         aiFallbackProvider: input.aiFallbackProvider ?? null,
         aiFallbackApiKey: input.aiFallbackApiKey?.trim() || null,
         aiFallbackModel: input.aiFallbackModel?.trim() || null,
-        modules: (input.modules ?? {}) as unknown as Prisma.InputJsonValue
+        modules: (input.modules ?? {}) as Prisma.InputJsonValue
       } as Prisma.ChatbotConfigUncheckedCreateInput,
       update: {
         isEnabled: input.isEnabled,
@@ -376,13 +483,13 @@ export class ChatbotService {
         visionEnabled,
         visionPrompt,
         leadAutoExtract,
-        leadVehicleTable: leadVehicleTable as unknown as Prisma.InputJsonValue,
-        leadPriceTable: leadPriceTable as unknown as Prisma.InputJsonValue,
-        leadSurchargeTable: leadSurchargeTable as unknown as Prisma.InputJsonValue,
+        leadVehicleTable: leadVehicleTable as Prisma.InputJsonValue,
+        leadPriceTable: leadPriceTable as Prisma.InputJsonValue,
+        leadSurchargeTable: leadSurchargeTable as Prisma.InputJsonValue,
         aiFallbackProvider: input.aiFallbackProvider ?? null,
         aiFallbackApiKey: input.aiFallbackApiKey?.trim() || null,
         aiFallbackModel: input.aiFallbackModel?.trim() || null,
-        modules: (input.modules ?? {}) as unknown as Prisma.InputJsonValue
+        modules: (input.modules ?? {}) as Prisma.InputJsonValue
       } as Prisma.ChatbotConfigUncheckedUpdateInput
     });
 
@@ -422,7 +529,7 @@ export class ChatbotService {
     return this.mapConfig(record, managedAiProvider);
   }
 
-public async simulate(
+  public async simulate(
     tenantId: string,
     instanceId: string,
     input: ChatbotRuntimeInput
@@ -550,7 +657,7 @@ public async simulate(
     };
   }
 
-private async evaluateConfig(
+  private async evaluateConfig(
     tenantId: string,
     prisma: Awaited<ReturnType<TenantPrismaRegistry["getClient"]>>,
     config: ChatbotConfig,
@@ -642,6 +749,22 @@ private async evaluateConfig(
       ...defaultAiSettings,
       ...(record.aiSettings && typeof record.aiSettings === "object" ? record.aiSettings : {})
     });
+    const leadVehicleTable =
+      record.leadVehicleTable && typeof record.leadVehicleTable === "object"
+        ? (record.leadVehicleTable as Record<string, unknown>)
+        : {};
+    const leadPriceTable =
+      record.leadPriceTable && typeof record.leadPriceTable === "object"
+        ? (record.leadPriceTable as Record<string, unknown>)
+        : {};
+    const leadSurchargeTable =
+      record.leadSurchargeTable && typeof record.leadSurchargeTable === "object"
+        ? (record.leadSurchargeTable as Record<string, unknown>)
+        : {};
+
+    this.primeNormalizedLeadTable(leadVehicleTable);
+    this.primeNormalizedLeadTable(leadPriceTable);
+    this.primeNormalizedLeadTable(leadSurchargeTable);
 
     return {
       id: record.id,
@@ -660,18 +783,9 @@ private async evaluateConfig(
       visionEnabled: record.visionEnabled ?? false,
       visionPrompt: record.visionPrompt ?? null,
       leadAutoExtract: record.leadAutoExtract ?? false,
-      leadVehicleTable:
-        record.leadVehicleTable && typeof record.leadVehicleTable === "object"
-          ? (record.leadVehicleTable as Record<string, unknown>)
-          : {},
-      leadPriceTable:
-        record.leadPriceTable && typeof record.leadPriceTable === "object"
-          ? (record.leadPriceTable as Record<string, unknown>)
-          : {},
-      leadSurchargeTable:
-        record.leadSurchargeTable && typeof record.leadSurchargeTable === "object"
-          ? (record.leadSurchargeTable as Record<string, unknown>)
-          : {},
+      leadVehicleTable,
+      leadPriceTable,
+      leadSurchargeTable,
       rules: chatbotRulesArraySchema.parse(record.rules),
       ai: this.buildRuntimeAiConfig(aiSettings, managedAiProvider),
       aiFallbackProvider: normalizeFallbackProvider(record.aiFallbackProvider),
@@ -703,7 +817,7 @@ private async evaluateConfig(
       ...input
     });
 
-    return parsed as unknown as Prisma.InputJsonValue;
+    return parsed as Prisma.InputJsonValue;
   }
 
   private async getLeadConversationForExtraction(
@@ -797,16 +911,12 @@ private async evaluateConfig(
   }
 
   public async processLeadAfterConversation(
+    tenantId: string,
     conversationId: string,
-    chatbotConfig: ChatbotConfig & { __tenantId?: string },
+    chatbotConfig: ChatbotConfig,
     phoneNumber: string
   ): Promise<void> {
-    const tenantId = chatbotConfig.__tenantId?.trim();
     console.log("[lead:phone] raw phoneNumber received:", JSON.stringify(phoneNumber));
-
-    if (!tenantId) {
-      return;
-    }
 
     const prisma = await this.tenantPrismaRegistry.getClient(tenantId);
     console.log("[lead] iniciando extração para conversa:", conversationId);
@@ -825,7 +935,7 @@ private async evaluateConfig(
           },
           data: {
             awaitingLeadExtraction: false
-          } as Prisma.ConversationUncheckedUpdateInput
+          }
         });
         console.log("[lead] awaitingLeadExtraction reset para conversa:", conversationId);
         return;
@@ -859,7 +969,7 @@ private async evaluateConfig(
         conversation.instanceId,
         leadRemoteJids
       );
-      const extracted = await this.extractLeadWithAi(messages, cleanPhone, chatbotConfig);
+      const extracted = await this.extractLeadWithAi(messages, cleanPhone, tenantId, chatbotConfig);
 
       console.log("[lead] dados extraídos:", JSON.stringify(extracted));
 
@@ -915,7 +1025,7 @@ private async evaluateConfig(
         data: {
           leadSent: true,
           awaitingLeadExtraction: false
-        } as Prisma.ConversationUncheckedUpdateInput
+        }
       });
       console.log("[lead] awaitingLeadExtraction reset para conversa:", conversationId);
       console.log("[lead] lead enviado para:", cleanPhone);
@@ -927,7 +1037,7 @@ private async evaluateConfig(
         },
         data: {
           awaitingLeadExtraction: false
-        } as Prisma.ConversationUncheckedUpdateInput
+        }
       }).catch(() => undefined);
       console.log("[lead] awaitingLeadExtraction reset para conversa:", conversationId);
     }
@@ -936,12 +1046,12 @@ private async evaluateConfig(
   private async extractLeadWithAi(
     messages: ChatMessage[],
     phoneNumber: string,
-    chatbotConfig: ChatbotConfig & { __tenantId?: string }
+    tenantId: string,
+    chatbotConfig: ChatbotConfig
   ): Promise<ExtractedLeadFromConversation | null> {
     const transcript = this.buildLeadExtractionTranscript(messages);
-    const tenantId = chatbotConfig.__tenantId?.trim();
 
-    if (!tenantId || !transcript) {
+    if (!transcript) {
       return null;
     }
 
@@ -1106,18 +1216,6 @@ private async evaluateConfig(
     }
   }
 
-  private resolveLeadContactPhoneNumber(...candidates: Array<string | null | undefined>): string {
-    for (const candidate of candidates) {
-      const normalized = normalizeWhatsAppPhoneNumber(candidate);
-
-      if (normalized) {
-        return normalized;
-      }
-    }
-
-    return normalizePhoneNumber(candidates.find((candidate): candidate is string => typeof candidate === "string") ?? "");
-  }
-
   private parseNullableLeadString(value: unknown): string | null {
     if (typeof value !== "string") {
       return null;
@@ -1185,29 +1283,21 @@ private async evaluateConfig(
   }
 
   private lookupLeadTableValue(table: unknown, rowKey: string, columnKey: string): number | null {
-    if (!table || typeof table !== "object") {
+    const normalizedTable = this.readNormalizedLeadTable(table);
+
+    if (!normalizedTable) {
       return null;
     }
 
     const normalizedRowKey = normalizeLeadLookup(rowKey);
-    const rowEntry = Object.entries(table as Record<string, unknown>).find(
-      ([key]) => normalizeLeadLookup(key) === normalizedRowKey
-    );
+    const rowEntry = normalizedTable.get(normalizedRowKey);
 
-    if (!rowEntry || !rowEntry[1] || typeof rowEntry[1] !== "object") {
+    if (!rowEntry) {
       return null;
     }
 
     const normalizedColumnKey = normalizeLeadLookup(columnKey);
-    const columnEntry = Object.entries(rowEntry[1] as Record<string, unknown>).find(
-      ([key]) => normalizeLeadLookup(key) === normalizedColumnKey
-    );
-
-    if (!columnEntry) {
-      return null;
-    }
-
-    return this.parseLeadMoneyValue(columnEntry[1]);
+    return rowEntry.get(normalizedColumnKey) ?? null;
   }
 
   private parseLeadMoneyValue(value: unknown): number | null {
@@ -1381,15 +1471,10 @@ private async evaluateConfig(
     ];
 
     const memoryFilePath = join(this.config.DATA_DIR, "tenants", tenantId, "instances", instanceId, "memory.md");
-    try {
-      const memoryContent = await readFile(memoryFilePath, "utf-8");
-      if (memoryContent.trim()) {
-        systemParts.push(`\n--- CONTEXTO LOCAL (memory.md) ---\n${memoryContent.trim()}`);
-      }
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
-        throw error;
-      }
+    const memoryContent = await this.readCachedMemoryFile(memoryFilePath);
+
+    if (memoryContent) {
+      systemParts.push(`\n--- CONTEXTO LOCAL (memory.md) ---\n${memoryContent}`);
     }
 
     if (input.clientContext?.trim()) {
@@ -1473,26 +1558,27 @@ private async evaluateConfig(
     const primaryProviderLabel = managedAiProvider.provider ?? "provider principal";
 
     try {
-      return await this.requestOpenAiCompatibleCompletion(
-        managedAiProvider,
-        apiKey,
-        conversation,
-        temperature,
-        toolRuntime
+      return await this.withOpenAiCompatibleTimeout((signal) =>
+        this.requestOpenAiCompatibleCompletion(
+          managedAiProvider,
+          apiKey,
+          conversation,
+          temperature,
+          signal,
+          toolRuntime
+        )
       );
     } catch (err: unknown) {
       const fetchErr = err as { status?: number; statusCode?: number; message?: string };
       const status = fetchErr?.status ?? fetchErr?.statusCode;
-      const isRateLimit = status === 429;
-      const isServerError = status !== undefined && status >= 500;
 
       if (
-        (isRateLimit || isServerError) &&
+        this.shouldUseFallbackForError(err) &&
         config.aiFallbackProvider &&
         (config.aiFallbackProvider === "ollama" || config.aiFallbackApiKey)
       ) {
         console.warn(
-          `[chatbot:ai] ${primaryProviderLabel} falhou (${status}), tentando fallback: ${config.aiFallbackProvider}`
+          `[chatbot:ai] ${primaryProviderLabel} falhou (${status ?? "network"}), tentando fallback: ${config.aiFallbackProvider}`
         );
         await this.notifyAdminFallback(tenantId, config, primaryProviderLabel, status ?? 0);
         return this.callFallbackProvider(
@@ -1643,6 +1729,7 @@ private async evaluateConfig(
       messages: Array<{ role: "user" | "assistant"; content: string }>;
     },
     temperature: number,
+    signal: AbortSignal,
     toolRuntime?: ChatbotToolRuntime,
     messageHistory?: OpenAiCompatibleMessage[],
     recursionDepth = 0
@@ -1664,7 +1751,7 @@ private async evaluateConfig(
     const url = new URL("chat/completions", baseUrl).toString();
     const response = await fetch(url, {
       method: "POST",
-      signal: AbortSignal.timeout(30_000),
+      signal,
       headers: {
         Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json"
@@ -1795,6 +1882,7 @@ private async evaluateConfig(
         apiKey,
         conversation,
         temperature,
+        signal,
         toolRuntime,
         nextMessages,
         recursionDepth + 1
@@ -1804,4 +1892,3 @@ private async evaluateConfig(
     return normalizedContent;
   }
 }
-

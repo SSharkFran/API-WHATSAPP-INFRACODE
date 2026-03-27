@@ -535,6 +535,7 @@ export class PlatformAdminService {
     }
 
     await this.tenantPrismaRegistry.disposeClient(tenantId);
+    this.tenantPrismaRegistry.invalidateSchemaCache(tenantId);
     await this.platformPrisma.$executeRawUnsafe(`DROP SCHEMA IF EXISTS "${tenant.schemaName.replaceAll("\"", "\"\"")}" CASCADE;`);
     await this.platformPrisma.tenant.delete({
       where: {

@@ -144,6 +144,7 @@ const chatbotPersistedSettingsSchema = chatbotAiSettingsSchema.extend({
   responseDelayMs: z.number().int().min(0).max(60_000).default(defaultResponseDelayMs)
 });
 const chatbotAiUpsertSchema = upsertChatbotAiBodySchema;
+const chatbotGlobalSystemPromptSettingKey = "chatbot.globalSystemPrompt";
 const normalizeManagedAiProvider = (provider?: string | null): ChatbotAiProvider | null => {
   if (provider === "GROQ" || provider === "OPENAI_COMPATIBLE") {
     return provider;
@@ -281,6 +282,12 @@ export class ChatbotService {
     }
   >();
   private readonly normalizedLeadTableCache = new WeakMap<object, Map<string, Map<string, number | null>>>();
+  private globalSystemPromptCache:
+    | {
+        value: string | null;
+        expiresAt: number;
+      }
+    | null = null;
 
   public constructor(deps: ChatbotServiceDeps) {
     this.config = deps.config;
@@ -291,6 +298,10 @@ export class ChatbotService {
 
   public setPlatformAlertService(service: PlatformAlertService): void {
     this.platformAlertService = service;
+  }
+
+  public invalidateGlobalSystemPromptCache(): void {
+    this.globalSystemPromptCache = null;
   }
 
   private primeNormalizedLeadTable(table: unknown): void {
@@ -355,6 +366,34 @@ export class ChatbotService {
         content: null
       });
       return null;
+    }
+  }
+
+  private async getCachedGlobalSystemPrompt(): Promise<string | null> {
+    if (this.globalSystemPromptCache && this.globalSystemPromptCache.expiresAt > Date.now()) {
+      return this.globalSystemPromptCache.value;
+    }
+
+    try {
+      const setting = await this.platformPrisma.platformSetting.findUnique({
+        where: {
+          key: chatbotGlobalSystemPromptSettingKey
+        },
+        select: {
+          value: true
+        }
+      });
+
+      const value = typeof setting?.value === "string" ? setting.value.trim() || null : null;
+      this.globalSystemPromptCache = {
+        value,
+        expiresAt: Date.now() + 30_000
+      };
+
+      return value;
+    } catch (error) {
+      console.error("[chatbot] erro ao carregar prompt global da plataforma:", error);
+      return this.globalSystemPromptCache?.value ?? null;
     }
   }
 
@@ -1564,13 +1603,29 @@ export class ChatbotService {
     messages: Array<{ role: "user" | "assistant"; content: string }>;
   }> {
     const normalizedPhoneNumber = normalizePhoneNumber(input.phoneNumber);
+    const globalSystemPrompt = await this.getCachedGlobalSystemPrompt();
+    const instanceSystemPrompt = systemPrompt.trim() || defaultAiSettings.systemPrompt;
+    const effectiveSystemPrompt = globalSystemPrompt
+      ? [
+          "### PROMPT GLOBAL DA PLATAFORMA ###",
+          "As instrucoes globais abaixo sao obrigatorias e prevalecem sobre qualquer regra especifica da instancia em caso de conflito.",
+          globalSystemPrompt,
+          "",
+          "### PROMPT DA INSTANCIA ###",
+          "As instrucoes abaixo complementam o prompt global e devem ser seguidas sem violar as regras globais.",
+          instanceSystemPrompt
+        ].join("\n")
+      : instanceSystemPrompt;
     const systemParts = [
-      systemPrompt.trim() || defaultAiSettings.systemPrompt,
+      effectiveSystemPrompt,
       `Data atual: ${formatDate(new Date())} ${formatTime(new Date())}.`,
       `Numero exato do cliente: ${normalizedPhoneNumber}.`,
       "### REGRAS GERAIS ###",
       "1. Responda em 1 a 3 frases no maximo. Seja direto.",
-      '2. O cliente dita o nome: Se ele disser "me chamo X", use X.'
+      '2. O cliente dita o nome: Se ele disser "me chamo X", use X.',
+      "3. Se precisar quebrar a resposta em mais de uma mensagem, use exatamente `|||` entre os blocos.",
+      "4. Nunca explique o separador ao cliente e nunca escreva `| | |`. Use sempre `|||` sem espacos.",
+      "5. Se a resposta couber em uma unica mensagem, nao use separador."
     ];
 
     const memoryFilePath = join(this.config.DATA_DIR, "tenants", tenantId, "instances", instanceId, "memory.md");

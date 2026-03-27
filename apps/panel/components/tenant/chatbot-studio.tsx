@@ -918,6 +918,14 @@ export const ChatbotStudio = ({ initialInstances }: ChatbotStudioProps) => {
                   placeholder="Você é um assistente virtual comercial..."
                   onChange={(e) => setFormState((c) => ({ ...c, ai: { ...c.ai, systemPrompt: e.target.value } }))}
                 />
+                <p className="text-xs leading-relaxed text-[var(--text-tertiary)]">
+                  Para respostas em mais de uma mensagem, a IA deve usar `|||` entre os blocos. Exemplo:
+                  `Primeira mensagem ||| Segunda mensagem`.
+                </p>
+                <p className="text-xs leading-relaxed text-[var(--text-tertiary)]">
+                  Este prompt e especifico desta instancia. Se a InfraCode definir um prompt global no super-admin,
+                  ele sera aplicado junto e tera prioridade sobre regras conflitantes.
+                </p>
               </div>
 
               <div className="flex gap-3 pt-1">

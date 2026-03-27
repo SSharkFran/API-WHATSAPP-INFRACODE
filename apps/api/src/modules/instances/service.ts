@@ -194,6 +194,7 @@ const leadExtractionAwaitingTimeoutMs = 120_000;
 const conversationDebounceDelayMs = 3_000;
 const conversationSessionCleanupIntervalMs = 10 * 60 * 1000;
 const conversationSessionIdleTtlMs = 60 * 60 * 1000;
+const assistantMessageSeparatorPattern = /\s*\|\s*\|\s*\|\s*/g;
 const normalizeResponseDelayMs = (value: number | null | undefined): number =>
   Math.min(60_000, Math.max(0, Math.round(value ?? conversationDebounceDelayMs)));
 const resolvePersistedResponseDelayMs = (aiSettings: Prisma.JsonValue | null | undefined): number => {
@@ -2039,6 +2040,35 @@ export class InstanceOrchestrator {
     }
   }
 
+  private splitAutomatedResponseParts(text: string): string[] {
+    const trimmedText = text.trim();
+
+    if (!trimmedText) {
+      return [];
+    }
+
+    const normalizedSeparatorText = trimmedText.replace(assistantMessageSeparatorPattern, "|||");
+    const explicitParts = normalizedSeparatorText
+      .split("|||")
+      .map((part) => part.trim())
+      .filter(Boolean);
+
+    if (explicitParts.length > 1) {
+      return explicitParts;
+    }
+
+    const paragraphParts = trimmedText
+      .split(/\n{2,}/)
+      .map((part) => part.trim())
+      .filter(Boolean);
+
+    if (paragraphParts.length > 1) {
+      return paragraphParts;
+    }
+
+    return [trimmedText];
+  }
+
   private queueConversationTurn(
     session: ConversationSession,
     inputText: string,
@@ -2536,9 +2566,10 @@ export class InstanceOrchestrator {
       return;
     }
 
-    if (clientText.includes("|||")) {
-      const partes = clientText.split("|||").map((p) => p.trim()).filter(Boolean);
-      for (const parte of partes) {
+    const responseParts = this.splitAutomatedResponseParts(clientText);
+
+    if (responseParts.length > 1) {
+      for (const parte of responseParts) {
         if (await this.isConversationAiBlocked(prisma, params.conversationId)) {
           return;
         }
@@ -2556,20 +2587,22 @@ export class InstanceOrchestrator {
         await new Promise((resolve) => setTimeout(resolve, delayDigitacao));
       }
     } else {
+      const singleResponse = responseParts[0] ?? clientText;
+
       await this.sendAutomatedTextMessage(
         params.tenantId,
         params.instance.id,
         params.remoteNumber,
         params.targetJid,
-        clientText,
+        singleResponse,
         { action: "conversation_agent", kind: "chatbot" }
       );
-      this.appendConversationHistory(params.session, "assistant", clientText);
+      this.appendConversationHistory(params.session, "assistant", singleResponse);
     }
 
     const leadAutoExtractValue = params.chatbotConfig?.leadAutoExtract as unknown;
     const leadAutoExtractEnabled = leadAutoExtractValue === true || leadAutoExtractValue === "true";
-    const responseText = clientText.replace(/\|\|\|/g, " ");
+    const responseText = responseParts.join(" ");
     const isClosing = /consultor|agendamento|em instantes|encaminhei|entrar.{0,20}contato/i.test(responseText ?? "");
 
     if (leadAutoExtractEnabled && isClosing && !params.session.leadAlreadySent) {
@@ -2639,10 +2672,7 @@ export class InstanceOrchestrator {
     session: ConversationSession;
   }): Promise<void> {
     const prisma = await this.tenantPrismaRegistry.getClient(params.tenantId);
-    const responseParts = params.text
-      .split("|||")
-      .map((part) => part.trim())
-      .filter(Boolean);
+    const responseParts = this.splitAutomatedResponseParts(params.text);
 
     if (responseParts.length === 0) {
       return;

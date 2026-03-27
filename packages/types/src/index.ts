@@ -715,7 +715,7 @@ export interface BaseModuleConfig {
 }
 
 export interface FaqModuleConfig extends BaseModuleConfig {
-  faqs?: Array<{ pergunta: string; resposta: string }>;
+  faqs: Array<{ pergunta: string; resposta: string }>;
 }
 
 export interface HorarioAtendimentoModuleConfig extends BaseModuleConfig {

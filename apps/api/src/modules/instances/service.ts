@@ -196,6 +196,14 @@ const conversationSessionCleanupIntervalMs = 10 * 60 * 1000;
 const conversationSessionIdleTtlMs = 60 * 60 * 1000;
 const normalizeResponseDelayMs = (value: number | null | undefined): number =>
   Math.min(60_000, Math.max(0, Math.round(value ?? conversationDebounceDelayMs)));
+const resolvePersistedResponseDelayMs = (aiSettings: Prisma.JsonValue | null | undefined): number => {
+  if (!aiSettings || typeof aiSettings !== "object" || Array.isArray(aiSettings)) {
+    return conversationDebounceDelayMs;
+  }
+
+  const rawValue = (aiSettings as Record<string, unknown>).responseDelayMs;
+  return typeof rawValue === "number" ? normalizeResponseDelayMs(rawValue) : conversationDebounceDelayMs;
+};
 
 /**
  * Orquestra o ciclo de vida das instancias WhatsApp em workers isolados.
@@ -1297,8 +1305,8 @@ export class InstanceOrchestrator {
       remotePhoneFromJid ??
       contact.phoneNumber ??
       remoteNumber;
-    const [chatbotConfig, currentInstance] = await Promise.all([
-      prisma.chatbotConfig.findUnique({
+	    const [chatbotConfig, currentInstance] = await Promise.all([
+	      prisma.chatbotConfig.findUnique({
         where: {
           instanceId: instance.id
         }
@@ -1312,14 +1320,15 @@ export class InstanceOrchestrator {
         }
       })
     ]);
-    const chatbotConfigWithTakeoverMessages = chatbotConfig as
-      | (typeof chatbotConfig & {
-          humanTakeoverStartMessage?: string | null;
-          humanTakeoverEndMessage?: string | null;
-        })
-      | null;
-    const humanTakeoverStartMessage =
-      chatbotConfigWithTakeoverMessages?.humanTakeoverStartMessage?.trim() ||
+	    const chatbotConfigWithTakeoverMessages = chatbotConfig as
+	      | (typeof chatbotConfig & {
+	          humanTakeoverStartMessage?: string | null;
+	          humanTakeoverEndMessage?: string | null;
+	        })
+	      | null;
+	    const responseDelayMs = resolvePersistedResponseDelayMs(chatbotConfig?.aiSettings as Prisma.JsonValue | null | undefined);
+	    const humanTakeoverStartMessage =
+	      chatbotConfigWithTakeoverMessages?.humanTakeoverStartMessage?.trim() ||
       "A partir de agora, seu atendimento será realizado por um especialista da Zelo. Em instantes ele entrará em contato. 🚗✨";
     const humanTakeoverEndMessage =
       chatbotConfigWithTakeoverMessages?.humanTakeoverEndMessage?.trim() ||
@@ -1810,13 +1819,13 @@ export class InstanceOrchestrator {
         chatbotConfig: chatbotConfig
           ? {
               leadsPhoneNumber: chatbotConfig.leadsPhoneNumber ?? null,
-              leadsEnabled: chatbotConfig.leadsEnabled ?? true,
-              fiadoEnabled: chatbotConfig.fiadoEnabled ?? false,
-              audioEnabled: chatbotConfig.audioEnabled ?? false,
-              visionEnabled: chatbotConfig.visionEnabled ?? false,
-              visionPrompt: chatbotConfig.visionPrompt ?? null,
-              responseDelayMs: chatbotConfig.responseDelayMs ?? conversationDebounceDelayMs,
-              leadAutoExtract: chatbotConfig.leadAutoExtract ?? false,
+	              leadsEnabled: chatbotConfig.leadsEnabled ?? true,
+	              fiadoEnabled: chatbotConfig.fiadoEnabled ?? false,
+	              audioEnabled: chatbotConfig.audioEnabled ?? false,
+	              visionEnabled: chatbotConfig.visionEnabled ?? false,
+	              visionPrompt: chatbotConfig.visionPrompt ?? null,
+	              responseDelayMs,
+	              leadAutoExtract: chatbotConfig.leadAutoExtract ?? false,
               modules:
                 chatbotConfig.modules && typeof chatbotConfig.modules === "object"
                   ? (chatbotConfig.modules as ChatbotModules)

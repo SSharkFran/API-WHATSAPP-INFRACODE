@@ -105,7 +105,10 @@ const parseConfiguredTime = (value: string): number => {
   return hours * 60 + minutes;
 };
 
-const getParsedModuleConfig = <T>(schema: z.ZodType<T>, value: unknown): T | null => {
+const getParsedModuleConfig = <TSchema extends z.ZodTypeAny>(
+  schema: TSchema,
+  value: unknown
+): z.output<TSchema> | null => {
   const parsed = schema.safeParse(value);
   return parsed.success ? parsed.data : null;
 };

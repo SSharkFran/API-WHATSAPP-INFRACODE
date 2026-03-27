@@ -816,6 +816,16 @@ export class InstanceOrchestrator {
           lastError: error.message
         }
       });
+
+      this.platformAlertService?.alertInstanceLogError(
+        tenantId,
+        instance.id,
+        instance.name,
+        "Worker da instancia falhou",
+        { error: error.message }
+      ).catch((err) => {
+        console.error("[orchestrator] erro ao alertar falha de worker:", err);
+      });
     });
 
     worker.on("exit", () => {
@@ -926,6 +936,19 @@ export class InstanceOrchestrator {
         message: event.message,
         timestamp: event.timestamp
       });
+
+      if (event.level === "error") {
+        this.platformAlertService?.alertInstanceLogError(
+          tenantId,
+          instance.id,
+          instance.name,
+          event.message,
+          event.context
+        ).catch((err) => {
+          console.error("[orchestrator] erro ao alertar log de erro:", err);
+        });
+      }
+
       return;
     }
 

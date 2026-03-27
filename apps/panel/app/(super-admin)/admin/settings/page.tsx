@@ -153,7 +153,7 @@ export default function SuperAdminSettingsPage() {
         <CardContent className="space-y-5 pt-5">
           <p className="text-sm leading-7 text-slate-300">
             Configure um numero WhatsApp global para receber alertas de todas as instancias de todos os tenants.
-            Receba notificacoes sobre instancias caídas, novos leads e uso alto de tokens.
+            Receba notificacoes sobre instancias caídas, novos leads, uso alto de tokens e erros criticos de worker/log.
           </p>
 
           {error && (

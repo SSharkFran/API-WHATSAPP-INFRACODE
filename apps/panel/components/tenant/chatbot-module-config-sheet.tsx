@@ -29,6 +29,10 @@ const parseLines = (value: string): string[] =>
 
 const joinLines = (value?: string[]): string => (value ?? []).join("\n");
 
+type ChatbotModuleConfigByKey = {
+  [TKey in ChatbotModuleKey]-?: NonNullable<ChatbotModules[TKey]>;
+};
+
 const executionModeMeta = {
   runtime: {
     badge: "Runtime",
@@ -52,44 +56,153 @@ const executionModeMeta = {
   }
 };
 
-export const buildDefaultChatbotModuleConfig = (moduleKey: ChatbotModuleKey): NonNullable<ChatbotModules[ChatbotModuleKey]> => {
-  switch (moduleKey) {
-    case "faq":
-      return { isEnabled: false, faqs: [] };
-    case "horarioAtendimento":
-      return {
-        isEnabled: false,
-        horarioInicio: "09:00",
-        horarioFim: "18:00",
-        diasSemana: [1, 2, 3, 4, 5],
-        mensagemForaHorario: "Estamos fora do horário de atendimento no momento.",
-        timezone: "America/Sao_Paulo"
-      };
-    case "antiSpam":
-      return { isEnabled: false, intervaloMinutos: 5, maxMensagens: 3 };
-    case "multiIdioma":
-      return { isEnabled: false, idiomasPermitidos: ["pt-BR"], idiomaPrincipal: "pt-BR" };
-    case "agenda":
-      return {
-        isEnabled: false,
-        horariosDisponiveis: ["09:00", "10:00", "11:00", "14:00", "15:00", "16:00"],
-        duracaoMinutos: 60,
-        mensagemConfirmacao: "Agendamento confirmado."
-      };
-    case "googleCalendar":
-      return { isEnabled: false, clientId: "", clientSecret: "", refreshToken: "", calendarId: "" };
-    case "listaBranca":
-      return { isEnabled: false, numeros: [], modo: "permitir_lista" };
-    case "blacklist":
-      return { isEnabled: false, numeros: [] };
-    case "limiteMensagens":
-      return { isEnabled: false, maxPorHora: 20, maxPorDia: 100 };
-    case "palavraPausa":
-      return { isEnabled: false, palavras: ["sair", "parar", "atendente"], mensagemPausa: "Tudo bem. Vou pausar o atendimento automático por aqui." };
-    default:
-      return { isEnabled: false };
+const defaultChatbotModuleConfigs: ChatbotModuleConfigByKey = {
+  faq: { isEnabled: false, faqs: [] },
+  horarioAtendimento: {
+    isEnabled: false,
+    horarioInicio: "09:00",
+    horarioFim: "18:00",
+    diasSemana: [1, 2, 3, 4, 5],
+    mensagemForaHorario: "Estamos fora do horário de atendimento no momento.",
+    timezone: "America/Sao_Paulo"
+  },
+  antiSpam: { isEnabled: false, intervaloMinutos: 5, maxMensagens: 3 },
+  multiIdioma: { isEnabled: false, idiomasPermitidos: ["pt-BR"], idiomaPrincipal: "pt-BR" },
+  agenda: {
+    isEnabled: false,
+    horariosDisponiveis: ["09:00", "10:00", "11:00", "14:00", "15:00", "16:00"],
+    duracaoMinutos: 60,
+    mensagemConfirmacao: "Agendamento confirmado."
+  },
+  lembrete: {
+    isEnabled: false,
+    horasAntes: 24,
+    mensagemLembrete: "Lembrete: seu compromisso se aproxima."
+  },
+  confirmacaoPresenca: {
+    isEnabled: false,
+    mensagemConfirmacao: "Você confirma sua presença?",
+    prazoConfirmacaoHoras: 24
+  },
+  cancelamentoReagendamento: {
+    isEnabled: false,
+    permiteCancelamento: true,
+    permiteReagendamento: true,
+    prazoCancelamentoHoras: 24
+  },
+  cobrancaAutomatica: {
+    isEnabled: false,
+    extratoMessage: "Segue o resumo em aberto.",
+    chavePix: "",
+    tipoChavePix: "cpf",
+    mensagemConfirmacao: "Pagamento identificado com sucesso."
+  },
+  notificacaoVencimento: {
+    isEnabled: false,
+    diasAntes: 3,
+    mensagemVencimento: "Seu vencimento está próximo."
+  },
+  orcamentoRapido: {
+    isEnabled: false,
+    tabelaPrecos: [],
+    mensagemOrcamento: "Segue o orçamento solicitado."
+  },
+  catalogo: {
+    isEnabled: false,
+    produtos: []
+  },
+  pedidoWhatsApp: {
+    isEnabled: false,
+    produtos: [],
+    mostrarPreco: true,
+    mensagemPedido: "Perfeito, vou registrar seu pedido."
+  },
+  statusPedido: {
+    isEnabled: false,
+    statusDisponiveis: []
+  },
+  envioMidia: {
+    isEnabled: false,
+    gatilhos: []
+  },
+  capturaDados: {
+    isEnabled: false,
+    campos: [],
+    mensagemAgradecimento: "Obrigado pelos dados enviados."
+  },
+  nps: {
+    isEnabled: false,
+    perguntas: ["Como você avalia seu atendimento de 0 a 10?"],
+    notaMinima: 8,
+    mensagemAgradecimento: "Obrigado pelo seu feedback."
+  },
+  tagFollowUp: {
+    isEnabled: false,
+    tags: [],
+    diasInatividade: 7
+  },
+  exportarLeads: {
+    isEnabled: false,
+    formato: "csv",
+    campos: ["nome", "telefone", "servico"]
+  },
+  webhook: {
+    isEnabled: false,
+    url: "",
+    secret: "",
+    eventos: []
+  },
+  webhookBidirecional: {
+    isEnabled: false,
+    url: "",
+    secret: ""
+  },
+  googleCalendar: {
+    isEnabled: false,
+    clientId: "",
+    clientSecret: "",
+    refreshToken: "",
+    calendarId: ""
+  },
+  planilhaGoogle: {
+    isEnabled: false,
+    spreadsheetId: "",
+    sheetName: ""
+  },
+  listaBranca: { isEnabled: false, numeros: [], modo: "permitir_lista" },
+  blacklist: { isEnabled: false, numeros: [] },
+  limiteMensagens: { isEnabled: false, maxPorHora: 20, maxPorDia: 100 },
+  palavraPausa: {
+    isEnabled: false,
+    palavras: ["sair", "parar", "atendente"],
+    mensagemPausa: "Tudo bem. Vou pausar o atendimento automático por aqui."
+  },
+  disparoMassa: {
+    isEnabled: false,
+    modeloMensagem: "",
+    agendamentoPadrao: ""
+  },
+  campanhaSegmento: {
+    isEnabled: false,
+    segmentoTags: [],
+    modeloMensagem: ""
+  },
+  reativacao: {
+    isEnabled: false,
+    diasInatividade: 30,
+    modeloMensagem: "",
+    maxPorMes: 1
+  },
+  cupomPromocao: {
+    isEnabled: false,
+    cupons: [],
+    palavrasGatilho: []
   }
 };
+
+export const buildDefaultChatbotModuleConfig = <TKey extends ChatbotModuleKey>(
+  moduleKey: TKey
+): ChatbotModuleConfigByKey[TKey] => defaultChatbotModuleConfigs[moduleKey];
 
 interface ChatbotModuleConfigSheetProps {
   moduleKey: ChatbotModuleKey | null;

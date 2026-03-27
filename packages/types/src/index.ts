@@ -300,6 +300,7 @@ export interface ChatbotConfig {
   audioEnabled?: boolean;
   visionEnabled?: boolean;
   visionPrompt?: string | null;
+  responseDelayMs?: number;
   leadAutoExtract?: boolean;
   leadVehicleTable?: Record<string, unknown>;
   leadPriceTable?: Record<string, unknown>;
@@ -403,6 +404,311 @@ export interface ChatbotModules {
   reativacao?: ReativacaoModuleConfig;
   cupomPromocao?: CupomPromocaoModuleConfig;
 }
+
+export type ChatbotModuleKey = keyof ChatbotModules;
+export type ChatbotModuleCategory =
+  | "atendimento"
+  | "agendamento"
+  | "financeiro"
+  | "catalogo"
+  | "dados"
+  | "integracoes"
+  | "controle"
+  | "marketing";
+export type ChatbotModuleSupportLevel = "operational" | "placeholder";
+export type ChatbotModuleExecutionMode = "runtime" | "prompt" | "tool" | "placeholder";
+
+export interface ChatbotModuleCatalogItem {
+  key: ChatbotModuleKey;
+  label: string;
+  description: string;
+  category: ChatbotModuleCategory;
+  supportLevel: ChatbotModuleSupportLevel;
+  executionMode: ChatbotModuleExecutionMode;
+  requiresConfig: boolean;
+}
+
+export const CHATBOT_MODULE_CATALOG: ChatbotModuleCatalogItem[] = [
+  {
+    key: "faq",
+    label: "FAQ Automático",
+    description: "Responde perguntas frequentes configuradas.",
+    category: "atendimento",
+    supportLevel: "operational",
+    executionMode: "runtime",
+    requiresConfig: true
+  },
+  {
+    key: "horarioAtendimento",
+    label: "Horário de Atendimento",
+    description: "Mensagem automática fora do horário configurado.",
+    category: "atendimento",
+    supportLevel: "operational",
+    executionMode: "runtime",
+    requiresConfig: true
+  },
+  {
+    key: "antiSpam",
+    label: "Anti-spam",
+    description: "Ignora repetição excessiva de mensagens em curto intervalo.",
+    category: "atendimento",
+    supportLevel: "operational",
+    executionMode: "runtime",
+    requiresConfig: true
+  },
+  {
+    key: "multiIdioma",
+    label: "Multi-idioma",
+    description: "Orienta a IA a responder nos idiomas permitidos; depende da aderência do modelo.",
+    category: "atendimento",
+    supportLevel: "operational",
+    executionMode: "prompt",
+    requiresConfig: true
+  },
+  {
+    key: "agenda",
+    label: "Agenda Inteligente",
+    description: "Define duração e horários-base da agenda; com Google Calendar ativo, consulta a disponibilidade real.",
+    category: "agendamento",
+    supportLevel: "operational",
+    executionMode: "prompt",
+    requiresConfig: true
+  },
+  {
+    key: "lembrete",
+    label: "Lembrete Automático",
+    description: "Placeholder visual; ainda não agenda envios automáticos no backend.",
+    category: "agendamento",
+    supportLevel: "placeholder",
+    executionMode: "placeholder",
+    requiresConfig: true
+  },
+  {
+    key: "confirmacaoPresenca",
+    label: "Confirmação de Presença",
+    description: "Placeholder visual; ainda não executa follow-up automático.",
+    category: "agendamento",
+    supportLevel: "placeholder",
+    executionMode: "placeholder",
+    requiresConfig: true
+  },
+  {
+    key: "cancelamentoReagendamento",
+    label: "Cancel./Reagendamento",
+    description: "Placeholder visual; ainda não remarca/cancela eventos automaticamente.",
+    category: "agendamento",
+    supportLevel: "placeholder",
+    executionMode: "placeholder",
+    requiresConfig: true
+  },
+  {
+    key: "cobrancaAutomatica",
+    label: "Cobrança Automática",
+    description: "Placeholder visual; ainda não integra cobrança/PIX automaticamente.",
+    category: "financeiro",
+    supportLevel: "placeholder",
+    executionMode: "placeholder",
+    requiresConfig: true
+  },
+  {
+    key: "notificacaoVencimento",
+    label: "Notificação de Vencimento",
+    description: "Placeholder visual; ainda não agenda notificações automáticas.",
+    category: "financeiro",
+    supportLevel: "placeholder",
+    executionMode: "placeholder",
+    requiresConfig: true
+  },
+  {
+    key: "orcamentoRapido",
+    label: "Orçamento Rápido",
+    description: "Placeholder visual; ainda não calcula orçamento automaticamente no runtime.",
+    category: "financeiro",
+    supportLevel: "placeholder",
+    executionMode: "placeholder",
+    requiresConfig: true
+  },
+  {
+    key: "catalogo",
+    label: "Cardápio/Catálogo",
+    description: "Placeholder visual; ainda não publica catálogo no fluxo de conversa.",
+    category: "catalogo",
+    supportLevel: "placeholder",
+    executionMode: "placeholder",
+    requiresConfig: true
+  },
+  {
+    key: "pedidoWhatsApp",
+    label: "Pedido pelo WhatsApp",
+    description: "Placeholder visual; ainda não possui motor de carrinho/pedido.",
+    category: "catalogo",
+    supportLevel: "placeholder",
+    executionMode: "placeholder",
+    requiresConfig: true
+  },
+  {
+    key: "statusPedido",
+    label: "Status do Pedido",
+    description: "Placeholder visual; ainda não consulta status externo.",
+    category: "catalogo",
+    supportLevel: "placeholder",
+    executionMode: "placeholder",
+    requiresConfig: true
+  },
+  {
+    key: "envioMidia",
+    label: "Envio de Mídia",
+    description: "Placeholder visual; ainda não envia mídia por gatilho automaticamente.",
+    category: "catalogo",
+    supportLevel: "placeholder",
+    executionMode: "placeholder",
+    requiresConfig: true
+  },
+  {
+    key: "capturaDados",
+    label: "Captura de Dados",
+    description: "Placeholder visual; ainda não mantém uma esteira dedicada de coleta estruturada.",
+    category: "dados",
+    supportLevel: "placeholder",
+    executionMode: "placeholder",
+    requiresConfig: true
+  },
+  {
+    key: "nps",
+    label: "NPS",
+    description: "Placeholder visual; ainda não dispara pesquisa pós-atendimento automaticamente.",
+    category: "dados",
+    supportLevel: "placeholder",
+    executionMode: "placeholder",
+    requiresConfig: true
+  },
+  {
+    key: "tagFollowUp",
+    label: "Tag de Follow-up",
+    description: "Placeholder visual; ainda não gera follow-up automatizado por tag.",
+    category: "dados",
+    supportLevel: "placeholder",
+    executionMode: "placeholder",
+    requiresConfig: true
+  },
+  {
+    key: "exportarLeads",
+    label: "Exportar Leads",
+    description: "Placeholder visual; ainda não cria exportações dedicadas por módulo.",
+    category: "dados",
+    supportLevel: "placeholder",
+    executionMode: "placeholder",
+    requiresConfig: true
+  },
+  {
+    key: "webhook",
+    label: "Webhook de Saída",
+    description: "Placeholder na aba de módulos; a integração webhook real vive na área de webhooks da instância.",
+    category: "integracoes",
+    supportLevel: "placeholder",
+    executionMode: "placeholder",
+    requiresConfig: true
+  },
+  {
+    key: "webhookBidirecional",
+    label: "Webhook Bidirecional",
+    description: "Placeholder visual; ainda não possui runtime bidirecional no chatbot.",
+    category: "integracoes",
+    supportLevel: "placeholder",
+    executionMode: "placeholder",
+    requiresConfig: true
+  },
+  {
+    key: "googleCalendar",
+    label: "Google Calendar",
+    description: "Consulta disponibilidade real e cria eventos usando as credenciais configuradas.",
+    category: "integracoes",
+    supportLevel: "operational",
+    executionMode: "tool",
+    requiresConfig: true
+  },
+  {
+    key: "planilhaGoogle",
+    label: "Planilha Google",
+    description: "Placeholder visual; ainda não grava leads/pedidos em planilha automaticamente.",
+    category: "integracoes",
+    supportLevel: "placeholder",
+    executionMode: "placeholder",
+    requiresConfig: true
+  },
+  {
+    key: "listaBranca",
+    label: "Lista Branca",
+    description: "Responde apenas para números permitidos quando ativado.",
+    category: "controle",
+    supportLevel: "operational",
+    executionMode: "runtime",
+    requiresConfig: true
+  },
+  {
+    key: "blacklist",
+    label: "Blacklist",
+    description: "Bloqueia respostas automáticas para números específicos.",
+    category: "controle",
+    supportLevel: "operational",
+    executionMode: "runtime",
+    requiresConfig: true
+  },
+  {
+    key: "limiteMensagens",
+    label: "Limite de Mensagens",
+    description: "Corta respostas quando o contato ultrapassa o limite configurado.",
+    category: "controle",
+    supportLevel: "operational",
+    executionMode: "runtime",
+    requiresConfig: true
+  },
+  {
+    key: "palavraPausa",
+    label: "Palavra de Pausa",
+    description: "Pausa o bot quando o cliente envia uma palavra-chave configurada.",
+    category: "controle",
+    supportLevel: "operational",
+    executionMode: "runtime",
+    requiresConfig: true
+  },
+  {
+    key: "disparoMassa",
+    label: "Disparo em Massa",
+    description: "Placeholder visual; ainda não possui motor de campanha/envio em lote aqui.",
+    category: "marketing",
+    supportLevel: "placeholder",
+    executionMode: "placeholder",
+    requiresConfig: true
+  },
+  {
+    key: "campanhaSegmento",
+    label: "Campanha por Segmento",
+    description: "Placeholder visual; ainda não dispara campanhas segmentadas no chatbot.",
+    category: "marketing",
+    supportLevel: "placeholder",
+    executionMode: "placeholder",
+    requiresConfig: true
+  },
+  {
+    key: "reativacao",
+    label: "Reativação Automática",
+    description: "Placeholder visual; ainda não agenda retomadas automáticas.",
+    category: "marketing",
+    supportLevel: "placeholder",
+    executionMode: "placeholder",
+    requiresConfig: true
+  },
+  {
+    key: "cupomPromocao",
+    label: "Cupom/Promoção",
+    description: "Placeholder visual; ainda não entrega cupons por gatilho automaticamente.",
+    category: "marketing",
+    supportLevel: "placeholder",
+    executionMode: "placeholder",
+    requiresConfig: true
+  }
+];
 
 export interface BaseModuleConfig {
   isEnabled: boolean;

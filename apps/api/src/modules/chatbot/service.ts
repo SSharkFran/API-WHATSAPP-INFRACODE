@@ -14,9 +14,21 @@ import {
   toJid
 } from "../../lib/phone.js";
 import type { ChatMessage } from "./agents/types.js";
-import { chatbotAiConfigSchema, chatbotRuleSchema, googleCalendarModuleSchema, upsertChatbotAiBodySchema } from "./schemas.js";
+import { chatbotAiConfigSchema, chatbotRuleSchema, upsertChatbotAiBodySchema } from "./schemas.js";
 import { GoogleCalendarTool } from "./tools/google-calendar.tool.js";
 import type { PlatformAlertService } from "../platform/alert.service.js";
+import {
+  buildOperationalModuleInstructions,
+  findFaqResponse,
+  getAgendaModuleConfig,
+  getGoogleCalendarModuleConfig,
+  getHorarioAtendimentoModuleConfig,
+  isPhoneAllowedByListaBranca,
+  isPhoneBlockedByBlacklist,
+  isWithinHorarioAtendimento,
+  matchesPauseWord,
+  sanitizeChatbotModules
+} from "./module-runtime.js";
 
 interface ChatbotServiceDeps {
   config: AppConfig;
@@ -127,6 +139,10 @@ const chatbotAiSettingsSchema = chatbotAiConfigSchema.pick({
   temperature: true,
   maxContextMessages: true
 });
+const defaultResponseDelayMs = 3_000;
+const chatbotPersistedSettingsSchema = chatbotAiSettingsSchema.extend({
+  responseDelayMs: z.number().int().min(0).max(60_000).default(defaultResponseDelayMs)
+});
 const chatbotAiUpsertSchema = upsertChatbotAiBodySchema;
 const normalizeManagedAiProvider = (provider?: string | null): ChatbotAiProvider | null => {
   if (provider === "GROQ" || provider === "OPENAI_COMPATIBLE") {
@@ -150,6 +166,8 @@ const defaultAiSettings = {
   temperature: 0.4,
   maxContextMessages: 12
 } as const;
+const normalizeResponseDelayMs = (value: number | null | undefined): number =>
+  Math.min(60_000, Math.max(0, Math.round(value ?? defaultResponseDelayMs)));
 
 const formatDate = (date: Date): string =>
   new Intl.DateTimeFormat("pt-BR", {
@@ -397,6 +415,7 @@ export class ChatbotService {
       audioEnabled?: boolean;
       visionEnabled?: boolean;
       visionPrompt?: string | null;
+      responseDelayMs?: number;
       leadAutoExtract?: boolean;
       leadVehicleTable?: Record<string, unknown>;
       leadPriceTable?: Record<string, unknown>;
@@ -417,9 +436,18 @@ export class ChatbotService {
         instanceId
       }
     });
+    const existingPersistedSettings = chatbotPersistedSettingsSchema.parse({
+      ...defaultAiSettings,
+      responseDelayMs: defaultResponseDelayMs,
+      ...(existingConfig?.aiSettings && typeof existingConfig.aiSettings === "object" ? existingConfig.aiSettings : {})
+    });
     const audioEnabled = input.audioEnabled ?? existingConfig?.audioEnabled ?? false;
     const visionEnabled = input.visionEnabled ?? existingConfig?.visionEnabled ?? false;
     const visionPrompt = input.visionPrompt?.trim() ?? existingConfig?.visionPrompt ?? null;
+    const responseDelayMs =
+      input.responseDelayMs !== undefined
+        ? normalizeResponseDelayMs(input.responseDelayMs)
+        : existingPersistedSettings.responseDelayMs;
     const leadAutoExtract = input.leadAutoExtract ?? existingConfig?.leadAutoExtract ?? false;
     const leadVehicleTable =
       input.leadVehicleTable !== undefined
@@ -433,6 +461,10 @@ export class ChatbotService {
       input.leadSurchargeTable !== undefined
         ? input.leadSurchargeTable
         : ((existingConfig?.leadSurchargeTable as Record<string, unknown> | null | undefined) ?? {});
+    const modules =
+      input.modules !== undefined
+        ? sanitizeChatbotModules(input.modules)
+        : sanitizeChatbotModules(existingConfig?.modules ?? {});
 
     if (leadsPhoneNumberRaw && normalizedLeadsPhoneNumber) {
       assertValidPhoneNumber(normalizedLeadsPhoneNumber);
@@ -450,7 +482,7 @@ export class ChatbotService {
         humanTakeoverStartMessage: input.humanTakeoverStartMessage?.trim() || null,
         humanTakeoverEndMessage: input.humanTakeoverEndMessage?.trim() || null,
         rules,
-        aiSettings: this.buildPersistedAiSettings(aiInput),
+        aiSettings: this.buildPersistedAiSettings(aiInput, responseDelayMs),
         aiApiKeyEncrypted: null,
         leadsPhoneNumber: normalizedLeadsPhoneNumber,
         leadsEnabled: input.leadsEnabled ?? true,
@@ -465,7 +497,7 @@ export class ChatbotService {
         aiFallbackProvider: input.aiFallbackProvider ?? null,
         aiFallbackApiKey: input.aiFallbackApiKey?.trim() || null,
         aiFallbackModel: input.aiFallbackModel?.trim() || null,
-        modules: (input.modules ?? {}) as Prisma.InputJsonValue
+        modules: modules as Prisma.InputJsonValue
       } as Prisma.ChatbotConfigUncheckedCreateInput,
       update: {
         isEnabled: input.isEnabled,
@@ -474,7 +506,7 @@ export class ChatbotService {
         humanTakeoverStartMessage: input.humanTakeoverStartMessage?.trim() || null,
         humanTakeoverEndMessage: input.humanTakeoverEndMessage?.trim() || null,
         rules,
-        aiSettings: this.buildPersistedAiSettings(aiInput),
+        aiSettings: this.buildPersistedAiSettings(aiInput, responseDelayMs),
         aiApiKeyEncrypted: null,
         leadsPhoneNumber: normalizedLeadsPhoneNumber,
         leadsEnabled: input.leadsEnabled ?? true,
@@ -489,7 +521,7 @@ export class ChatbotService {
         aiFallbackProvider: input.aiFallbackProvider ?? null,
         aiFallbackApiKey: input.aiFallbackApiKey?.trim() || null,
         aiFallbackModel: input.aiFallbackModel?.trim() || null,
-        modules: (input.modules ?? {}) as Prisma.InputJsonValue
+        modules: modules as Prisma.InputJsonValue
       } as Prisma.ChatbotConfigUncheckedUpdateInput
     });
 
@@ -517,7 +549,7 @@ export class ChatbotService {
         humanTakeoverStartMessage: null,
         humanTakeoverEndMessage: null,
         rules: [] as Prisma.InputJsonValue,
-        aiSettings: this.buildPersistedAiSettings(defaultAiSettings),
+        aiSettings: this.buildPersistedAiSettings(defaultAiSettings, defaultResponseDelayMs),
         aiApiKeyEncrypted: null,
         leadsPhoneNumber: normalizedPhoneNumber
       } as Prisma.ChatbotConfigUncheckedCreateInput,
@@ -600,6 +632,7 @@ export class ChatbotService {
             audioEnabled: false,
             visionEnabled: false,
             visionPrompt: null,
+            responseDelayMs: defaultResponseDelayMs,
             leadAutoExtract: false,
             leadVehicleTable: {},
             leadPriceTable: {},
@@ -665,6 +698,55 @@ export class ChatbotService {
     input: ChatbotRuntimeInput
   ): Promise<ChatbotSimulationResult> {
     const normalizedInput = normalizeText(input.text ?? "");
+    const simulationPhoneNumber = normalizePhoneNumber(input.phoneNumber);
+
+    if (!isPhoneAllowedByListaBranca(config.modules, simulationPhoneNumber)) {
+      return {
+        action: "NO_MATCH",
+        matchedRuleId: null,
+        matchedRuleName: "Módulo Lista Branca",
+        responseText: "Simulação: o bot não responderia porque esse número não está autorizado na lista branca."
+      };
+    }
+
+    if (isPhoneBlockedByBlacklist(config.modules, simulationPhoneNumber)) {
+      return {
+        action: "NO_MATCH",
+        matchedRuleId: null,
+        matchedRuleName: "Módulo Blacklist",
+        responseText: "Simulação: o bot não responderia porque esse número está bloqueado na blacklist."
+      };
+    }
+
+    const pauseWord = matchesPauseWord(config.modules, input.text ?? "");
+    if (pauseWord.matched) {
+      return {
+        action: "MATCHED",
+        matchedRuleId: null,
+        matchedRuleName: "Módulo Palavra de Pausa",
+        responseText: pauseWord.message ?? "Simulação: o atendimento automático seria pausado para este contato."
+      };
+    }
+
+    const horarioAtendimentoModule = getHorarioAtendimentoModuleConfig(config.modules);
+    if (horarioAtendimentoModule?.isEnabled && !isWithinHorarioAtendimento(horarioAtendimentoModule)) {
+      return {
+        action: "MATCHED",
+        matchedRuleId: null,
+        matchedRuleName: "Módulo Horário de Atendimento",
+        responseText: horarioAtendimentoModule.mensagemForaHorario
+      };
+    }
+
+    const faqResponse = findFaqResponse(config.modules, input.text ?? "");
+    if (faqResponse) {
+      return {
+        action: "MATCHED",
+        matchedRuleId: null,
+        matchedRuleName: "Módulo FAQ",
+        responseText: faqResponse
+      };
+    }
 
     if (input.isFirstContact && config.welcomeMessage?.trim()) {
       return {
@@ -749,6 +831,11 @@ export class ChatbotService {
       ...defaultAiSettings,
       ...(record.aiSettings && typeof record.aiSettings === "object" ? record.aiSettings : {})
     });
+    const persistedSettings = chatbotPersistedSettingsSchema.parse({
+      ...defaultAiSettings,
+      responseDelayMs: defaultResponseDelayMs,
+      ...(record.aiSettings && typeof record.aiSettings === "object" ? record.aiSettings : {})
+    });
     const leadVehicleTable =
       record.leadVehicleTable && typeof record.leadVehicleTable === "object"
         ? (record.leadVehicleTable as Record<string, unknown>)
@@ -782,6 +869,7 @@ export class ChatbotService {
       audioEnabled: record.audioEnabled ?? false,
       visionEnabled: record.visionEnabled ?? false,
       visionPrompt: record.visionPrompt ?? null,
+      responseDelayMs: persistedSettings.responseDelayMs,
       leadAutoExtract: record.leadAutoExtract ?? false,
       leadVehicleTable,
       leadPriceTable,
@@ -791,7 +879,7 @@ export class ChatbotService {
       aiFallbackProvider: normalizeFallbackProvider(record.aiFallbackProvider),
       aiFallbackApiKey: record.aiFallbackApiKey ?? null,
       aiFallbackModel: record.aiFallbackModel ?? null,
-      modules: (record.modules && typeof record.modules === "object" ? record.modules : {}) as ChatbotModules,
+      modules: sanitizeChatbotModules(record.modules),
       createdAt: record.createdAt.toISOString(),
       updatedAt: record.updatedAt.toISOString()
     };
@@ -811,10 +899,14 @@ export class ChatbotService {
     };
   }
 
-  private buildPersistedAiSettings(input: z.infer<typeof chatbotAiUpsertSchema>): Prisma.InputJsonValue {
-    const parsed = chatbotAiSettingsSchema.parse({
+  private buildPersistedAiSettings(
+    input: z.infer<typeof chatbotAiUpsertSchema>,
+    responseDelayMs: number
+  ): Prisma.InputJsonValue {
+    const parsed = chatbotPersistedSettingsSchema.parse({
       ...defaultAiSettings,
-      ...input
+      ...input,
+      responseDelayMs: normalizeResponseDelayMs(responseDelayMs)
     });
 
     return parsed as Prisma.InputJsonValue;
@@ -1359,14 +1451,24 @@ export class ChatbotService {
         config.instanceId,
         input,
         config.ai.systemPrompt,
-        config.ai.maxContextMessages
+        config.ai.maxContextMessages,
+        config.modules
       );
       let toolRuntime: ChatbotToolRuntime | undefined;
-      const googleCalendarConfigResult = googleCalendarModuleSchema.safeParse(config.modules?.googleCalendar);
+      const googleCalendarConfig = getGoogleCalendarModuleConfig(config.modules);
+      const agendaModuleConfig = getAgendaModuleConfig(config.modules);
+      const horarioAtendimentoModule = getHorarioAtendimentoModuleConfig(config.modules);
 
-      if (googleCalendarConfigResult.success && googleCalendarConfigResult.data.isEnabled) {
+      if (googleCalendarConfig?.isEnabled) {
         toolRuntime = {
-          googleCalendar: new GoogleCalendarTool(googleCalendarConfigResult.data),
+          googleCalendar: new GoogleCalendarTool(googleCalendarConfig, {
+            candidateStartTimes:
+              agendaModuleConfig?.isEnabled && agendaModuleConfig.horariosDisponiveis.length > 0
+                ? agendaModuleConfig.horariosDisponiveis
+                : undefined,
+            slotDurationMinutes: agendaModuleConfig?.isEnabled ? agendaModuleConfig.duracaoMinutos : undefined,
+            timeZone: horarioAtendimentoModule?.isEnabled ? horarioAtendimentoModule.timezone : undefined
+          }),
           definitions: [
             {
               type: "function",
@@ -1455,7 +1557,8 @@ export class ChatbotService {
     instanceId: string,
     input: ChatbotRuntimeInput,
     systemPrompt: string,
-    maxContextMessages: number
+    maxContextMessages: number,
+    modules?: ChatbotModules
   ): Promise<{
     system: string;
     messages: Array<{ role: "user" | "assistant"; content: string }>;
@@ -1479,6 +1582,12 @@ export class ChatbotService {
 
     if (input.clientContext?.trim()) {
       systemParts.push(input.clientContext.trim());
+    }
+
+    const moduleInstructions = buildOperationalModuleInstructions(modules);
+
+    if (moduleInstructions.length > 0) {
+      systemParts.push(moduleInstructions.join("\n"));
     }
 
     const system = systemParts.join("\n");

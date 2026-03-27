@@ -3,6 +3,7 @@ import { mkdir, rm } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { Worker } from "node:worker_threads";
 import type {
+  ChatbotModules,
   InstanceHealthReport,
   InstanceLogEvent,
   InstanceSummary,
@@ -24,6 +25,16 @@ import { MemoryAgent } from "../chatbot/agents/memory.agent.js";
 import { AdminMemoryService } from "../chatbot/admin-memory.service.js";
 import type { ChatMessage, ConversationSession as BaseConversationSession, LeadData } from "../chatbot/agents/types.js";
 import type { ClientMemoryService } from "../chatbot/memory.service.js";
+import {
+  findFaqResponse,
+  getAntiSpamModuleConfig,
+  getHorarioAtendimentoModuleConfig,
+  getLimiteMensagensModuleConfig,
+  isPhoneAllowedByListaBranca,
+  isPhoneBlockedByBlacklist,
+  isWithinHorarioAtendimento,
+  matchesPauseWord
+} from "../chatbot/module-runtime.js";
 import type { ChatbotService } from "../chatbot/service.js";
 import type { PlanEnforcementService } from "../platform/plan-enforcement.service.js";
 import type { WebhookService } from "../webhooks/service.js";
@@ -160,7 +171,9 @@ interface PendingConversationTurnContext {
     audioEnabled?: boolean | null;
     visionEnabled?: boolean | null;
     visionPrompt?: string | null;
+    responseDelayMs?: number | null;
     leadAutoExtract?: boolean | null;
+    modules?: ChatbotModules | null;
   } | null;
   conversationId: string;
   conversationPhoneNumber: string | null;
@@ -181,6 +194,8 @@ const leadExtractionAwaitingTimeoutMs = 120_000;
 const conversationDebounceDelayMs = 3_000;
 const conversationSessionCleanupIntervalMs = 10 * 60 * 1000;
 const conversationSessionIdleTtlMs = 60 * 60 * 1000;
+const normalizeResponseDelayMs = (value: number | null | undefined): number =>
+  Math.min(60_000, Math.max(0, Math.round(value ?? conversationDebounceDelayMs)));
 
 /**
  * Orquestra o ciclo de vida das instancias WhatsApp em workers isolados.
@@ -1792,7 +1807,22 @@ export class InstanceOrchestrator {
         contactPhoneNumber: contact.phoneNumber ?? remoteNumber,
         contactDisplayName: contact.displayName ?? null,
         contactFields,
-        chatbotConfig,
+        chatbotConfig: chatbotConfig
+          ? {
+              leadsPhoneNumber: chatbotConfig.leadsPhoneNumber ?? null,
+              leadsEnabled: chatbotConfig.leadsEnabled ?? true,
+              fiadoEnabled: chatbotConfig.fiadoEnabled ?? false,
+              audioEnabled: chatbotConfig.audioEnabled ?? false,
+              visionEnabled: chatbotConfig.visionEnabled ?? false,
+              visionPrompt: chatbotConfig.visionPrompt ?? null,
+              responseDelayMs: chatbotConfig.responseDelayMs ?? conversationDebounceDelayMs,
+              leadAutoExtract: chatbotConfig.leadAutoExtract ?? false,
+              modules:
+                chatbotConfig.modules && typeof chatbotConfig.modules === "object"
+                  ? (chatbotConfig.modules as ChatbotModules)
+                  : undefined
+            }
+          : null,
         conversationId: activeConversation.id,
         conversationPhoneNumber: activeConversation.phoneNumber,
         isFirstContact
@@ -2025,6 +2055,8 @@ export class InstanceOrchestrator {
       clearTimeout(session.debounceTimer);
     }
 
+    const debounceDelayMs = normalizeResponseDelayMs(context.chatbotConfig?.responseDelayMs);
+
     session.debounceTimer = setTimeout(() => {
       session.debounceTimer = null;
 
@@ -2034,7 +2066,7 @@ export class InstanceOrchestrator {
       }
 
       void this.processQueuedConversationTurn(session);
-    }, conversationDebounceDelayMs);
+    }, debounceDelayMs);
   }
 
   private async processQueuedConversationTurn(session: ConversationSession): Promise<void> {
@@ -2101,6 +2133,83 @@ export class InstanceOrchestrator {
     return Boolean(conversation?.humanTakeover || conversation?.aiDisabledPermanent);
   }
 
+  private async exceededAntiSpamThreshold(
+    prisma: Awaited<ReturnType<TenantPrismaRegistry["getClient"]>>,
+    instanceId: string,
+    remoteJid: string,
+    inputText: string,
+    intervalMinutes: number,
+    maxMessages: number
+  ): Promise<boolean> {
+    const normalizedInput = inputText.normalize("NFKC").trim().toLowerCase();
+
+    if (!normalizedInput) {
+      return false;
+    }
+
+    const recentMessages = await prisma.message.findMany({
+      where: {
+        instanceId,
+        remoteJid,
+        direction: "INBOUND",
+        createdAt: {
+          gte: new Date(Date.now() - intervalMinutes * 60 * 1000)
+        }
+      },
+      orderBy: {
+        createdAt: "desc"
+      },
+      take: maxMessages + 3,
+      select: {
+        payload: true
+      }
+    });
+
+    const repeatedCount = recentMessages.filter((message) => {
+      const payload =
+        message.payload && typeof message.payload === "object"
+          ? (message.payload as Record<string, unknown>)
+          : null;
+      const text = typeof payload?.text === "string" ? payload.text.normalize("NFKC").trim().toLowerCase() : "";
+      return text === normalizedInput;
+    }).length;
+
+    return repeatedCount > maxMessages;
+  }
+
+  private async exceededMessageModuleLimit(
+    prisma: Awaited<ReturnType<TenantPrismaRegistry["getClient"]>>,
+    instanceId: string,
+    remoteJid: string,
+    maxPerHour: number,
+    maxPerDay: number
+  ): Promise<boolean> {
+    const [messagesLastHour, messagesLastDay] = await Promise.all([
+      prisma.message.count({
+        where: {
+          instanceId,
+          remoteJid,
+          direction: "INBOUND",
+          createdAt: {
+            gte: new Date(Date.now() - 60 * 60 * 1000)
+          }
+        }
+      }),
+      prisma.message.count({
+        where: {
+          instanceId,
+          remoteJid,
+          direction: "INBOUND",
+          createdAt: {
+            gte: new Date(Date.now() - 24 * 60 * 60 * 1000)
+          }
+        }
+      })
+    ]);
+
+    return messagesLastHour > maxPerHour || messagesLastDay > maxPerDay;
+  }
+
   private async processConversationTurn(params: PendingConversationTurnContext & {
     inputText: string;
     session: ConversationSession;
@@ -2108,12 +2217,111 @@ export class InstanceOrchestrator {
     const prisma = await this.tenantPrismaRegistry.getClient(params.tenantId);
     const clientMemory = await this.clientMemoryService.findByPhone(params.tenantId, params.resolvedContactNumber);
     const adminPhone = await this.getCachedPlatformAdminPhone();
+    const modules = params.chatbotConfig?.modules ?? undefined;
 
     if (clientMemory?.tags.includes("paused_by_human")) {
       return;
     }
 
     if (await this.isConversationAiBlocked(prisma, params.conversationId)) {
+      return;
+    }
+
+    if (!isPhoneAllowedByListaBranca(modules, params.resolvedContactNumber)) {
+      return;
+    }
+
+    if (isPhoneBlockedByBlacklist(modules, params.resolvedContactNumber)) {
+      return;
+    }
+
+    const pauseWord = matchesPauseWord(modules, params.inputText);
+
+    if (pauseWord.matched) {
+      await this.clientMemoryService.addTag(params.tenantId, params.resolvedContactNumber, "paused_by_human");
+
+      if (pauseWord.message?.trim()) {
+        await this.sendAutomatedTextMessage(
+          params.tenantId,
+          params.instance.id,
+          params.remoteNumber,
+          params.targetJid,
+          pauseWord.message.trim(),
+          { action: "pause_word", kind: "chatbot" }
+        );
+        this.appendConversationHistory(params.session, "assistant", pauseWord.message.trim());
+      }
+
+      return;
+    }
+
+    const horarioAtendimentoModule = getHorarioAtendimentoModuleConfig(modules);
+
+    if (
+      horarioAtendimentoModule?.isEnabled &&
+      !isWithinHorarioAtendimento(horarioAtendimentoModule)
+    ) {
+      await this.sendAutomatedTextMessage(
+        params.tenantId,
+        params.instance.id,
+        params.remoteNumber,
+        params.targetJid,
+        horarioAtendimentoModule.mensagemForaHorario,
+        { action: "working_hours_guard", kind: "chatbot" }
+      );
+      this.appendConversationHistory(params.session, "assistant", horarioAtendimentoModule.mensagemForaHorario);
+      return;
+    }
+
+    const antiSpamModule = getAntiSpamModuleConfig(modules);
+
+    if (
+      antiSpamModule?.isEnabled &&
+      await this.exceededAntiSpamThreshold(
+        prisma,
+        params.instance.id,
+        params.targetJid,
+        params.inputText,
+        antiSpamModule.intervaloMinutos,
+        antiSpamModule.maxMensagens
+      )
+    ) {
+      return;
+    }
+
+    const limiteMensagensModule = getLimiteMensagensModuleConfig(modules);
+
+    if (
+      limiteMensagensModule?.isEnabled &&
+      await this.exceededMessageModuleLimit(
+        prisma,
+        params.instance.id,
+        params.targetJid,
+        limiteMensagensModule.maxPorHora,
+        limiteMensagensModule.maxPorDia
+      )
+    ) {
+      return;
+    }
+
+    const faqResponse = findFaqResponse(modules, params.inputText);
+
+    if (faqResponse) {
+      await this.memoryAgent.update({
+        tenantId: params.tenantId,
+        phoneNumber: params.resolvedContactNumber,
+        clientMessage: params.inputText
+      });
+
+      await this.sendAutomatedTextMessage(
+        params.tenantId,
+        params.instance.id,
+        params.remoteNumber,
+        params.targetJid,
+        faqResponse,
+        { action: "faq_module", kind: "chatbot" }
+      );
+      this.appendConversationHistory(params.session, "assistant", faqResponse);
       return;
     }
 

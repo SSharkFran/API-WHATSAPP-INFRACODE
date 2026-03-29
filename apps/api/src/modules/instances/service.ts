@@ -1417,6 +1417,12 @@ if (event.status === "CONNECTED") {
       lastRemoteNumber
     ];
     const matchedAdminPhone = this.findMatchingExpectedPhone(adminCandidatePhones, adminSenderCandidates);
+    const persistedAdminPromptConversationId = await this.escalationService.resolveConversationIdByPersistedAdminPrompt(
+      tenantId,
+      instance.id,
+      [event.remoteJid, senderJid],
+      adminSenderCandidates
+    );
     const quotedLearningConversationId =
       this.extractQuotedLearningConversationId(event.rawMessage) ??
       this.extractLearningConversationIdFromText(rawTextInput) ??
@@ -1424,7 +1430,8 @@ if (event.status === "CONNECTED") {
         this.extractQuotedMessageExternalId(event.rawMessage)
       ) ??
       this.escalationService.resolveConversationIdByAdminAlertChat(event.remoteJid) ??
-      this.escalationService.resolveConversationIdByAdminAlertChat(senderJid);
+      this.escalationService.resolveConversationIdByAdminAlertChat(senderJid) ??
+      persistedAdminPromptConversationId;
     const isAdminSender = Boolean(matchedAdminPhone);
     const isAdminLearningReply = Boolean(quotedLearningConversationId);
     const isInstanceSender = Boolean(

@@ -109,6 +109,7 @@ export class EscalationService {
       "Responda esta mensagem para eu aprender e responder o cliente automaticamente.",
       `ID: ${ctx.conversationId}`
     ].join("\n");
+    const normalizedAdminPhone = ctx.adminPhone.replace(/\D/g, "");
 
     try {
       if (!this.platformAlertService) {
@@ -131,6 +132,26 @@ export class EscalationService {
       }
 
       this.trackAdminAlertRouting(result.externalMessageId, result.remoteJid, ctx.conversationId);
+      await prisma.message.create({
+        data: {
+          instanceId: ctx.instanceId,
+          remoteJid: result.remoteJid ?? `${normalizedAdminPhone}@s.whatsapp.net`,
+          externalMessageId: result.externalMessageId,
+          direction: "OUTBOUND",
+          type: "text",
+          status: "SENT",
+          payload: {
+            text: adminMessage,
+            to: normalizedAdminPhone,
+            automation: {
+              kind: "chatbot",
+              action: "admin_learning_prompt"
+            }
+          },
+          traceId: ctx.conversationId,
+          sentAt: new Date()
+        }
+      });
 
       return true;
     } catch (err) {
@@ -258,6 +279,71 @@ export class EscalationService {
     }
 
     return result.count;
+  }
+
+  public async resolveConversationIdByPersistedAdminPrompt(
+    tenantId: string,
+    instanceId: string,
+    remoteJids: Array<string | null | undefined>,
+    candidatePhones: Array<string | null | undefined>
+  ): Promise<string | null> {
+    const prisma = await this.tenantPrismaRegistry.getClient(tenantId);
+    const normalizedRemoteJids = [...new Set(
+      remoteJids
+        .flatMap((remoteJid) => this.buildAdminAlertChatKeys(remoteJid))
+        .filter(Boolean)
+    )];
+    const normalizedPhones = [...new Set(
+      candidatePhones
+        .map((phone) => phone?.replace(/\D/g, "") ?? "")
+        .filter(Boolean)
+    )];
+    const cutoff = new Date(Date.now() - 2 * 60 * 60 * 1000);
+
+    if (normalizedRemoteJids.length > 0) {
+      const byRemoteJid = await prisma.message.findFirst({
+        where: {
+          instanceId,
+          direction: "OUTBOUND",
+          createdAt: { gte: cutoff },
+          remoteJid: { in: normalizedRemoteJids },
+          payload: {
+            path: ["automation", "action"],
+            equals: "admin_learning_prompt"
+          },
+          traceId: { not: null }
+        },
+        orderBy: { createdAt: "desc" },
+        select: { traceId: true }
+      });
+
+      if (byRemoteJid?.traceId) {
+        return byRemoteJid.traceId;
+      }
+    }
+
+    for (const phone of normalizedPhones) {
+      const byPhone = await prisma.message.findFirst({
+        where: {
+          instanceId,
+          direction: "OUTBOUND",
+          createdAt: { gte: cutoff },
+          payload: {
+            path: ["to"],
+            equals: phone
+          },
+          traceId: { not: null }
+        },
+        orderBy: { createdAt: "desc" },
+        select: { traceId: true }
+      });
+
+      if (byPhone?.traceId) {
+        return byPhone.traceId;
+      }
+    }
+
+    return null;
   }
 
   private async rollbackEscalationState(

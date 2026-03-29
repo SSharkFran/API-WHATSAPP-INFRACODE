@@ -2,21 +2,25 @@
 
 import { startTransition, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import type {
-  ChatbotAiMode,
-  ChatbotConfig,
-  ChatbotModules,
-  ChatbotRule,
-  ChatbotSimulationResult,
-  ChatbotTriggerType,
-  FiadoTab,
-  InstanceSummary
+import {
+  CHATBOT_MODULE_CATALOG,
+  type ChatbotModuleCategory,
+  type ChatbotModuleKey,
+  type ChatbotAiMode,
+  type ChatbotConfig,
+  type ChatbotModules,
+  type ChatbotRule,
+  type ChatbotSimulationResult,
+  type ChatbotTriggerType,
+  type FiadoTab,
+  type InstanceSummary
 } from "@infracode/types";
 import { requestClientApi } from "../../lib/client-api";
 import { Button } from "../ui/Button";
 import { Badge } from "../ui/Badge";
 import { EmptyState } from "../ui/EmptyState";
-import { Bot, Save, RotateCcw, Play, Plus, Trash2, Server } from "lucide-react";
+import { Save, RotateCcw, Play, Plus, Trash2, Server, Settings2 } from "lucide-react";
+import { buildDefaultChatbotModuleConfig, ChatbotModuleConfigSheet } from "./chatbot-module-config-sheet";
 
 interface ChatbotStudioProps {
   initialInstances: InstanceSummary[];
@@ -34,6 +38,7 @@ interface ChatbotFormState {
   audioEnabled: boolean;
   visionEnabled: boolean;
   visionPrompt: string;
+  responseDelaySeconds: number;
   leadAutoExtract: boolean;
   leadVehicleTable: string;
   leadPriceTable: string;
@@ -99,6 +104,7 @@ const buildDefaultFormState = (): ChatbotFormState => ({
   audioEnabled: false,
   visionEnabled: false,
   visionPrompt: "",
+  responseDelaySeconds: 3,
   leadAutoExtract: false,
   leadVehicleTable: "",
   leadPriceTable: "",
@@ -174,6 +180,7 @@ const mapConfigToFormState = (config: ChatbotConfig): ChatbotFormState => ({
   audioEnabled: config.audioEnabled ?? false,
   visionEnabled: config.visionEnabled ?? false,
   visionPrompt: config.visionPrompt ?? "",
+  responseDelaySeconds: Math.round((config.responseDelayMs ?? 3_000) / 1000),
   leadAutoExtract: config.leadAutoExtract ?? false,
   leadVehicleTable: formatJsonTextarea(config.leadVehicleTable),
   leadPriceTable: formatJsonTextarea(config.leadPriceTable),
@@ -227,6 +234,35 @@ const tabs: { id: StudioTab; label: string }[] = [
   { id: "estado", label: "Estado" }
 ];
 
+const moduleCategoryMeta: Record<ChatbotModuleCategory, { emoji: string; label: string }> = {
+  atendimento: { emoji: "💬", label: "Atendimento" },
+  agendamento: { emoji: "📅", label: "Agendamento" },
+  financeiro: { emoji: "💰", label: "Financeiro" },
+  catalogo: { emoji: "📦", label: "Catálogo & Pedidos" },
+  dados: { emoji: "📊", label: "Dados & CRM" },
+  integracoes: { emoji: "🔗", label: "Integrações" },
+  controle: { emoji: "🛡️", label: "Controle" },
+  marketing: { emoji: "🎯", label: "Marketing" }
+};
+
+const moduleCategoryOrder: ChatbotModuleCategory[] = [
+  "atendimento",
+  "agendamento",
+  "financeiro",
+  "catalogo",
+  "dados",
+  "integracoes",
+  "controle",
+  "marketing"
+];
+
+const executionModeMeta = {
+  runtime: { label: "Runtime", variant: "success" as const },
+  prompt: { label: "Prompt IA", variant: "info" as const },
+  tool: { label: "Tool", variant: "info" as const },
+  placeholder: { label: "Placeholder", variant: "warning" as const }
+};
+
 /* ─── Main component ────────────────────────────────────────────────── */
 export const ChatbotStudio = ({ initialInstances }: ChatbotStudioProps) => {
   const router = useRouter();
@@ -241,13 +277,24 @@ export const ChatbotStudio = ({ initialInstances }: ChatbotStudioProps) => {
   const [success, setSuccess] = useState<string | null>(null);
   const [fiadoTabs, setFiadoTabs] = useState<FiadoTab[]>([]);
   const [activeTab, setActiveTab] = useState<StudioTab>("geral");
+  const [selectedModuleConfigKey, setSelectedModuleConfigKey] = useState<ChatbotModuleKey | null>(null);
 
   const selectedInstance = useMemo(
     () => instances.find((instance) => instance.id === selectedInstanceId) ?? null,
     [instances, selectedInstanceId]
   );
+  const moduleDefinitionsByCategory = useMemo(
+    () =>
+      moduleCategoryOrder.map((category) => ({
+        category,
+        items: CHATBOT_MODULE_CATALOG.filter((module) => module.category === category)
+      })),
+    []
+  );
 
   useEffect(() => {
+    setSelectedModuleConfigKey(null);
+
     if (!selectedInstanceId) {
       setFormState(buildDefaultFormState());
       setLastSavedConfig(null);
@@ -337,6 +384,7 @@ export const ChatbotStudio = ({ initialInstances }: ChatbotStudioProps) => {
           audioEnabled: formState.audioEnabled,
           visionEnabled: formState.visionEnabled,
           visionPrompt: formState.visionPrompt.trim() || null,
+          responseDelayMs: Math.min(60_000, Math.max(0, Math.round(formState.responseDelaySeconds * 1000))),
           leadAutoExtract: formState.leadAutoExtract,
           leadVehicleTable,
           leadPriceTable,
@@ -373,12 +421,53 @@ export const ChatbotStudio = ({ initialInstances }: ChatbotStudioProps) => {
   const clearFiado = async (phoneNumber: string) => {
     if (!selectedInstance) return;
     try {
-      await requestClientApi(`/instances/${selectedInstance.id}/fiado/${phoneNumber}`, { method: "DELETE" });
+      await requestClientApi(`/instances/${selectedInstance.id}/fiado/${phoneNumber}`, {
+        method: "DELETE",
+        expectNoContent: true
+      });
       setFiadoTabs((current) => current.filter((t) => t.phoneNumber !== phoneNumber));
       setSuccess("Fiado limpo.");
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Falha ao limpar fiado.");
     }
+  };
+
+  const updateModuleConfig = (
+    moduleKey: ChatbotModuleKey,
+    nextValue: NonNullable<ChatbotModules[ChatbotModuleKey]>
+  ) => {
+    setFormState((current) => ({
+      ...current,
+      modules: {
+        ...current.modules,
+        [moduleKey]: nextValue
+      }
+    }));
+  };
+
+  const toggleModuleEnabled = (moduleKey: ChatbotModuleKey, enabled: boolean) => {
+    const moduleDefinition = CHATBOT_MODULE_CATALOG.find((module) => module.key === moduleKey);
+
+    if (!moduleDefinition) {
+      return;
+    }
+
+    if (moduleDefinition.supportLevel !== "operational") {
+      setError(`O módulo "${moduleDefinition.label}" ainda não possui execução real no backend.`);
+      return;
+    }
+
+    setFormState((current) => ({
+      ...current,
+      modules: {
+        ...current.modules,
+        [moduleKey]: {
+          ...buildDefaultChatbotModuleConfig(moduleKey),
+          ...((current.modules[moduleKey] as Record<string, unknown> | undefined) ?? {}),
+          isEnabled: enabled
+        } as NonNullable<ChatbotModules[ChatbotModuleKey]>
+      }
+    }));
   };
 
   const runSimulation = async () => {
@@ -570,6 +659,30 @@ export const ChatbotStudio = ({ initialInstances }: ChatbotStudioProps) => {
                   />
                 </div>
 
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-[var(--text-secondary)]">
+                    Tempo para a IA responder (segundos)
+                  </label>
+                  <input
+                    type="number"
+                    min={0}
+                    max={60}
+                    step={1}
+                    className={[fieldClass, "h-11"].join(" ")}
+                    value={formState.responseDelaySeconds}
+                    onChange={(e) =>
+                      setFormState((current) => ({
+                        ...current,
+                        responseDelaySeconds: Math.min(60, Math.max(0, Number(e.target.value || 0)))
+                      }))
+                    }
+                  />
+                  <p className="text-xs leading-relaxed text-[var(--text-tertiary)]">
+                    Define quanto tempo o bot espera após a última mensagem antes de analisar e responder. Use `0`
+                    para resposta imediata.
+                  </p>
+                </div>
+
                 {/* Rules */}
                 <div className="space-y-3">
                   <div className="flex items-center justify-between">
@@ -718,6 +831,11 @@ export const ChatbotStudio = ({ initialInstances }: ChatbotStudioProps) => {
                     <p className="text-xs text-[var(--text-tertiary)]">Execute a simulação para ver o resultado.</p>
                   )}
                 </div>
+                <p className="text-[11px] leading-relaxed text-[var(--text-tertiary)]">
+                  A simulação já considera FAQ, horário de atendimento, lista branca, blacklist e palavra de pausa.
+                  Anti-spam e limite de mensagens continuam dependentes do histórico real da conversa, e agenda com
+                  Google Calendar depende de IA ativa e credenciais válidas.
+                </p>
               </div>
             </div>
           </div>
@@ -800,6 +918,14 @@ export const ChatbotStudio = ({ initialInstances }: ChatbotStudioProps) => {
                   placeholder="Você é um assistente virtual comercial..."
                   onChange={(e) => setFormState((c) => ({ ...c, ai: { ...c.ai, systemPrompt: e.target.value } }))}
                 />
+                <p className="text-xs leading-relaxed text-[var(--text-tertiary)]">
+                  Para respostas em mais de uma mensagem, a IA deve usar `|||` entre os blocos. Exemplo:
+                  `Primeira mensagem ||| Segunda mensagem`.
+                </p>
+                <p className="text-xs leading-relaxed text-[var(--text-tertiary)]">
+                  Este prompt e especifico desta instancia. Se a InfraCode definir um prompt global no super-admin,
+                  ele sera aplicado junto e tera prioridade sobre regras conflitantes.
+                </p>
               </div>
 
               <div className="flex gap-3 pt-1">
@@ -1015,298 +1141,115 @@ export const ChatbotStudio = ({ initialInstances }: ChatbotStudioProps) => {
 
         {/* ── MÓDULOS ───────────────────────────────────────────────────── */}
         {activeTab === "modulos" && (
-          <div className="space-y-5 max-w-4xl">
-            {/* 💬 Atendimento */}
-            <div className="rounded-[var(--radius-lg)] border border-[var(--border-subtle)] bg-[var(--bg-secondary)] overflow-hidden">
-              <div className="px-5 py-4 border-b border-[var(--border-subtle)] flex items-center gap-2">
-                <span className="text-lg">💬</span>
-                <h2 className="text-base font-semibold text-[var(--text-primary)]">Atendimento</h2>
-              </div>
-              <div className="p-5 grid gap-4 sm:grid-cols-2">
-                {[
-                  { key: "faq", label: "FAQ Automático", desc: "Responde perguntas frequentes configuradas" },
-                  { key: "horarioAtendimento", label: "Horário de Atendimento", desc: "Mensagem automática fora do horário" },
-                  { key: "antiSpam", label: "Anti-spam", desc: "Ignora mensagens repetidas" },
-                  { key: "multiIdioma", label: "Multi-idioma", desc: "Detecta e responde no mesmo idioma" }
-                ].map(({ key, label, desc }) => (
-                  <div key={key} className="flex items-start justify-between gap-3 p-3 rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--bg-tertiary)]">
-                    <div>
-                      <p className="text-sm font-medium text-[var(--text-primary)]">{label}</p>
-                      <p className="text-xs text-[var(--text-tertiary)] mt-0.5">{desc}</p>
-                    </div>
-                    <label className="flex items-center gap-2 cursor-pointer flex-shrink-0">
-                      <span className="relative inline-flex h-5 w-9 items-center rounded-full transition-colors duration-200"
-                        style={{ background: formState.modules[key as keyof ChatbotModules]?.isEnabled ? "var(--accent-green)" : "var(--bg-active)" }}>
-                        <input type="checkbox" className="sr-only"
-                          checked={formState.modules[key as keyof ChatbotModules]?.isEnabled ?? false}
-                          onChange={(e) => setFormState((c) => ({
-                            ...c,
-                            modules: { ...c.modules, [key]: { ...c.modules[key as keyof ChatbotModules], isEnabled: e.target.checked } }
-                          }))} />
-                        <span className={["inline-block h-3 w-3 rounded-full bg-white shadow-sm transition-transform duration-200",
-                          formState.modules[key as keyof ChatbotModules]?.isEnabled ? "translate-x-5" : "translate-x-1"].join(" ")} />
-                      </span>
-                    </label>
-                  </div>
-                ))}
+          <div className="space-y-5 max-w-5xl">
+            <div className="rounded-[var(--radius-lg)] border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-5">
+              <div className="flex flex-wrap items-start justify-between gap-4">
+                <div className="max-w-2xl">
+                  <p className="text-[10px] font-mono uppercase tracking-[0.24em] text-[var(--text-tertiary)]">Catálogo operacional</p>
+                  <h2 className="mt-1 text-lg font-semibold text-[var(--text-primary)]">Módulos com status real de execução</h2>
+                  <p className="mt-2 text-sm text-[var(--text-secondary)]">
+                    Operacional significa que já existe um caminho real no backend. O selo secundário mostra se esse
+                    caminho roda direto no runtime, via prompt da IA ou por tool de integração. Placeholder continua
+                    bloqueado e não entra no fluxo mesmo que exista configuração salva.
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Badge variant="success">Operacional</Badge>
+                  <Badge variant="info">Prompt/Tool</Badge>
+                  <Badge variant="warning">Placeholder</Badge>
+                </div>
               </div>
             </div>
 
-            {/* 📅 Agendamento */}
-            <div className="rounded-[var(--radius-lg)] border border-[var(--border-subtle)] bg-[var(--bg-secondary)] overflow-hidden">
-              <div className="px-5 py-4 border-b border-[var(--border-subtle)] flex items-center gap-2">
-                <span className="text-lg">📅</span>
-                <h2 className="text-base font-semibold text-[var(--text-primary)]">Agendamento</h2>
-              </div>
-              <div className="p-5 grid gap-4 sm:grid-cols-2">
-                {[
-                  { key: "agenda", label: "Agenda Inteligente", desc: "Horários disponíveis sem duplo agendamento" },
-                  { key: "lembrete", label: "Lembrete Automático", desc: "Envia lembrete X horas antes" },
-                  { key: "confirmacaoPresenca", label: "Confirmação de Presença", desc: "Pergunta se vai comparecer" },
-                  { key: "cancelamentoReagendamento", label: "Cancel./Reagendamento", desc: "Cliente muda pelo WhatsApp" }
-                ].map(({ key, label, desc }) => (
-                  <div key={key} className="flex items-start justify-between gap-3 p-3 rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--bg-tertiary)]">
-                    <div>
-                      <p className="text-sm font-medium text-[var(--text-primary)]">{label}</p>
-                      <p className="text-xs text-[var(--text-tertiary)] mt-0.5">{desc}</p>
-                    </div>
-                    <label className="flex items-center gap-2 cursor-pointer flex-shrink-0">
-                      <span className="relative inline-flex h-5 w-9 items-center rounded-full transition-colors duration-200"
-                        style={{ background: formState.modules[key as keyof ChatbotModules]?.isEnabled ? "var(--accent-green)" : "var(--bg-active)" }}>
-                        <input type="checkbox" className="sr-only"
-                          checked={formState.modules[key as keyof ChatbotModules]?.isEnabled ?? false}
-                          onChange={(e) => setFormState((c) => ({
-                            ...c,
-                            modules: { ...c.modules, [key]: { ...c.modules[key as keyof ChatbotModules], isEnabled: e.target.checked } }
-                          }))} />
-                        <span className={["inline-block h-3 w-3 rounded-full bg-white shadow-sm transition-transform duration-200",
-                          formState.modules[key as keyof ChatbotModules]?.isEnabled ? "translate-x-5" : "translate-x-1"].join(" ")} />
-                      </span>
-                    </label>
-                  </div>
-                ))}
-              </div>
-            </div>
+            {moduleDefinitionsByCategory.map(({ category, items }) => {
+              const categoryMeta = moduleCategoryMeta[category];
 
-            {/* 💰 Financeiro */}
-            <div className="rounded-[var(--radius-lg)] border border-[var(--border-subtle)] bg-[var(--bg-secondary)] overflow-hidden">
-              <div className="px-5 py-4 border-b border-[var(--border-subtle)] flex items-center gap-2">
-                <span className="text-lg">💰</span>
-                <h2 className="text-base font-semibold text-[var(--text-primary)]">Financeiro</h2>
-              </div>
-              <div className="p-5 grid gap-4 sm:grid-cols-2">
-                {[
-                  { key: "cobrancaAutomatica", label: "Cobrança Automática", desc: "Extrato → PIX → confirma pagamento" },
-                  { key: "notificacaoVencimento", label: "Notificação de Vencimento", desc: "Lembra cliente de dívida próxima" },
-                  { key: "orcamentoRapido", label: "Orçamento Rápido", desc: "Gera orçamento baseado em tabela" }
-                ].map(({ key, label, desc }) => (
-                  <div key={key} className="flex items-start justify-between gap-3 p-3 rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--bg-tertiary)]">
-                    <div>
-                      <p className="text-sm font-medium text-[var(--text-primary)]">{label}</p>
-                      <p className="text-xs text-[var(--text-tertiary)] mt-0.5">{desc}</p>
-                    </div>
-                    <label className="flex items-center gap-2 cursor-pointer flex-shrink-0">
-                      <span className="relative inline-flex h-5 w-9 items-center rounded-full transition-colors duration-200"
-                        style={{ background: formState.modules[key as keyof ChatbotModules]?.isEnabled ? "var(--accent-green)" : "var(--bg-active)" }}>
-                        <input type="checkbox" className="sr-only"
-                          checked={formState.modules[key as keyof ChatbotModules]?.isEnabled ?? false}
-                          onChange={(e) => setFormState((c) => ({
-                            ...c,
-                            modules: { ...c.modules, [key]: { ...c.modules[key as keyof ChatbotModules], isEnabled: e.target.checked } }
-                          }))} />
-                        <span className={["inline-block h-3 w-3 rounded-full bg-white shadow-sm transition-transform duration-200",
-                          formState.modules[key as keyof ChatbotModules]?.isEnabled ? "translate-x-5" : "translate-x-1"].join(" ")} />
-                      </span>
-                    </label>
+              return (
+                <div
+                  key={category}
+                  className="rounded-[var(--radius-lg)] border border-[var(--border-subtle)] bg-[var(--bg-secondary)] overflow-hidden"
+                >
+                  <div className="px-5 py-4 border-b border-[var(--border-subtle)] flex items-center gap-2">
+                    <span className="text-lg">{categoryMeta.emoji}</span>
+                    <h2 className="text-base font-semibold text-[var(--text-primary)]">{categoryMeta.label}</h2>
                   </div>
-                ))}
-              </div>
-            </div>
 
-            {/* 📦 Catálogo & Pedidos */}
-            <div className="rounded-[var(--radius-lg)] border border-[var(--border-subtle)] bg-[var(--bg-secondary)] overflow-hidden">
-              <div className="px-5 py-4 border-b border-[var(--border-subtle)] flex items-center gap-2">
-                <span className="text-lg">📦</span>
-                <h2 className="text-base font-semibold text-[var(--text-primary)]">Catálogo & Pedidos</h2>
-              </div>
-              <div className="p-5 grid gap-4 sm:grid-cols-2">
-                {[
-                  { key: "catalogo", label: "Cardápio/Catálogo", desc: "Mostra produtos configurados" },
-                  { key: "pedidoWhatsApp", label: "Pedido pelo WhatsApp", desc: "Cliente monta pedido" },
-                  { key: "statusPedido", label: "Status do Pedido", desc: "Cliente consulta status" },
-                  { key: "envioMidia", label: "Envio de Mídia", desc: "PDF, imagem, áudio por gatilho" }
-                ].map(({ key, label, desc }) => (
-                  <div key={key} className="flex items-start justify-between gap-3 p-3 rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--bg-tertiary)]">
-                    <div>
-                      <p className="text-sm font-medium text-[var(--text-primary)]">{label}</p>
-                      <p className="text-xs text-[var(--text-tertiary)] mt-0.5">{desc}</p>
-                    </div>
-                    <label className="flex items-center gap-2 cursor-pointer flex-shrink-0">
-                      <span className="relative inline-flex h-5 w-9 items-center rounded-full transition-colors duration-200"
-                        style={{ background: formState.modules[key as keyof ChatbotModules]?.isEnabled ? "var(--accent-green)" : "var(--bg-active)" }}>
-                        <input type="checkbox" className="sr-only"
-                          checked={formState.modules[key as keyof ChatbotModules]?.isEnabled ?? false}
-                          onChange={(e) => setFormState((c) => ({
-                            ...c,
-                            modules: { ...c.modules, [key]: { ...c.modules[key as keyof ChatbotModules], isEnabled: e.target.checked } }
-                          }))} />
-                        <span className={["inline-block h-3 w-3 rounded-full bg-white shadow-sm transition-transform duration-200",
-                          formState.modules[key as keyof ChatbotModules]?.isEnabled ? "translate-x-5" : "translate-x-1"].join(" ")} />
-                      </span>
-                    </label>
+                  <div className="p-5 grid gap-4 sm:grid-cols-2">
+                    {items.map((moduleDefinition) => {
+                      const moduleState = formState.modules[moduleDefinition.key];
+                      const isEnabled = moduleDefinition.supportLevel === "operational"
+                        ? moduleState?.isEnabled ?? false
+                        : false;
+
+                      return (
+                        <div
+                          key={moduleDefinition.key}
+                          className="rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--bg-tertiary)] p-4"
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="space-y-2">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <p className="text-sm font-medium text-[var(--text-primary)]">{moduleDefinition.label}</p>
+                                <Badge variant={moduleDefinition.supportLevel === "operational" ? "success" : "warning"}>
+                                  {moduleDefinition.supportLevel === "operational" ? "Operacional" : "Placeholder"}
+                                </Badge>
+                                <Badge variant={executionModeMeta[moduleDefinition.executionMode].variant}>
+                                  {executionModeMeta[moduleDefinition.executionMode].label}
+                                </Badge>
+                              </div>
+                              <p className="text-xs text-[var(--text-tertiary)]">{moduleDefinition.description}</p>
+                            </div>
+
+                            <div className="flex items-center gap-2 flex-shrink-0">
+                              {moduleDefinition.requiresConfig ? (
+                                <button
+                                  type="button"
+                                  aria-label={`Configurar módulo ${moduleDefinition.label}`}
+                                  className="rounded-full border border-[var(--border-subtle)] p-2 text-[var(--text-secondary)] transition hover:text-[var(--text-primary)]"
+                                  onClick={() => setSelectedModuleConfigKey(moduleDefinition.key)}
+                                >
+                                  <Settings2 className="h-4 w-4" />
+                                </button>
+                              ) : null}
+
+                              <label className="flex items-center gap-2 cursor-pointer">
+                                <span
+                                  className="relative inline-flex h-5 w-9 items-center rounded-full transition-colors duration-200"
+                                  style={{ background: isEnabled ? "var(--accent-green)" : "var(--bg-active)" }}
+                                >
+                                  <input
+                                    type="checkbox"
+                                    className="sr-only"
+                                    checked={isEnabled}
+                                    disabled={moduleDefinition.supportLevel !== "operational"}
+                                    onChange={(event) => toggleModuleEnabled(moduleDefinition.key, event.target.checked)}
+                                  />
+                                  <span
+                                    className={[
+                                      "inline-block h-3 w-3 rounded-full bg-white shadow-sm transition-transform duration-200",
+                                      isEnabled ? "translate-x-5" : "translate-x-1"
+                                    ].join(" ")}
+                                  />
+                                </span>
+                              </label>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
-                ))}
-              </div>
-            </div>
+                </div>
+              );
+            })}
 
-            {/* 📊 Dados & CRM */}
-            <div className="rounded-[var(--radius-lg)] border border-[var(--border-subtle)] bg-[var(--bg-secondary)] overflow-hidden">
-              <div className="px-5 py-4 border-b border-[var(--border-subtle)] flex items-center gap-2">
-                <span className="text-lg">📊</span>
-                <h2 className="text-base font-semibold text-[var(--text-primary)]">Dados & CRM</h2>
-              </div>
-              <div className="p-5 grid gap-4 sm:grid-cols-2">
-                {[
-                  { key: "capturaDados", label: "Captura de Dados", desc: "Coleta nome, email, interesse" },
-                  { key: "nps", label: "NPS", desc: "Pesquisa de satisfação pós-atendimento" },
-                  { key: "tagFollowUp", label: "Tag de Follow-up", desc: "Salva quem não fechou" },
-                  { key: "exportarLeads", label: "Exportar Leads", desc: "Exporta base pelo painel" }
-                ].map(({ key, label, desc }) => (
-                  <div key={key} className="flex items-start justify-between gap-3 p-3 rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--bg-tertiary)]">
-                    <div>
-                      <p className="text-sm font-medium text-[var(--text-primary)]">{label}</p>
-                      <p className="text-xs text-[var(--text-tertiary)] mt-0.5">{desc}</p>
-                    </div>
-                    <label className="flex items-center gap-2 cursor-pointer flex-shrink-0">
-                      <span className="relative inline-flex h-5 w-9 items-center rounded-full transition-colors duration-200"
-                        style={{ background: formState.modules[key as keyof ChatbotModules]?.isEnabled ? "var(--accent-green)" : "var(--bg-active)" }}>
-                        <input type="checkbox" className="sr-only"
-                          checked={formState.modules[key as keyof ChatbotModules]?.isEnabled ?? false}
-                          onChange={(e) => setFormState((c) => ({
-                            ...c,
-                            modules: { ...c.modules, [key]: { ...c.modules[key as keyof ChatbotModules], isEnabled: e.target.checked } }
-                          }))} />
-                        <span className={["inline-block h-3 w-3 rounded-full bg-white shadow-sm transition-transform duration-200",
-                          formState.modules[key as keyof ChatbotModules]?.isEnabled ? "translate-x-5" : "translate-x-1"].join(" ")} />
-                      </span>
-                    </label>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* 🔗 Integrações */}
-            <div className="rounded-[var(--radius-lg)] border border-[var(--border-subtle)] bg-[var(--bg-secondary)] overflow-hidden">
-              <div className="px-5 py-4 border-b border-[var(--border-subtle)] flex items-center gap-2">
-                <span className="text-lg">🔗</span>
-                <h2 className="text-base font-semibold text-[var(--text-primary)]">Integrações</h2>
-              </div>
-              <div className="p-5 grid gap-4 sm:grid-cols-2">
-                {[
-                  { key: "webhook", label: "Webhook de Saída", desc: "Dispara evento para sistema externo" },
-                  { key: "webhookBidirecional", label: "Webhook Bidirecional", desc: "Sistema externo responde" },
-                  { key: "googleCalendar", label: "Google Calendar", desc: "Cria evento ao agendar" },
-                  { key: "planilhaGoogle", label: "Planilha Google", desc: "Registra leads/pedidos" }
-                ].map(({ key, label, desc }) => (
-                  <div key={key} className="flex items-start justify-between gap-3 p-3 rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--bg-tertiary)]">
-                    <div>
-                      <p className="text-sm font-medium text-[var(--text-primary)]">{label}</p>
-                      <p className="text-xs text-[var(--text-tertiary)] mt-0.5">{desc}</p>
-                    </div>
-                    <label className="flex items-center gap-2 cursor-pointer flex-shrink-0">
-                      <span className="relative inline-flex h-5 w-9 items-center rounded-full transition-colors duration-200"
-                        style={{ background: formState.modules[key as keyof ChatbotModules]?.isEnabled ? "var(--accent-green)" : "var(--bg-active)" }}>
-                        <input type="checkbox" className="sr-only"
-                          checked={formState.modules[key as keyof ChatbotModules]?.isEnabled ?? false}
-                          onChange={(e) => setFormState((c) => ({
-                            ...c,
-                            modules: { ...c.modules, [key]: { ...c.modules[key as keyof ChatbotModules], isEnabled: e.target.checked } }
-                          }))} />
-                        <span className={["inline-block h-3 w-3 rounded-full bg-white shadow-sm transition-transform duration-200",
-                          formState.modules[key as keyof ChatbotModules]?.isEnabled ? "translate-x-5" : "translate-x-1"].join(" ")} />
-                      </span>
-                    </label>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* 🛡️ Controle */}
-            <div className="rounded-[var(--radius-lg)] border border-[var(--border-subtle)] bg-[var(--bg-secondary)] overflow-hidden">
-              <div className="px-5 py-4 border-b border-[var(--border-subtle)] flex items-center gap-2">
-                <span className="text-lg">🛡️</span>
-                <h2 className="text-base font-semibold text-[var(--text-primary)]">Controle</h2>
-              </div>
-              <div className="p-5 grid gap-4 sm:grid-cols-2">
-                {[
-                  { key: "listaBranca", label: "Lista Branca", desc: "Só responde para números cadastrados" },
-                  { key: "blacklist", label: "Blacklist", desc: "Bloqueia números específicos" },
-                  { key: "limiteMensagens", label: "Limite de Mensagens", desc: "Evita flood por contato" },
-                  { key: "palavraPausa", label: "Palavra de Pausa", desc: "Cliente digita 'sair' e para" }
-                ].map(({ key, label, desc }) => (
-                  <div key={key} className="flex items-start justify-between gap-3 p-3 rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--bg-tertiary)]">
-                    <div>
-                      <p className="text-sm font-medium text-[var(--text-primary)]">{label}</p>
-                      <p className="text-xs text-[var(--text-tertiary)] mt-0.5">{desc}</p>
-                    </div>
-                    <label className="flex items-center gap-2 cursor-pointer flex-shrink-0">
-                      <span className="relative inline-flex h-5 w-9 items-center rounded-full transition-colors duration-200"
-                        style={{ background: formState.modules[key as keyof ChatbotModules]?.isEnabled ? "var(--accent-green)" : "var(--bg-active)" }}>
-                        <input type="checkbox" className="sr-only"
-                          checked={formState.modules[key as keyof ChatbotModules]?.isEnabled ?? false}
-                          onChange={(e) => setFormState((c) => ({
-                            ...c,
-                            modules: { ...c.modules, [key]: { ...c.modules[key as keyof ChatbotModules], isEnabled: e.target.checked } }
-                          }))} />
-                        <span className={["inline-block h-3 w-3 rounded-full bg-white shadow-sm transition-transform duration-200",
-                          formState.modules[key as keyof ChatbotModules]?.isEnabled ? "translate-x-5" : "translate-x-1"].join(" ")} />
-                      </span>
-                    </label>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* 🎯 Marketing */}
-            <div className="rounded-[var(--radius-lg)] border border-[var(--border-subtle)] bg-[var(--bg-secondary)] overflow-hidden">
-              <div className="px-5 py-4 border-b border-[var(--border-subtle)] flex items-center gap-2">
-                <span className="text-lg">🎯</span>
-                <h2 className="text-base font-semibold text-[var(--text-primary)]">Marketing</h2>
-              </div>
-              <div className="p-5 grid gap-4 sm:grid-cols-2">
-                {[
-                  { key: "disparoMassa", label: "Disparo em Massa", desc: "Envia para lista de contatos" },
-                  { key: "campanhaSegmento", label: "Campanha por Segmento", desc: "Dispara para clientes com tag" },
-                  { key: "reativacao", label: "Reativação Automática", desc: "Mensagem para cliente inativo" },
-                  { key: "cupomPromocao", label: "Cupom/Promoção", desc: "Envia desconto por gatilho" }
-                ].map(({ key, label, desc }) => (
-                  <div key={key} className="flex items-start justify-between gap-3 p-3 rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--bg-tertiary)]">
-                    <div>
-                      <p className="text-sm font-medium text-[var(--text-primary)]">{label}</p>
-                      <p className="text-xs text-[var(--text-tertiary)] mt-0.5">{desc}</p>
-                    </div>
-                    <label className="flex items-center gap-2 cursor-pointer flex-shrink-0">
-                      <span className="relative inline-flex h-5 w-9 items-center rounded-full transition-colors duration-200"
-                        style={{ background: formState.modules[key as keyof ChatbotModules]?.isEnabled ? "var(--accent-green)" : "var(--bg-active)" }}>
-                        <input type="checkbox" className="sr-only"
-                          checked={formState.modules[key as keyof ChatbotModules]?.isEnabled ?? false}
-                          onChange={(e) => setFormState((c) => ({
-                            ...c,
-                            modules: { ...c.modules, [key]: { ...c.modules[key as keyof ChatbotModules], isEnabled: e.target.checked } }
-                          }))} />
-                        <span className={["inline-block h-3 w-3 rounded-full bg-white shadow-sm transition-transform duration-200",
-                          formState.modules[key as keyof ChatbotModules]?.isEnabled ? "translate-x-5" : "translate-x-1"].join(" ")} />
-                      </span>
-                    </label>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Save button */}
             <div className="flex gap-3">
-              <Button variant="primary" size="md" loading={pendingAction === "save"}
-                disabled={pendingAction !== null || !selectedInstance} onClick={() => void saveConfig()}>
+              <Button
+                variant="primary"
+                size="md"
+                loading={pendingAction === "save"}
+                disabled={pendingAction !== null || !selectedInstance}
+                onClick={() => void saveConfig()}
+              >
                 <Save aria-hidden="true" className="h-3.5 w-3.5" /> Salvar módulos
               </Button>
             </div>
@@ -1333,7 +1276,15 @@ export const ChatbotStudio = ({ initialInstances }: ChatbotStudioProps) => {
                 { label: "Fiado", value: lastSavedConfig?.fiadoEnabled ? "Ativo" : "Inativo" },
                 { label: "Áudio", value: lastSavedConfig?.audioEnabled ? "Ativo" : "Inativo" },
                 { label: "Visão (imagem)", value: lastSavedConfig?.visionEnabled ? "Ativo" : "Inativo" },
-                { label: "Módulos ativos", value: String(Object.values(formState.modules).filter(m => m?.isEnabled).length) }
+                { label: "Delay IA", value: `${Math.round((lastSavedConfig?.responseDelayMs ?? 3_000) / 1000)}s` },
+                {
+                  label: "Módulos ativos",
+                  value: String(
+                    CHATBOT_MODULE_CATALOG.filter((module) => module.supportLevel === "operational")
+                      .filter((module) => formState.modules[module.key]?.isEnabled)
+                      .length
+                  )
+                }
               ].map(({ label, value }) => (
                 <div key={label} className="flex justify-between px-4 py-2.5 rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--bg-tertiary)]">
                   <span className="text-[var(--text-tertiary)] text-xs font-mono uppercase tracking-wide">{label}</span>
@@ -1362,8 +1313,14 @@ export const ChatbotStudio = ({ initialInstances }: ChatbotStudioProps) => {
             </div>
           </div>
         )}
+
+        <ChatbotModuleConfigSheet
+          moduleKey={selectedModuleConfigKey}
+          modules={formState.modules}
+          onChange={updateModuleConfig}
+          onClose={() => setSelectedModuleConfigKey(null)}
+        />
       </div>
     </div>
   );
 };
-

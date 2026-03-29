@@ -9,9 +9,22 @@ interface PlatformConfigRecord {
   alertHighTokens: boolean;
 }
 
+const instanceLogAlertCooldownMs = 10 * 60 * 1000;
+
 export class PlatformAlertService {
   private readonly platformPrisma: PlatformPrisma;
   private readonly instanceOrchestrator: InstanceOrchestrator;
+  private readonly logAlertCooldowns = new Map<string, number>();
+  private connectedInstanceCache:
+    | {
+        expiresAt: number;
+        value: {
+          tenantId: string;
+          instanceId: string;
+          name: string;
+        } | null;
+      }
+    | null = null;
 
   public constructor(
     platformPrisma: PlatformPrisma,
@@ -38,6 +51,10 @@ export class PlatformAlertService {
     instanceId: string;
     name: string;
   } | null> {
+    if (this.connectedInstanceCache && this.connectedInstanceCache.expiresAt > Date.now()) {
+      return this.connectedInstanceCache.value;
+    }
+
     const tenants = await this.platformPrisma.tenant.findMany({
       where: {
         status: "ACTIVE",
@@ -51,16 +68,29 @@ export class PlatformAlertService {
         const instances = await this.instanceOrchestrator.listInstances(tenant.id);
         const connected = instances.find((i) => i.status === "CONNECTED");
         if (connected) {
-          return {
+          const resolved = {
             tenantId: tenant.id,
             instanceId: connected.id,
             name: connected.name
           };
+
+          this.connectedInstanceCache = {
+            expiresAt: Date.now() + 30_000,
+            value: resolved
+          };
+
+          return resolved;
         }
       } catch {
         continue;
       }
     }
+
+    this.connectedInstanceCache = {
+      expiresAt: Date.now() + 30_000,
+      value: null
+    };
+
     return null;
   }
 
@@ -140,6 +170,51 @@ export class PlatformAlertService {
 
     const phone = config.adminAlertPhone;
     const msg = `🚨 *ERRO CRÍTICO — InfraCode*\n\nTenant: ${tenantId}\nInstância: ${instanceId}\nErro: ${error.slice(0, 200)}\nHorário: ${new Date().toLocaleString("pt-BR")}`;
+
+    await this.sendAdminAlert(phone, msg);
+  }
+
+  async alertInstanceLogError(
+    tenantId: string,
+    instanceId: string,
+    instanceName: string,
+    logMessage: string,
+    context?: Record<string, unknown>
+  ): Promise<void> {
+    const config = await this.getConfig();
+    if (!config?.adminAlertPhone) return;
+
+    const normalizedMessage = logMessage.replace(/\s+/g, " ").trim();
+    const dedupeKey = `${tenantId}:${instanceId}:${normalizedMessage.slice(0, 160)}`;
+    const now = Date.now();
+
+    for (const [key, expiresAt] of this.logAlertCooldowns.entries()) {
+      if (expiresAt <= now) {
+        this.logAlertCooldowns.delete(key);
+      }
+    }
+
+    const activeCooldown = this.logAlertCooldowns.get(dedupeKey);
+
+    if (activeCooldown && activeCooldown > now) {
+      return;
+    }
+
+    this.logAlertCooldowns.set(dedupeKey, now + instanceLogAlertCooldownMs);
+
+    let renderedContext = "";
+
+    if (context && Object.keys(context).length > 0) {
+      try {
+        const serialized = JSON.stringify(context);
+        renderedContext = serialized ? `\nContexto: ${serialized.slice(0, 280)}` : "";
+      } catch {
+        renderedContext = "";
+      }
+    }
+
+    const phone = config.adminAlertPhone;
+    const msg = `🚨 *ERRO DE LOG — InfraCode*\n\nTenant: ${tenantId}\nInstância: ${instanceName} (${instanceId})\nLog: ${normalizedMessage.slice(0, 220)}${renderedContext}\nHorário: ${new Date().toLocaleString("pt-BR")}`;
 
     await this.sendAdminAlert(phone, msg);
   }

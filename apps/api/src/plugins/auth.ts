@@ -12,6 +12,7 @@ import {
   type AuthContext
 } from "../lib/authz.js";
 import { resolveTenantSlugFromHostname } from "../lib/host.js";
+import { incrementExpiringCounter } from "../lib/redis-rate-limit.js";
 import { verifyAccessToken } from "../lib/tokens.js";
 
 const readBearerToken = (value: string | undefined): string | undefined => {
@@ -42,6 +43,8 @@ export const authPlugin: FastifyPluginAsync = fp(async (app) => {
     }
 
     if (!app.config.ENABLE_AUTH) {
+      // Em ambiente de desenvolvimento, o bypass de auth tambem pula o rate limit por tenant,
+      // porque a execucao retorna antes de qualquer validacao/autorizacao tenant-scoped.
       request.auth = {
         actorId: "development-bypass",
         actorType: tenantSlugFromHost ? "TENANT_USER" : "PLATFORM_USER",
@@ -259,11 +262,7 @@ const enforceTenantHttpRateLimit = async (
   const now = new Date();
   const bucket = `${now.getUTCFullYear()}-${now.getUTCMonth()}-${now.getUTCDate()}-${now.getUTCHours()}-${now.getUTCMinutes()}`;
   const key = `http-rate:${tenantId}:${bucket}`;
-  const current = await app.redis.incr(key);
-
-  if (current === 1) {
-    await app.redis.expire(key, 60);
-  }
+  const current = await incrementExpiringCounter(app.redis, key, 60);
 
   if (current > limitPerMinute) {
     throw new ApiError(429, "TENANT_HTTP_RATE_LIMIT_EXCEEDED", "Tenant excedeu o limite de requisicoes por minuto", {

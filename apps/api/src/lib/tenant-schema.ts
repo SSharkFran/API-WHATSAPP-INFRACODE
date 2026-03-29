@@ -1,9 +1,18 @@
 const quoteIdentifier = (value: string): string => `"${value.replaceAll("\"", "\"\"")}"`;
+const tenantSchemaNamePattern = /^[a-zA-Z0-9_]+$/;
 
 /**
  * Gera o nome fisico do schema de um tenant a partir do seu ID imutavel.
  */
-export const resolveTenantSchemaName = (tenantId: string): string => `tenant_${tenantId.replaceAll(/[^a-zA-Z0-9_]/g, "_")}`;
+export const resolveTenantSchemaName = (tenantId: string): string => {
+  const schemaName = `tenant_${tenantId.replaceAll(/[^a-zA-Z0-9_]/g, "_")}`;
+
+  if (!tenantSchemaNamePattern.test(schemaName)) {
+    throw new Error("Nome de schema do tenant invalido");
+  }
+
+  return schemaName;
+};
 
 /**
  * Retorna o conjunto de comandos SQL necessario para provisionar um schema de tenant.

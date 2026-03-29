@@ -3,23 +3,25 @@
 import * as React from "react";
 
 interface InputProps extends React.InputHTMLAttributes<HTMLInputElement> {
-  label: string;
+  label?: string;
   error?: string;
   hint?: string;
 }
 
 export const Input = React.forwardRef<HTMLInputElement, InputProps>(
   ({ label, error, hint, id, className = "", ...props }, ref) => {
-    const inputId = id ?? label.toLowerCase().replace(/\s+/g, "-");
+    const inputId = id ?? label?.toLowerCase().replace(/\s+/g, "-") ?? React.useId();
 
     return (
       <div className="flex flex-col gap-1.5">
-        <label
-          htmlFor={inputId}
-          className="text-xs font-medium text-[var(--text-secondary)] tracking-wide select-none"
-        >
-          {label}
-        </label>
+        {label ? (
+          <label
+            htmlFor={inputId}
+            className="text-xs font-medium text-[var(--text-secondary)] tracking-wide select-none"
+          >
+            {label}
+          </label>
+        ) : null}
         <input
           ref={ref}
           id={inputId}

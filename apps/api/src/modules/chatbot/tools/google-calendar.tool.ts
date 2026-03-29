@@ -21,12 +21,20 @@ export interface CheckAvailabilityResult {
   error?: string;
 }
 
+interface GoogleCalendarToolOptions {
+  candidateStartTimes?: string[];
+  slotDurationMinutes?: number;
+  timeZone?: string;
+}
+
 export class GoogleCalendarTool {
   private readonly config: GoogleCalendarModuleConfig;
   private readonly oauth2Client: Auth.OAuth2Client;
+  private readonly options: GoogleCalendarToolOptions;
 
-  constructor(config: GoogleCalendarModuleConfig) {
+  constructor(config: GoogleCalendarModuleConfig, options: GoogleCalendarToolOptions = {}) {
     this.config = config;
+    this.options = options;
     this.oauth2Client = new google.auth.OAuth2(
       config.clientId,
       config.clientSecret,
@@ -40,10 +48,16 @@ export class GoogleCalendarTool {
   private async getAccessToken(): Promise<string> {
     try {
       const { credentials } = await this.oauth2Client.refreshAccessToken();
-      return credentials.access_token ?? "";
+      if (!credentials.access_token) {
+        throw new Error("Access token vazio na resposta do OAuth");
+      }
+
+      return credentials.access_token;
     } catch (error) {
       console.error("[GoogleCalendar] Erro ao gerar access token:", error);
-      throw new Error("Falha ao autenticar com Google Calendar");
+      throw new Error(
+        `Falha ao autenticar com Google Calendar: ${error instanceof Error ? error.message : String(error)}`
+      );
     }
   }
 
@@ -74,25 +88,35 @@ export class GoogleCalendarTool {
       const busySlots = response.data.items ?? [];
 
       const slots: TimeSlot[] = [];
-      const dayStart = new Date(`${date}T09:00:00`);
-      const dayEnd = new Date(`${date}T18:00:00`);
-      const slotDurationMinutes = 30;
+      const slotDurationMinutes = Math.max(15, this.options.slotDurationMinutes ?? 30);
+      const configuredStartTimes = Array.from(
+        new Set(
+          (this.options.candidateStartTimes ?? [])
+            .filter((time) => /^\d{2}:\d{2}$/.test(time))
+            .sort((left, right) => left.localeCompare(right))
+        )
+      );
 
-      let currentSlotStart = new Date(dayStart);
-
-      while (currentSlotStart < dayEnd) {
-        const currentSlotEnd = new Date(currentSlotStart.getTime() + slotDurationMinutes * 60 * 1000);
+      const evaluateAvailability = (slotStart: Date, slotEnd: Date): boolean => {
         let isBusy = false;
 
         for (const event of busySlots) {
-          const eventStart = event.start?.dateTime ? new Date(event.start.dateTime) : null;
-          const eventEnd = event.end?.dateTime ? new Date(event.end.dateTime) : null;
+          const eventStart = event.start?.dateTime
+            ? new Date(event.start.dateTime)
+            : event.start?.date
+              ? new Date(`${event.start.date}T00:00:00`)
+              : null;
+          const eventEnd = event.end?.dateTime
+            ? new Date(event.end.dateTime)
+            : event.end?.date
+              ? new Date(`${event.end.date}T00:00:00`)
+              : null;
 
           if (eventStart && eventEnd) {
             if (
-              (currentSlotStart >= eventStart && currentSlotStart < eventEnd) ||
-              (currentSlotEnd > eventStart && currentSlotEnd <= eventEnd) ||
-              (currentSlotStart <= eventStart && currentSlotEnd >= eventEnd)
+              (slotStart >= eventStart && slotStart < eventEnd) ||
+              (slotEnd > eventStart && slotEnd <= eventEnd) ||
+              (slotStart <= eventStart && slotEnd >= eventEnd)
             ) {
               isBusy = true;
               break;
@@ -100,13 +124,36 @@ export class GoogleCalendarTool {
           }
         }
 
-        slots.push({
-          start: currentSlotStart.toTimeString().slice(0, 5),
-          end: currentSlotEnd.toTimeString().slice(0, 5),
-          available: !isBusy
-        });
+        return !isBusy;
+      };
 
-        currentSlotStart = currentSlotEnd;
+      if (configuredStartTimes.length > 0) {
+        for (const configuredStartTime of configuredStartTimes) {
+          const slotStart = new Date(`${date}T${configuredStartTime}:00`);
+          const slotEnd = new Date(slotStart.getTime() + slotDurationMinutes * 60 * 1000);
+
+          slots.push({
+            start: configuredStartTime,
+            end: slotEnd.toTimeString().slice(0, 5),
+            available: evaluateAvailability(slotStart, slotEnd)
+          });
+        }
+      } else {
+        const dayStart = new Date(`${date}T09:00:00`);
+        const dayEnd = new Date(`${date}T18:00:00`);
+        let currentSlotStart = new Date(dayStart);
+
+        while (currentSlotStart < dayEnd) {
+          const currentSlotEnd = new Date(currentSlotStart.getTime() + slotDurationMinutes * 60 * 1000);
+
+          slots.push({
+            start: currentSlotStart.toTimeString().slice(0, 5),
+            end: currentSlotEnd.toTimeString().slice(0, 5),
+            available: evaluateAvailability(currentSlotStart, currentSlotEnd)
+          });
+
+          currentSlotStart = currentSlotEnd;
+        }
       }
 
       return {
@@ -139,11 +186,11 @@ export class GoogleCalendarTool {
         description,
         start: {
           dateTime: startDateTime,
-          timeZone: "America/Sao_Paulo"
+          timeZone: this.options.timeZone ?? "America/Sao_Paulo"
         },
         end: {
           dateTime: endDateTime,
-          timeZone: "America/Sao_Paulo"
+          timeZone: this.options.timeZone ?? "America/Sao_Paulo"
         },
         reminders: {
           useDefault: false,

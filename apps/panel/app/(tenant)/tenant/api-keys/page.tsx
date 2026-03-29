@@ -1,5 +1,6 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@infracode/ui";
 import { getServerPanelConfig } from "../../../../lib/api";
+import { ApiKeysManager } from "../../../../components/tenant/api-keys-manager";
 
 export default function TenantApiKeysPage() {
   const panelConfig = getServerPanelConfig();
@@ -64,6 +65,14 @@ export default function TenantApiKeysPage() {
             </CardContent>
           </Card>
         </div>
+      </div>
+
+      <div className="space-y-3">
+        <div className="max-w-3xl">
+          <p className="control-kicker text-slate-400">Gestão</p>
+          <h3 className="mt-2 text-2xl font-semibold text-white">Criar, listar e revogar chaves do tenant</h3>
+        </div>
+        <ApiKeysManager />
       </div>
     </section>
   );

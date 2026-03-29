@@ -99,7 +99,11 @@ export const useSqliteAuthState = async (databasePath: string): Promise<SqliteAu
       writeData("creds", state.creds);
     },
     close: () => {
-      db.close();
+      try {
+        db.close();
+      } catch (error) {
+        console.warn("[baileys-auth-store] falha ao fechar SQLite auth store:", error);
+      }
     }
   };
 };

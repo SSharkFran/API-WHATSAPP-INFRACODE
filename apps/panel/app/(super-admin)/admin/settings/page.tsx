@@ -14,8 +14,13 @@ interface AlertConfig {
   alertHighTokens: boolean;
 }
 
+interface GlobalChatbotPromptConfig {
+  systemPrompt: string | null;
+}
+
 export default function SuperAdminSettingsPage() {
   const [alertConfig, setAlertConfig] = useState<AlertConfig | null>(null);
+  const [globalChatbotPromptConfig, setGlobalChatbotPromptConfig] = useState<GlobalChatbotPromptConfig | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -26,6 +31,7 @@ export default function SuperAdminSettingsPage() {
   const [alertInstanceDown, setAlertInstanceDown] = useState(true);
   const [alertNewLead, setAlertNewLead] = useState(true);
   const [alertHighTokens, setAlertHighTokens] = useState(true);
+  const [globalSystemPrompt, setGlobalSystemPrompt] = useState("");
 
   useEffect(() => {
     loadConfig();
@@ -34,13 +40,18 @@ export default function SuperAdminSettingsPage() {
   const loadConfig = async () => {
     try {
       setLoading(true);
-      const config = await requestClientApi<AlertConfig>("/admin/alerts-config");
+      const [config, promptConfig] = await Promise.all([
+        requestClientApi<AlertConfig>("/admin/alerts-config"),
+        requestClientApi<GlobalChatbotPromptConfig>("/admin/chatbot-global-prompt")
+      ]);
       setAlertConfig(config);
+      setGlobalChatbotPromptConfig(promptConfig);
       setPhone(config.adminAlertPhone ?? "");
       setGroqLimit(config.groqUsageLimit);
       setAlertInstanceDown(config.alertInstanceDown);
       setAlertNewLead(config.alertNewLead);
       setAlertHighTokens(config.alertHighTokens);
+      setGlobalSystemPrompt(promptConfig.systemPrompt ?? "");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erro ao carregar configuracao");
     } finally {
@@ -53,17 +64,27 @@ export default function SuperAdminSettingsPage() {
       setSaving(true);
       setError(null);
       setSaved(false);
-      const updated = await requestClientApi<AlertConfig>("/admin/alerts-config", {
-        method: "PATCH",
-        body: {
-          adminAlertPhone: phone || null,
-          groqUsageLimit: groqLimit,
-          alertInstanceDown,
-          alertNewLead,
-          alertHighTokens
-        }
-      });
+      const [updated, updatedPromptConfig] = await Promise.all([
+        requestClientApi<AlertConfig>("/admin/alerts-config", {
+          method: "PATCH",
+          body: {
+            adminAlertPhone: phone || null,
+            groqUsageLimit: groqLimit,
+            alertInstanceDown,
+            alertNewLead,
+            alertHighTokens
+          }
+        }),
+        requestClientApi<GlobalChatbotPromptConfig>("/admin/chatbot-global-prompt", {
+          method: "PATCH",
+          body: {
+            systemPrompt: globalSystemPrompt.trim() || null
+          }
+        })
+      ]);
       setAlertConfig(updated);
+      setGlobalChatbotPromptConfig(updatedPromptConfig);
+      setGlobalSystemPrompt(updatedPromptConfig.systemPrompt ?? "");
       setSaved(true);
       setTimeout(() => setSaved(false), 3000);
     } catch (err) {
@@ -132,7 +153,7 @@ export default function SuperAdminSettingsPage() {
         <CardContent className="space-y-5 pt-5">
           <p className="text-sm leading-7 text-slate-300">
             Configure um numero WhatsApp global para receber alertas de todas as instancias de todos os tenants.
-            Receba notificacoes sobre instancias caídas, novos leads e uso alto de tokens.
+            Receba notificacoes sobre instancias caídas, novos leads, uso alto de tokens e erros criticos de worker/log.
           </p>
 
           {error && (
@@ -245,6 +266,43 @@ export default function SuperAdminSettingsPage() {
                 Configuracao salva!
               </div>
             )}
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card className="surface-card-dark text-white max-w-4xl">
+        <CardHeader className="border-b border-white/8">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <CardDescription className="font-[var(--font-mono)] uppercase tracking-[0.24em] text-slate-400">Prompt global</CardDescription>
+              <CardTitle className="mt-2 text-xl text-white">Guardrails universais do chatbot</CardTitle>
+            </div>
+            <span className={`status-pill ${globalChatbotPromptConfig?.systemPrompt ? "bg-green-400/12 text-green-100" : "bg-yellow-400/12 text-yellow-100"}`}>
+              {globalChatbotPromptConfig?.systemPrompt ? "Configurado" : "Nao configurado"}
+            </span>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-5 pt-5">
+          <p className="text-sm leading-7 text-slate-300">
+            Este prompt afeta todos os chatbots da plataforma. Use aqui regras universais como `|||`,
+            tom institucional, limites de formato e instrucoes que precisam valer para qualquer tenant.
+          </p>
+
+          <div className="space-y-2">
+            <label htmlFor="globalSystemPrompt" className="block text-sm font-medium text-slate-300">
+              Prompt global do chatbot
+            </label>
+            <textarea
+              id="globalSystemPrompt"
+              value={globalSystemPrompt}
+              onChange={(e) => setGlobalSystemPrompt(e.target.value)}
+              placeholder={"Regras globais obrigatorias:\n- Se precisar dividir a resposta, use exatamente ||| entre os blocos.\n- Nunca exponha o separador ao cliente.\n- Seja direto e profissional."}
+              className="min-h-[260px] w-full rounded-[var(--radius-md)] border border-[var(--border-default)] bg-[var(--bg-tertiary)] px-3 py-3 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)] focus:outline-none focus:border-[var(--accent-blue)]"
+            />
+            <p className="text-xs leading-relaxed text-slate-500">
+              O prompt da instancia continua existindo no tenant, mas ele passa a complementar este prompt global.
+              Em caso de conflito, as regras globais devem prevalecer.
+            </p>
           </div>
         </CardContent>
       </Card>

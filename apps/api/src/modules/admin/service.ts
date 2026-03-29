@@ -24,6 +24,7 @@ const defaultTenantAiProvider = {
   model: "llama-3.1-8b-instant",
   isActive: false
 } as const;
+const chatbotGlobalSystemPromptSettingKey = "chatbot.globalSystemPrompt";
 
 const normalizeManagedProvider = (provider?: string | null): "GROQ" | "OPENAI_COMPATIBLE" | null => {
   if (provider === "GROQ" || provider === "OPENAI_COMPATIBLE") {
@@ -535,6 +536,7 @@ export class PlatformAdminService {
     }
 
     await this.tenantPrismaRegistry.disposeClient(tenantId);
+    this.tenantPrismaRegistry.invalidateSchemaCache(tenantId);
     await this.platformPrisma.$executeRawUnsafe(`DROP SCHEMA IF EXISTS "${tenant.schemaName.replaceAll("\"", "\"\"")}" CASCADE;`);
     await this.platformPrisma.tenant.delete({
       where: {
@@ -650,6 +652,46 @@ export class PlatformAdminService {
     );
 
     return this.listSettings();
+  }
+
+  public async getChatbotGlobalPrompt(): Promise<{
+    systemPrompt: string | null;
+  }> {
+    const setting = await this.platformPrisma.platformSetting.findUnique({
+      where: {
+        key: chatbotGlobalSystemPromptSettingKey
+      }
+    });
+
+    return {
+      systemPrompt: typeof setting?.value === "string" ? setting.value : null
+    };
+  }
+
+  public async updateChatbotGlobalPrompt(input: {
+    systemPrompt?: string | null;
+  }): Promise<{
+    systemPrompt: string | null;
+  }> {
+    const normalizedPrompt = input.systemPrompt?.trim() || null;
+    const storedPrompt = normalizedPrompt ?? "";
+
+    await this.platformPrisma.platformSetting.upsert({
+      where: {
+        key: chatbotGlobalSystemPromptSettingKey
+      },
+      update: {
+        value: storedPrompt as never
+      },
+      create: {
+        key: chatbotGlobalSystemPromptSettingKey,
+        value: storedPrompt as never
+      }
+    });
+
+    return {
+      systemPrompt: normalizedPrompt
+    };
   }
 
   /**

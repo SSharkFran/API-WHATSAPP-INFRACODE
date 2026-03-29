@@ -304,7 +304,7 @@ export const registerAdminRoutes = async (app: FastifyInstance): Promise<void> =
     {
       config: {
         auth: "platform",
-        platformRoles: ["PLATFORM_OWNER", "PLATFORM_SUPPORT", "PLATFORM_VIEWER"]
+        platformRoles: ["PLATFORM_OWNER", "PLATFORM_SUPPORT", "PLATFORM_FINANCE", "PLATFORM_VIEWER"]
       },
       schema: {
         tags: ["Admin"],
@@ -370,6 +370,71 @@ export const registerAdminRoutes = async (app: FastifyInstance): Promise<void> =
       }
     },
     async () => app.platformAdminService.getAlertConfig()
+  );
+
+  app.get(
+    "/admin/chatbot-global-prompt",
+    {
+      config: {
+        auth: "platform",
+        platformRoles: ["PLATFORM_OWNER", "PLATFORM_SUPPORT", "PLATFORM_VIEWER"]
+      },
+      schema: {
+        tags: ["Admin"],
+        summary: "Retorna o prompt global que influencia todos os chatbots",
+        response: {
+          200: z.object({
+            systemPrompt: z.string().nullable()
+          })
+        }
+      }
+    },
+    async () => app.platformAdminService.getChatbotGlobalPrompt()
+  );
+
+  app.patch(
+    "/admin/chatbot-global-prompt",
+    {
+      config: {
+        auth: "platform",
+        platformRoles: ["PLATFORM_OWNER"]
+      },
+      schema: {
+        tags: ["Admin"],
+        summary: "Atualiza o prompt global que influencia todos os chatbots",
+        body: z.object({
+          systemPrompt: z.string().max(16_000).nullable().optional()
+        }),
+        response: {
+          200: z.object({
+            systemPrompt: z.string().nullable()
+          })
+        }
+      }
+    },
+    async (request) => {
+      const body = z.object({
+        systemPrompt: z.string().max(16_000).nullable().optional()
+      }).parse(request.body);
+
+      const updated = await app.platformAdminService.updateChatbotGlobalPrompt(body);
+      app.chatbotService.invalidateGlobalSystemPromptCache();
+
+      await recordPlatformAuditLog(
+        app.platformPrisma,
+        request,
+        "chatbot.global-prompt.update",
+        "PlatformSetting",
+        "chatbot.globalSystemPrompt",
+        {
+          hasPrompt: Boolean(body.systemPrompt?.trim()),
+          promptLength: body.systemPrompt?.trim().length ?? 0
+        },
+        app.config.JWT_SECRET
+      );
+
+      return updated;
+    }
   );
 
   app.patch(

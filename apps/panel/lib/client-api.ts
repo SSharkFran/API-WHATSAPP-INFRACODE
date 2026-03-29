@@ -5,6 +5,7 @@ interface ClientApiRequestOptions {
   method?: string;
   body?: unknown;
   headers?: HeadersInit;
+  expectNoContent?: boolean;
 }
 
 const parseErrorMessage = async (response: Response): Promise<string> => {
@@ -100,6 +101,9 @@ export const requestClientApi = async <TResponse>(
   }
 
   if (response.status === 204) {
+    if (!options.expectNoContent) {
+      console.warn(`[client-api] ${options.method ?? "GET"} ${path} retornou 204 sem conteúdo. Verifique se o chamador espera void/undefined.`);
+    }
     return undefined as TResponse;
   }
 

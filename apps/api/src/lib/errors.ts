@@ -17,6 +17,15 @@ export class ApiError extends Error {
   }
 }
 
+const hasExtendedErrorProperties = (
+  error: Error
+): error is Error & {
+  statusCode?: number;
+  publicCode?: string;
+  details?: Record<string, unknown>;
+} =>
+  "statusCode" in error || "publicCode" in error || "details" in error;
+
 /**
  * Converte erros desconhecidos para um formato consistente de resposta HTTP.
  */
@@ -26,7 +35,13 @@ export const normalizeError = (error: unknown): ApiError => {
   }
 
   if (error instanceof Error) {
-    return new ApiError(error.statusCode ?? 500, error.publicCode ?? "INTERNAL_ERROR", error.message, error.details);
+    const extendedError = hasExtendedErrorProperties(error) ? error : undefined;
+    return new ApiError(
+      extendedError?.statusCode ?? 500,
+      extendedError?.publicCode ?? "INTERNAL_ERROR",
+      error.message,
+      extendedError?.details
+    );
   }
 
   return new ApiError(500, "INTERNAL_ERROR", "Erro interno não identificado");

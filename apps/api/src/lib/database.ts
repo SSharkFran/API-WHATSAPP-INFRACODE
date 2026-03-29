@@ -70,6 +70,10 @@ export class TenantPrismaRegistry {
   private readonly config: AppConfig;
   private readonly metricsService: MetricsService;
   private readonly entries = new Map<string, TenantRegistryEntry>();
+  private readonly creationLocks = new Map<string, Promise<TenantPrisma>>();
+  private readonly ensuredSchemas = new Set<string>();
+  private readonly schemaEnsureLocks = new Map<string, Promise<string>>();
+  private evictionQueue = Promise.resolve();
 
   public constructor(config: AppConfig, metricsService: MetricsService) {
     this.config = config;
@@ -77,13 +81,39 @@ export class TenantPrismaRegistry {
   }
 
   public async ensureSchema(platformPrisma: PlatformPrisma, tenantId: string): Promise<string> {
-    const schemaName = resolveTenantSchemaName(tenantId);
-
-    for (const sql of buildTenantSchemaSql(schemaName)) {
-      await platformPrisma.$executeRawUnsafe(sql);
+    if (this.ensuredSchemas.has(tenantId)) {
+      return resolveTenantSchemaName(tenantId);
     }
 
-    return schemaName;
+    const pending = this.schemaEnsureLocks.get(tenantId);
+
+    if (pending) {
+      return pending;
+    }
+
+    const ensurePromise = (async () => {
+      const schemaName = resolveTenantSchemaName(tenantId);
+
+      for (const sql of buildTenantSchemaSql(schemaName)) {
+        await platformPrisma.$executeRawUnsafe(sql);
+      }
+
+      this.ensuredSchemas.add(tenantId);
+      return schemaName;
+    })();
+
+    this.schemaEnsureLocks.set(tenantId, ensurePromise);
+
+    try {
+      return await ensurePromise;
+    } finally {
+      this.schemaEnsureLocks.delete(tenantId);
+    }
+  }
+
+  public invalidateSchemaCache(tenantId: string): void {
+    this.ensuredSchemas.delete(tenantId);
+    this.schemaEnsureLocks.delete(tenantId);
   }
 
   public async getClient(tenantId: string): Promise<TenantPrisma> {
@@ -95,21 +125,38 @@ export class TenantPrismaRegistry {
       return existing.client;
     }
 
-    this.metricsService.recordTenantPrismaCacheMiss();
-    const client = new TenantPrismaClient({
-      datasourceUrl: withSchema(
-        this.config.TENANT_DATABASE_URL ?? this.config.DATABASE_URL,
-        resolveTenantSchemaName(tenantId),
-        this.config.TENANT_PRISMA_CONNECTION_LIMIT
-      )
-    });
+    const pendingCreation = this.creationLocks.get(tenantId);
 
-    const entry = { client };
-    this.entries.set(tenantId, entry);
-    this.touch(tenantId, entry);
-    await this.evictIfNeeded();
-    this.metricsService.setTenantPrismaActiveClients(this.entries.size);
-    return client;
+    if (pendingCreation) {
+      this.metricsService.recordTenantPrismaCacheHit();
+      return pendingCreation;
+    }
+
+    this.metricsService.recordTenantPrismaCacheMiss();
+    const creationPromise = (async () => {
+      const client = new TenantPrismaClient({
+        datasourceUrl: withSchema(
+          this.config.TENANT_DATABASE_URL ?? this.config.DATABASE_URL,
+          resolveTenantSchemaName(tenantId),
+          this.config.TENANT_PRISMA_CONNECTION_LIMIT
+        )
+      });
+
+      const entry = { client };
+      this.entries.set(tenantId, entry);
+      this.touch(tenantId, entry);
+      this.scheduleEvictionIfNeeded();
+      this.metricsService.setTenantPrismaActiveClients(this.entries.size);
+      return client;
+    })();
+
+    this.creationLocks.set(tenantId, creationPromise);
+
+    try {
+      return await creationPromise;
+    } finally {
+      this.creationLocks.delete(tenantId);
+    }
   }
 
   public async disposeClient(tenantId: string): Promise<void> {
@@ -130,9 +177,19 @@ export class TenantPrismaRegistry {
   }
 
   public async close(): Promise<void> {
+    await this.evictionQueue.catch(() => undefined);
+
     for (const tenantId of [...this.entries.keys()]) {
       await this.disposeClient(tenantId);
     }
+  }
+
+  private scheduleEvictionIfNeeded(): void {
+    this.evictionQueue = this.evictionQueue
+      .catch(() => undefined)
+      .then(async () => {
+        await this.evictIfNeeded();
+      });
   }
 
   private async evictIfNeeded(): Promise<void> {

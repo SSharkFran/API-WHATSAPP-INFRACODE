@@ -154,6 +154,8 @@ const defaultAiSettings = {
   temperature: 0.4,
   maxContextMessages: 12
 } as const;
+const defaultAiErrorFallbackMessage =
+  "Tive uma instabilidade para responder agora. Pode me chamar novamente em instantes?";
 const chatbotGlobalSystemPromptSettingKey = "chatbot.globalSystemPrompt";
 
 const formatDate = (date: Date): string =>
@@ -1559,7 +1561,15 @@ private async evaluateConfig(
       };
     } catch (err) {
       console.error("[chatbot:ai] erro:", err);
-      return null;
+      return {
+        action: "AI",
+        matchedRuleId: null,
+        matchedRuleName: `${managedAiProvider.provider}:${managedAiProvider.model}:error_fallback`,
+        responseText: renderReplyTemplate(
+          config.fallbackMessage?.trim() || defaultAiErrorFallbackMessage,
+          input
+        )
+      };
     }
   }
 
@@ -1737,13 +1747,21 @@ private async evaluateConfig(
           `[chatbot:ai] ${primaryProviderLabel} falhou (${status}), tentando fallback: ${config.aiFallbackProvider}`
         );
         await this.notifyAdminFallback(tenantId, config, primaryProviderLabel, status ?? 0);
-        return this.callFallbackProvider(
-          config.aiFallbackProvider,
-          config.aiFallbackApiKey ?? "",
-          config.aiFallbackModel ?? undefined,
-          conversation,
-          temperature
-        );
+        try {
+          return await this.callFallbackProvider(
+            config.aiFallbackProvider,
+            config.aiFallbackApiKey ?? "",
+            config.aiFallbackModel ?? undefined,
+            conversation,
+            temperature
+          );
+        } catch (fallbackErr) {
+          console.error(
+            `[chatbot:ai] fallback ${config.aiFallbackProvider} falhou apos erro do provider principal:`,
+            fallbackErr
+          );
+          throw fallbackErr;
+        }
       }
 
       throw err;

@@ -1376,31 +1376,61 @@ if (event.status === "CONNECTED") {
     const remoteChatNumber =
       normalizeWhatsAppPhoneNumber(event.remoteJid) ??
       normalizePhoneNumber(String(event.remoteJid ?? "").split("@")[0]?.split(":")[0] ?? "");
+    const sharedPhoneNumberFromFields =
+      normalizeWhatsAppPhoneNumber(
+        typeof contactFields?.sharedPhoneJid === "string" ? contactFields.sharedPhoneJid : null
+      ) ??
+      normalizePhoneNumber(
+        typeof contactFields?.sharedPhoneJid === "string"
+          ? String(contactFields.sharedPhoneJid).split("@")[0] ?? ""
+          : ""
+      );
+    const lastRemoteNumber =
+      normalizeWhatsAppPhoneNumber(
+        typeof contactFields?.lastRemoteJid === "string" ? contactFields.lastRemoteJid : null
+      ) ??
+      normalizePhoneNumber(
+        typeof contactFields?.lastRemoteJid === "string"
+          ? String(contactFields.lastRemoteJid).split("@")[0] ?? ""
+          : ""
+      );
     const instanceAlertPhone =
       normalizeWhatsAppPhoneNumber(chatbotConfig?.leadsPhoneNumber) ??
       normalizePhoneNumber(chatbotConfig?.leadsPhoneNumber ?? "");
     const instanceOwnPhone =
       normalizeWhatsAppPhoneNumber(currentInstance?.phoneNumber ?? instance.phoneNumber) ??
       normalizePhoneNumber(currentInstance?.phoneNumber ?? instance.phoneNumber ?? "");
+    const quotedLearningConversationId = this.extractQuotedLearningConversationId(event.rawMessage);
     const isAdminSender = Boolean(
       instanceAlertPhone &&
-      (
-        senderNumber === instanceAlertPhone ||
-        remoteChatNumber === instanceAlertPhone ||
-        resolvedContactNumber === instanceAlertPhone ||
-        normalizePhoneNumber(contact.phoneNumber ?? "") === instanceAlertPhone
-      )
+      this.phonesMatch(instanceAlertPhone, [
+        senderNumber,
+        remoteChatNumber,
+        resolvedContactNumber,
+        normalizePhoneNumber(contact.phoneNumber ?? ""),
+        remoteNumber,
+        realPhoneFromRemoteJid,
+        cleanPhoneFromRemoteJid,
+        sharedPhoneNumberFromFields,
+        lastRemoteNumber
+      ])
     );
+    const isAdminLearningReply = Boolean(quotedLearningConversationId);
     const isInstanceSender = Boolean(
       instanceOwnPhone &&
-      (
-        senderNumber === instanceOwnPhone ||
-        remoteChatNumber === instanceOwnPhone ||
-        resolvedContactNumber === instanceOwnPhone ||
-        normalizePhoneNumber(contact.phoneNumber ?? "") === instanceOwnPhone
-      )
+      this.phonesMatch(instanceOwnPhone, [
+        senderNumber,
+        remoteChatNumber,
+        resolvedContactNumber,
+        normalizePhoneNumber(contact.phoneNumber ?? ""),
+        remoteNumber,
+        realPhoneFromRemoteJid,
+        cleanPhoneFromRemoteJid,
+        sharedPhoneNumberFromFields,
+        lastRemoteNumber
+      ])
     );
-    const isAdminOrInstanceSender = isAdminSender || isInstanceSender;
+    const isAdminOrInstanceSender = isAdminSender || isAdminLearningReply || isInstanceSender;
     const isAdminSelfChat = Boolean(isAdminSender && instanceAlertPhone && remoteChatNumber === instanceAlertPhone);
     const isInstanceSelfChat = Boolean(isInstanceSender && instanceOwnPhone && remoteChatNumber === instanceOwnPhone);
     const shouldBypassDirectSenderTakeover = isAdminSelfChat || isInstanceSelfChat;
@@ -1883,7 +1913,7 @@ if (event.status === "CONNECTED") {
         return;
       }
 
-      if (finalInputText && isAdminSender) {
+      if (finalInputText && (isAdminSender || isAdminLearningReply)) {
         await this.escalationService.releaseTimedOutEscalations(tenantId, instance.id);
 
         const hasPendingEscalations = await this.escalationService.hasPendingEscalations(tenantId, instance.id);
@@ -1891,7 +1921,8 @@ if (event.status === "CONNECTED") {
           const learningResult = await this.escalationService.processAdminReply(
             tenantId,
             instance.id,
-            finalInputText
+            finalInputText,
+            quotedLearningConversationId
           );
 
           if (learningResult) {
@@ -1945,6 +1976,30 @@ if (event.status === "CONNECTED") {
 
             return;
           }
+
+          if (isAdminLearningReply || isAdminSender) {
+            await this.sendAutomatedTextMessage(
+              tenantId,
+              instance.id,
+              remoteNumber,
+              event.remoteJid,
+              "Nao consegui vincular sua resposta a um aprendizado pendente. Tente responder novamente a mensagem do aprendizado.",
+              { action: "admin_learning_unmatched_reply", kind: "chatbot" }
+            );
+            return;
+          }
+        }
+
+        if (isAdminLearningReply || isAdminSender) {
+          await this.sendAutomatedTextMessage(
+            tenantId,
+            instance.id,
+            remoteNumber,
+            event.remoteJid,
+            "Nao encontrei nenhum aprendizado pendente nesta instancia agora.",
+            { action: "admin_learning_no_pending", kind: "chatbot" }
+          );
+          return;
         }
       }
 
@@ -2297,6 +2352,102 @@ if (event.status === "CONNECTED") {
 
   private isSessionExecutionStale(session: ConversationSession, expectedGeneration: number): boolean {
     return session.resetGeneration !== expectedGeneration;
+  }
+
+  private buildPhoneMatchVariants(phone?: string | null): string[] {
+    const normalized = normalizePhoneNumber(phone ?? "");
+
+    if (!normalized) {
+      return [];
+    }
+
+    const variants = new Set<string>([normalized]);
+    const withoutCountryCode =
+      normalized.startsWith("55") && normalized.length > 11 ? normalized.slice(2) : normalized;
+
+    variants.add(withoutCountryCode);
+
+    if (withoutCountryCode.length === 11 && withoutCountryCode[2] === "9") {
+      variants.add(`${withoutCountryCode.slice(0, 2)}${withoutCountryCode.slice(3)}`);
+    }
+
+    if (normalized.startsWith("55") && withoutCountryCode.length === 11 && withoutCountryCode[2] === "9") {
+      variants.add(`55${withoutCountryCode.slice(0, 2)}${withoutCountryCode.slice(3)}`);
+    }
+
+    return [...variants].filter(Boolean);
+  }
+
+  private phonesMatch(expected?: string | null, candidates: Array<string | null | undefined> = []): boolean {
+    const expectedVariants = new Set(this.buildPhoneMatchVariants(expected));
+
+    if (expectedVariants.size === 0) {
+      return false;
+    }
+
+    return candidates.some((candidate) => {
+      const candidateVariants = this.buildPhoneMatchVariants(candidate);
+      return candidateVariants.some((variant) => expectedVariants.has(variant));
+    });
+  }
+
+  private extractQuotedMessageText(rawMessage?: Record<string, unknown>): string | null {
+    if (!rawMessage) {
+      return null;
+    }
+
+    const candidateContainers = [
+      rawMessage.extendedTextMessage,
+      rawMessage.imageMessage,
+      rawMessage.videoMessage,
+      rawMessage.documentMessage,
+      rawMessage.audioMessage,
+      rawMessage.pttMessage
+    ];
+
+    for (const container of candidateContainers) {
+      if (!container || typeof container !== "object") {
+        continue;
+      }
+
+      const contextInfo =
+        "contextInfo" in container && typeof container.contextInfo === "object"
+          ? (container.contextInfo as Record<string, unknown>)
+          : null;
+      const quotedMessage =
+        contextInfo?.quotedMessage && typeof contextInfo.quotedMessage === "object"
+          ? (contextInfo.quotedMessage as Record<string, unknown>)
+          : null;
+
+      if (!quotedMessage) {
+        continue;
+      }
+
+      if (typeof quotedMessage.conversation === "string" && quotedMessage.conversation.trim()) {
+        return quotedMessage.conversation.trim();
+      }
+
+      const quotedExtendedText =
+        quotedMessage.extendedTextMessage && typeof quotedMessage.extendedTextMessage === "object"
+          ? (quotedMessage.extendedTextMessage as { text?: string }).text
+          : null;
+
+      if (typeof quotedExtendedText === "string" && quotedExtendedText.trim()) {
+        return quotedExtendedText.trim();
+      }
+    }
+
+    return null;
+  }
+
+  private extractQuotedLearningConversationId(rawMessage?: Record<string, unknown>): string | null {
+    const quotedText = this.extractQuotedMessageText(rawMessage);
+
+    if (!quotedText || !/aprendizado necessario/i.test(quotedText)) {
+      return null;
+    }
+
+    return quotedText.match(/\bID:\s*([a-z0-9]+)\b/i)?.[1] ?? null;
   }
 
   private async getConversationSession(

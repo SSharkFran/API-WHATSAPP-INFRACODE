@@ -112,7 +112,8 @@ export class EscalationService {
   public async processAdminReply(
     tenantId: string,
     instanceId: string,
-    adminRawAnswer: string
+    adminRawAnswer: string,
+    targetConversationId?: string | null
   ): Promise<{
     clientJid: string;
     clientQuestion: string;
@@ -124,6 +125,11 @@ export class EscalationService {
     const pausedConversation = await prisma.conversation.findFirst({
       where: {
         instanceId,
+        ...(targetConversationId?.trim()
+          ? {
+              id: targetConversationId.trim()
+            }
+          : {}),
         awaitingAdminResponse: true,
         pendingClientJid: { not: null },
         pendingClientQuestion: { not: null }

@@ -1343,7 +1343,7 @@ if (event.status === "CONNECTED") {
       remotePhoneFromJid ??
       contact.phoneNumber ??
       remoteNumber;
-    const [chatbotConfig, currentInstance] = await Promise.all([
+    const [chatbotConfig, currentInstance, platformConfig] = await Promise.all([
       prisma.chatbotConfig.findUnique({
         where: {
           instanceId: instance.id
@@ -1356,6 +1356,9 @@ if (event.status === "CONNECTED") {
         select: {
           phoneNumber: true
         }
+      }),
+      this.platformPrisma.platformConfig.findUnique({
+        where: { id: "singleton" }
       })
     ]);
     const chatbotConfigWithTakeoverMessages = chatbotConfig as
@@ -1395,12 +1398,25 @@ if (event.status === "CONNECTED") {
           ? String(contactFields.lastRemoteJid).split("@")[0] ?? ""
           : ""
       );
-    const instanceAlertPhone =
-      normalizeWhatsAppPhoneNumber(chatbotConfig?.leadsPhoneNumber) ??
-      normalizePhoneNumber(chatbotConfig?.leadsPhoneNumber ?? "");
+    const adminCandidatePhones = [
+      platformConfig?.adminAlertPhone ?? null,
+      chatbotConfig?.leadsPhoneNumber ?? null
+    ];
     const instanceOwnPhone =
       normalizeWhatsAppPhoneNumber(currentInstance?.phoneNumber ?? instance.phoneNumber) ??
       normalizePhoneNumber(currentInstance?.phoneNumber ?? instance.phoneNumber ?? "");
+    const adminSenderCandidates = [
+      senderNumber,
+      remoteChatNumber,
+      resolvedContactNumber,
+      normalizePhoneNumber(contact.phoneNumber ?? ""),
+      remoteNumber,
+      realPhoneFromRemoteJid,
+      cleanPhoneFromRemoteJid,
+      sharedPhoneNumberFromFields,
+      lastRemoteNumber
+    ];
+    const matchedAdminPhone = this.findMatchingExpectedPhone(adminCandidatePhones, adminSenderCandidates);
     const quotedLearningConversationId =
       this.extractQuotedLearningConversationId(event.rawMessage) ??
       this.extractLearningConversationIdFromText(rawTextInput) ??
@@ -1408,20 +1424,7 @@ if (event.status === "CONNECTED") {
         this.extractQuotedMessageExternalId(event.rawMessage)
       ) ??
       this.escalationService.resolveConversationIdByAdminAlertChat(event.remoteJid);
-    const isAdminSender = Boolean(
-      instanceAlertPhone &&
-      this.phonesMatch(instanceAlertPhone, [
-        senderNumber,
-        remoteChatNumber,
-        resolvedContactNumber,
-        normalizePhoneNumber(contact.phoneNumber ?? ""),
-        remoteNumber,
-        realPhoneFromRemoteJid,
-        cleanPhoneFromRemoteJid,
-        sharedPhoneNumberFromFields,
-        lastRemoteNumber
-      ])
-    );
+    const isAdminSender = Boolean(matchedAdminPhone);
     const isAdminLearningReply = Boolean(quotedLearningConversationId);
     const isInstanceSender = Boolean(
       instanceOwnPhone &&
@@ -1438,7 +1441,11 @@ if (event.status === "CONNECTED") {
       ])
     );
     const isAdminOrInstanceSender = isAdminSender || isAdminLearningReply || isInstanceSender;
-    const isAdminSelfChat = Boolean(isAdminSender && instanceAlertPhone && remoteChatNumber === instanceAlertPhone);
+    const isAdminSelfChat = Boolean(
+      isAdminSender &&
+      remoteChatNumber &&
+      this.matchesAnyExpectedPhones(adminCandidatePhones, [remoteChatNumber])
+    );
     const isInstanceSelfChat = Boolean(isInstanceSender && instanceOwnPhone && remoteChatNumber === instanceOwnPhone);
     const shouldBypassDirectSenderTakeover = isAdminSelfChat || isInstanceSelfChat;
 
@@ -1901,26 +1908,21 @@ if (event.status === "CONNECTED") {
       }
 
       const clientMemory = await this.clientMemoryService.findByPhone(tenantId, resolvedContactNumber);
-      const platformConfig = await this.platformPrisma.platformConfig.findUnique({
-        where: { id: "singleton" }
-      });
-      const adminPhone = platformConfig?.adminAlertPhone ?? null;
-
       if (
         finalInputText &&
-        adminPhone &&
+        matchedAdminPhone &&
         await this.adminMemoryService.handleAdminMessage(
           instance.id,
           tenantId,
-          adminPhone,
-          resolvedContactNumber,
+          matchedAdminPhone,
+          matchedAdminPhone,
           finalInputText
         )
       ) {
         return;
       }
 
-      if (finalInputText && (isAdminSender || isAdminLearningReply)) {
+      if (finalInputText && isAdminOrInstanceSender) {
         await this.escalationService.releaseTimedOutEscalations(tenantId, instance.id);
 
         const hasPendingEscalations = await this.escalationService.hasPendingEscalations(tenantId, instance.id);
@@ -1962,7 +1964,10 @@ if (event.status === "CONNECTED") {
               console.warn("[escalation] nao foi possivel derivar o numero do cliente a partir do JID");
             }
 
-            const learningAdminPhone = chatbotConfig?.leadsPhoneNumber?.trim() ?? null;
+            const learningAdminPhone =
+              platformConfig?.adminAlertPhone?.trim() ??
+              chatbotConfig?.leadsPhoneNumber?.trim() ??
+              null;
             if (learningAdminPhone) {
               const delivered = await this.platformAlertService?.sendInstanceAlert(
                 tenantId,
@@ -1984,7 +1989,7 @@ if (event.status === "CONNECTED") {
             return;
           }
 
-          if (isAdminLearningReply || isAdminSender) {
+          if (isAdminOrInstanceSender) {
             await this.sendAutomatedTextMessage(
               tenantId,
               instance.id,
@@ -1997,7 +2002,7 @@ if (event.status === "CONNECTED") {
           }
         }
 
-        if (isAdminLearningReply || isAdminSender) {
+        if (isAdminOrInstanceSender) {
           await this.sendAutomatedTextMessage(
             tenantId,
             instance.id,
@@ -2008,6 +2013,18 @@ if (event.status === "CONNECTED") {
           );
           return;
         }
+      }
+
+      if (finalInputText && activeConversation.awaitingAdminResponse && !isAdminOrInstanceSender) {
+        console.warn("[escalation] mensagem recebida com aprendizado pendente, mas remetente nao foi reconhecido como admin", {
+          instanceId: instance.id,
+          conversationId: activeConversation.id,
+          remoteJid: event.remoteJid,
+          senderJid,
+          adminCandidatePhones: adminCandidatePhones.filter(Boolean),
+          adminSenderCandidates: adminSenderCandidates.filter(Boolean),
+          quotedLearningConversationId
+        });
       }
 
       if (activeConversation.awaitingAdminResponse && !isAdminOrInstanceSender) {
@@ -2396,6 +2413,26 @@ if (event.status === "CONNECTED") {
       const candidateVariants = this.buildPhoneMatchVariants(candidate);
       return candidateVariants.some((variant) => expectedVariants.has(variant));
     });
+  }
+
+  private matchesAnyExpectedPhones(
+    expectedPhones: Array<string | null | undefined>,
+    candidates: Array<string | null | undefined> = []
+  ): boolean {
+    return expectedPhones.some((expectedPhone) => this.phonesMatch(expectedPhone, candidates));
+  }
+
+  private findMatchingExpectedPhone(
+    expectedPhones: Array<string | null | undefined>,
+    candidates: Array<string | null | undefined> = []
+  ): string | null {
+    for (const expectedPhone of expectedPhones) {
+      if (this.phonesMatch(expectedPhone, candidates)) {
+        return expectedPhone ?? null;
+      }
+    }
+
+    return null;
   }
 
   private extractQuotedMessageText(rawMessage?: Record<string, unknown>): string | null {
@@ -2887,7 +2924,10 @@ if (event.status === "CONNECTED") {
       );
       this.appendConversationHistory(params.session, "assistant", pauseMessage);
 
-      const adminPhone = params.chatbotConfig?.leadsPhoneNumber?.trim() ?? null;
+      const adminPhone =
+        platformConfig?.adminAlertPhone?.trim() ??
+        params.chatbotConfig?.leadsPhoneNumber?.trim() ??
+        null;
       if (!adminPhone) {
         console.warn("[escalation] adminPhone nao configurado, escalacao ignorada");
         const fallbackText = "Nao consegui obter essa informacao agora. Por favor, entre em contato com nossa equipe.";

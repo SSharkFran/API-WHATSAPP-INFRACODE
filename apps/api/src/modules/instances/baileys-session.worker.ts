@@ -83,6 +83,10 @@ let saveCreds: (() => Promise<void>) | null = null;
 let closeAuthStore: (() => void) | null = null;
 let reconnectAttempts = 0;
 let stopping = false;
+let reconnectPromise: Promise<void> | null = null;
+let reconnectToken = 0;
+let activeStartPromise: Promise<void> | null = null;
+let socketGeneration = 0;
 const store = makeInMemoryStore({});
 const RESOLVED_JID_CACHE_TTL_MS = 5 * 60 * 1000;
 const resolvedJidCache = new Map<string, { jid: string; timeout: NodeJS.Timeout }>();
@@ -115,6 +119,11 @@ const setCachedResolvedJid = (phoneNumber: string, jid: string): void => {
   });
 };
 
+const clearPendingReconnect = (): void => {
+  reconnectToken += 1;
+  reconnectPromise = null;
+};
+
 const scheduleReconnect = async (message: string): Promise<void> => {
   if (stopping) {
     return;
@@ -125,6 +134,15 @@ const scheduleReconnect = async (message: string): Promise<void> => {
     return;
   }
 
+  if (reconnectPromise) {
+    log("info", "Reconexao ja agendada para a instancia, ignorando disparo duplicado", {
+      attempt: reconnectAttempts,
+      message
+    });
+    return reconnectPromise;
+  }
+
+  const token = ++reconnectToken;
   const backoffMs = resolveReconnectDelay(reconnectAttempts);
   reconnectAttempts += 1;
   emitStatus("DISCONNECTED", message);
@@ -133,8 +151,21 @@ const scheduleReconnect = async (message: string): Promise<void> => {
     backoffMs,
     message
   });
-  await delay(backoffMs);
-  await startSocket();
+  reconnectPromise = (async () => {
+    await delay(backoffMs);
+
+    if (stopping || token !== reconnectToken) {
+      return;
+    }
+
+    await startSocket();
+  })().finally(() => {
+    if (token === reconnectToken) {
+      reconnectPromise = null;
+    }
+  });
+
+  return reconnectPromise;
 };
 
 const log = (level: "info" | "warn" | "error", message: string, context?: Record<string, unknown>): void => {
@@ -435,153 +466,200 @@ const handleConnectionClose = async (error?: Error): Promise<void> => {
 };
 
 const startSocket = async (): Promise<void> => {
-  try {
-    stopping = false;
-    emitStatus("INITIALIZING");
-    await disconnectSocket();
-    closeAuthStore?.();
-    closeAuthStore = null;
-    saveCreds = null;
+  if (activeStartPromise) {
+    return activeStartPromise;
+  }
 
-    const authState = await useSqliteAuthState(init.sessionDbPath);
-    saveCreds = authState.saveCreds;
-    closeAuthStore = authState.close;
+  const currentStartPromise = (async () => {
+    try {
+      stopping = false;
+      emitStatus("INITIALIZING");
+      await disconnectSocket();
+      closeAuthStore?.();
+      closeAuthStore = null;
+      saveCreds = null;
 
-    if (init.proxyUrl) {
-      log("warn", "Proxy configurado para a instancia, mas o adaptador HTTP/SOCKS5 nao foi habilitado neste build", {
-        proxyUrl: init.proxyUrl
+      const authState = await useSqliteAuthState(init.sessionDbPath);
+      saveCreds = authState.saveCreds;
+      closeAuthStore = authState.close;
+
+      if (init.proxyUrl) {
+        log("warn", "Proxy configurado para a instancia, mas o adaptador HTTP/SOCKS5 nao foi habilitado neste build", {
+          proxyUrl: init.proxyUrl
+        });
+      }
+
+      const versionData = await fetchLatestBaileysVersion().catch(() => ({
+        version: undefined
+      }));
+      const generation = ++socketGeneration;
+      const nextSocket = makeWASocket({
+        auth: authState.state,
+        browser: ["InfraCode", "Chrome", "1.0.0"],
+        printQRInTerminal: false,
+        syncFullHistory: false,
+        ...(versionData.version ? { version: versionData.version } : {})
       });
-    }
+      socket = nextSocket;
+      store.bind(nextSocket.ev);
 
-    const versionData = await fetchLatestBaileysVersion().catch(() => ({
-      version: undefined
-    }));
+      const isStaleSocketEvent = (): boolean => socket !== nextSocket || generation !== socketGeneration;
 
-    const nextSocket = makeWASocket({
-      auth: authState.state,
-      browser: ["InfraCode", "Chrome", "1.0.0"],
-      printQRInTerminal: false,
-      syncFullHistory: false,
-      ...(versionData.version ? { version: versionData.version } : {})
-    });
-    socket = nextSocket;
-    store.bind(nextSocket.ev);
+      nextSocket.ev.on("creds.update", async () => {
+        if (isStaleSocketEvent()) {
+          return;
+        }
 
-    nextSocket.ev.on("creds.update", async () => {
-      try {
-        await saveCreds?.();
-      } catch (error) {
-        log("error", "Falha ao salvar credenciais do Baileys", {
-          error: error instanceof Error ? error.message : "unknown"
-        });
-      }
-    });
-
-    nextSocket.ev.on("connection.update", async (update: unknown) => {
-      try {
-        const event = update as ConnectionUpdateEvent;
-        if (event.qr) {
-          const qrCodeBase64 = await QRCode.toDataURL(event.qr);
-          emitStatus("QR_PENDING");
-          parentPort?.postMessage({
-            type: "qr",
-            qrCodeBase64,
-            expiresInSeconds: 60
+        try {
+          await saveCreds?.();
+        } catch (error) {
+          log("error", "Falha ao salvar credenciais do Baileys", {
+            error: error instanceof Error ? error.message : "unknown"
           });
         }
+      });
 
-        if (event.connection === "open") {
-          reconnectAttempts = 0;
-          emitStatus("CONNECTED");
-          log("info", "Instancia conectada com sucesso");
-          parentPort?.postMessage({
-            type: "profile",
-            phoneNumber: socket?.user?.id?.split(":")[0]?.split("@")[0] ?? null,
-            avatarUrl: null
-          });
-        }
-
-        if (event.connection === "close") {
-          await handleConnectionClose(event.lastDisconnect?.error as Error | undefined);
-        }
-      } catch (error) {
-        log("error", "Falha ao processar evento de conexao do Baileys", {
-          error: error instanceof Error ? error.message : "unknown"
-        });
-      }
-    });
-
-    nextSocket.ev.on("messages.upsert", async (payload: unknown) => {
-      try {
-        const { messages } = payload as UpsertMessageEvent;
-        for (const message of messages) {
-          if (!message.key.remoteJid || !message.message) {
-            continue;
+      nextSocket.ev.on("connection.update", async (update: unknown) => {
+        try {
+          if (isStaleSocketEvent()) {
+            return;
           }
 
-          const serializedPayload = serializeIncomingPayload(message.message as Record<string, unknown>);
-          const senderJid =
-            message.key.participant ??
-            (message.key.fromMe
-              ? socket?.user?.id ?? null
-              : message.key.remoteJid);
+          const event = update as ConnectionUpdateEvent;
+          if (event.qr) {
+            const qrCodeBase64 = await QRCode.toDataURL(event.qr);
+            emitStatus("QR_PENDING");
+            parentPort?.postMessage({
+              type: "qr",
+              qrCodeBase64,
+              expiresInSeconds: 60
+            });
+          }
 
-          parentPort?.postMessage({
-            type: "inbound-message",
-            remoteJid: message.key.remoteJid,
-            senderJid,
-            externalMessageId: message.key.id,
-            payload: {
-              ...serializedPayload,
-              pushName: message.pushName ?? null
-            },
-            messageType: detectMessageType(message.message as Record<string, unknown>),
-            rawMessage: message.message as Record<string, unknown>,
-            messageKey: {
-              remoteJid: message.key.remoteJid,
-              id: message.key.id,
-              fromMe: message.key.fromMe
-            }
+          if (event.connection === "open") {
+            reconnectAttempts = 0;
+            clearPendingReconnect();
+            emitStatus("CONNECTED");
+            log("info", "Instancia conectada com sucesso");
+            parentPort?.postMessage({
+              type: "profile",
+              phoneNumber: socket?.user?.id?.split(":")[0]?.split("@")[0] ?? null,
+              avatarUrl: null
+            });
+          }
+
+          if (event.connection === "close") {
+            await handleConnectionClose(event.lastDisconnect?.error as Error | undefined);
+          }
+        } catch (error) {
+          log("error", "Falha ao processar evento de conexao do Baileys", {
+            error: error instanceof Error ? error.message : "unknown"
           });
         }
-      } catch (error) {
-        log("error", "Falha ao processar mensagem recebida no worker", {
-          error: error instanceof Error ? error.message : "unknown"
-        });
-      }
-    });
-
-    nextSocket.ev.on("chats.phoneNumberShare", ({ lid, jid }) => {
-      parentPort?.postMessage({
-        type: "phone-number-share",
-        lid,
-        jid
       });
-    });
 
-    nextSocket.ev.on("messaging-history.set", ({ chats }) => {
-      for (const chat of chats) {
-        emitChatPhoneMapping(chat as ChatMappingPayload);
-      }
-    });
+      nextSocket.ev.on("messages.upsert", async (payload: unknown) => {
+        try {
+          if (isStaleSocketEvent()) {
+            return;
+          }
 
-    nextSocket.ev.on("chats.upsert", (chats) => {
-      for (const chat of chats) {
-        emitChatPhoneMapping(chat as ChatMappingPayload);
-      }
-    });
+          const { messages } = payload as UpsertMessageEvent;
+          for (const message of messages) {
+            if (!message.key.remoteJid || !message.message) {
+              continue;
+            }
 
-    nextSocket.ev.on("chats.update", (chats) => {
-      for (const chat of chats) {
-        emitChatPhoneMapping(chat as ChatMappingPayload);
-      }
-    });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Falha inesperada ao iniciar o worker";
-    log("error", "Falha ao iniciar o socket da instancia", {
-      error: message
-    });
-    await scheduleReconnect(message);
+            const serializedPayload = serializeIncomingPayload(message.message as Record<string, unknown>);
+            const senderJid =
+              message.key.participant ??
+              (message.key.fromMe
+                ? socket?.user?.id ?? null
+                : message.key.remoteJid);
+
+            parentPort?.postMessage({
+              type: "inbound-message",
+              remoteJid: message.key.remoteJid,
+              senderJid,
+              externalMessageId: message.key.id,
+              payload: {
+                ...serializedPayload,
+                pushName: message.pushName ?? null
+              },
+              messageType: detectMessageType(message.message as Record<string, unknown>),
+              rawMessage: message.message as Record<string, unknown>,
+              messageKey: {
+                remoteJid: message.key.remoteJid,
+                id: message.key.id,
+                fromMe: message.key.fromMe
+              }
+            });
+          }
+        } catch (error) {
+          log("error", "Falha ao processar mensagem recebida no worker", {
+            error: error instanceof Error ? error.message : "unknown"
+          });
+        }
+      });
+
+      nextSocket.ev.on("chats.phoneNumberShare", ({ lid, jid }) => {
+        if (isStaleSocketEvent()) {
+          return;
+        }
+
+        parentPort?.postMessage({
+          type: "phone-number-share",
+          lid,
+          jid
+        });
+      });
+
+      nextSocket.ev.on("messaging-history.set", ({ chats }) => {
+        if (isStaleSocketEvent()) {
+          return;
+        }
+
+        for (const chat of chats) {
+          emitChatPhoneMapping(chat as ChatMappingPayload);
+        }
+      });
+
+      nextSocket.ev.on("chats.upsert", (chats) => {
+        if (isStaleSocketEvent()) {
+          return;
+        }
+
+        for (const chat of chats) {
+          emitChatPhoneMapping(chat as ChatMappingPayload);
+        }
+      });
+
+      nextSocket.ev.on("chats.update", (chats) => {
+        if (isStaleSocketEvent()) {
+          return;
+        }
+
+        for (const chat of chats) {
+          emitChatPhoneMapping(chat as ChatMappingPayload);
+        }
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Falha inesperada ao iniciar o worker";
+      log("error", "Falha ao iniciar o socket da instancia", {
+        error: message
+      });
+      await scheduleReconnect(message);
+    }
+  })();
+
+  activeStartPromise = currentStartPromise;
+
+  try {
+    await currentStartPromise;
+  } finally {
+    if (activeStartPromise === currentStartPromise) {
+      activeStartPromise = null;
+    }
   }
 };
 
@@ -757,6 +835,7 @@ parentPort?.on("message", async (command: IncomingCommand) => {
   }
 
   stopping = true;
+  clearPendingReconnect();
 
   if (command.type === "logout") {
     try {

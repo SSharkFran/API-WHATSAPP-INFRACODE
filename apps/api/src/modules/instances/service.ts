@@ -760,7 +760,28 @@ export class InstanceOrchestrator {
     this.workers.set(workerKey, managedWorker);
 
     worker.on("message", (event: WorkerEvent) => {
-      void this.handleWorkerEvent(tenantId, instance, managedWorker, event);
+      void this.handleWorkerEvent(tenantId, instance, managedWorker, event).catch((error) => {
+        const normalizedError = error instanceof Error ? error : new Error(String(error));
+
+        console.error("[orchestrator] erro ao processar evento do worker:", {
+          error: normalizedError.message,
+          eventType: event.type,
+          instanceId: instance.id,
+          stack: normalizedError.stack,
+          tenantId
+        });
+
+        this.emitLog(workerKey, {
+          context: {
+            error: normalizedError.message,
+            eventType: event.type
+          },
+          instanceId: instance.id,
+          level: "error",
+          message: "Falha ao processar evento do worker",
+          timestamp: new Date().toISOString()
+        });
+      });
     });
 
     worker.on("error", async (error) => {
@@ -1417,21 +1438,28 @@ if (event.status === "CONNECTED") {
       lastRemoteNumber
     ];
     const matchedAdminPhone = this.findMatchingExpectedPhone(adminCandidatePhones, adminSenderCandidates);
-    const persistedAdminPromptConversationId = await this.escalationService.resolveConversationIdByPersistedAdminPrompt(
-      tenantId,
-      instance.id,
-      [event.remoteJid, senderJid],
-      adminSenderCandidates
-    );
-    const quotedLearningConversationId =
+    const quotedLearningConversationIdFromSignals =
       this.extractQuotedLearningConversationId(event.rawMessage) ??
       this.extractLearningConversationIdFromText(rawTextInput) ??
       this.escalationService.resolveConversationIdByAdminAlertMessage(
         this.extractQuotedMessageExternalId(event.rawMessage)
       ) ??
       this.escalationService.resolveConversationIdByAdminAlertChat(event.remoteJid) ??
-      this.escalationService.resolveConversationIdByAdminAlertChat(senderJid) ??
-      persistedAdminPromptConversationId;
+      this.escalationService.resolveConversationIdByAdminAlertChat(senderJid);
+    let persistedAdminPromptConversationId: string | null = null;
+    if (!quotedLearningConversationIdFromSignals && rawTextInput) {
+      try {
+        persistedAdminPromptConversationId = await this.escalationService.resolveConversationIdByPersistedAdminPrompt(
+          tenantId,
+          instance.id,
+          [event.remoteJid, senderJid],
+          []
+        );
+      } catch (error) {
+        console.error("[escalation] falha ao consultar alerta admin persistido:", error);
+      }
+    }
+    const quotedLearningConversationId = quotedLearningConversationIdFromSignals ?? persistedAdminPromptConversationId;
     const isAdminSender = Boolean(matchedAdminPhone);
     const isAdminLearningReply = Boolean(quotedLearningConversationId);
     const isInstanceSender = Boolean(

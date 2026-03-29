@@ -160,6 +160,18 @@ export class ClientMemoryService {
     return record;
   }
 
+  public async deleteByPhone(tenantId: string, phoneNumber: string): Promise<boolean> {
+    const prisma = await this.tenantPrismaRegistry.getClient(tenantId);
+    const normalizedPhoneNumber = normalizePhoneNumber(phoneNumber);
+    const result = await prisma.clientMemory.deleteMany({
+      where: {
+        phoneNumber: normalizedPhoneNumber
+      }
+    });
+
+    return result.count > 0;
+  }
+
   private mapRecord(record: {
     id: string;
     phoneNumber: string;

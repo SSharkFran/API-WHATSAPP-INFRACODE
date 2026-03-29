@@ -178,6 +178,7 @@ interface ConversationSession extends BaseConversationSession {
   debounceTimer: NodeJS.Timeout | null;
   isProcessing: boolean;
   flushAfterProcessing: boolean;
+  resetGeneration: number;
 }
 
 const buildWorkerKey = (tenantId: string, instanceId: string): string => `${tenantId}:${instanceId}`;
@@ -1609,7 +1610,20 @@ if (event.status === "CONNECTED") {
           remoteJid: event.remoteJid
         }
       });
+      await this.clientMemoryService.deleteByPhone(tenantId, resolvedContactNumber);
       this.clearConversationSession(sessionKey);
+
+      await this.sendAutomatedTextMessage(
+        tenantId,
+        instance.id,
+        resolvedContactNumber,
+        event.remoteJid,
+        "🔄 Conversa resetada com sucesso.",
+        {
+          action: "reset",
+          kind: "chatbot"
+        }
+      );
 
       return;
     }
@@ -2249,7 +2263,20 @@ if (event.status === "CONNECTED") {
       session.debounceTimer = null;
     }
 
+    if (session) {
+      session.pendingInputs = [];
+      session.pendingContext = null;
+      session.flushAfterProcessing = false;
+      session.history = [];
+      session.leadAlreadySent = false;
+      session.resetGeneration += 1;
+    }
+
     this.conversationSessions.delete(sessionKey);
+  }
+
+  private isSessionExecutionStale(session: ConversationSession, expectedGeneration: number): boolean {
+    return session.resetGeneration !== expectedGeneration;
   }
 
   private async getConversationSession(
@@ -2275,7 +2302,8 @@ if (event.status === "CONNECTED") {
         pendingContext: null,
         debounceTimer: null,
         isProcessing: false,
-        flushAfterProcessing: false
+        flushAfterProcessing: false,
+        resetGeneration: 0
       };
 
       this.conversationSessions.set(sessionKey, session);
@@ -2320,7 +2348,8 @@ if (event.status === "CONNECTED") {
       pendingContext: null,
       debounceTimer: null,
       isProcessing: false,
-      flushAfterProcessing: false
+      flushAfterProcessing: false,
+      resetGeneration: 0
     };
 
     this.conversationSessions.set(sessionKey, session);
@@ -2418,6 +2447,7 @@ if (event.status === "CONNECTED") {
 
     const combinedInput = session.pendingInputs.join("\n").trim();
     const context = session.pendingContext;
+    const sessionGeneration = session.resetGeneration;
 
     session.pendingInputs = [];
     session.pendingContext = null;
@@ -2428,7 +2458,8 @@ if (event.status === "CONNECTED") {
       await this.processConversationTurn({
         ...context,
         inputText: combinedInput,
-        session
+        session,
+        sessionGeneration
       });
     } catch (error) {
       this.emitLog(buildWorkerKey(context.tenantId, context.instance.id), {
@@ -2480,6 +2511,7 @@ if (event.status === "CONNECTED") {
   private async processConversationTurn(params: PendingConversationTurnContext & {
     inputText: string;
     session: ConversationSession;
+    sessionGeneration: number;
   }): Promise<void> {
     const prisma = await this.tenantPrismaRegistry.getClient(params.tenantId);
     const clientMemory = await this.clientMemoryService.findByPhone(params.tenantId, params.resolvedContactNumber);
@@ -2501,6 +2533,10 @@ if (event.status === "CONNECTED") {
       phoneNumber: params.resolvedContactNumber
     });
 
+    if (this.isSessionExecutionStale(params.session, params.sessionGeneration)) {
+      return;
+    }
+
     this.appendConversationHistory(params.session, "user", params.inputText);
 
     const fiadoResponse = await this.fiadoAgent.process({
@@ -2513,6 +2549,10 @@ if (event.status === "CONNECTED") {
     });
 
     if (fiadoResponse) {
+      if (this.isSessionExecutionStale(params.session, params.sessionGeneration)) {
+        return;
+      }
+
       await this.memoryAgent.update({
         tenantId: params.tenantId,
         phoneNumber: params.resolvedContactNumber,
@@ -2534,7 +2574,8 @@ if (event.status === "CONNECTED") {
           kind: "chatbot"
         },
         conversationId: params.conversationId,
-        session: params.session
+        session: params.session,
+        sessionGeneration: params.sessionGeneration
       });
       return;
     }
@@ -2562,9 +2603,14 @@ if (event.status === "CONNECTED") {
             kind: "chatbot"
           },
           conversationId: params.conversationId,
-          session: params.session
+          session: params.session,
+          sessionGeneration: params.sessionGeneration
         });
       }
+    }
+
+    if (this.isSessionExecutionStale(params.session, params.sessionGeneration)) {
+      return;
     }
 
     const chatbotResult = await this.conversationAgent.reply({
@@ -2579,7 +2625,15 @@ if (event.status === "CONNECTED") {
       remoteJid: shouldSendWelcomeFirst ? null : params.targetJid
     });
 
+    if (this.isSessionExecutionStale(params.session, params.sessionGeneration)) {
+      return;
+    }
+
     if (chatbotResult?.action === "HUMAN_HANDOFF") {
+      if (this.isSessionExecutionStale(params.session, params.sessionGeneration)) {
+        return;
+      }
+
       await this.clientMemoryService.upsert(params.tenantId, params.resolvedContactNumber, {
         lastContactAt: new Date(),
         tags: [...new Set<ClientMemoryTag>([...(clientMemory?.tags ?? []), "paused_by_human"])]
@@ -2596,6 +2650,10 @@ if (event.status === "CONNECTED") {
     }
 
     if (chatbotResult?.action === "ESCALATE_ADMIN") {
+      if (this.isSessionExecutionStale(params.session, params.sessionGeneration)) {
+        return;
+      }
+
       const pauseMessage = "Um momento, estou verificando essa informacao para voce \uD83D\uDD0D";
       await this.sendAutomatedTextMessage(
         params.tenantId,
@@ -2650,6 +2708,10 @@ if (event.status === "CONNECTED") {
     const rawResponse = chatbotResult?.responseText ?? null;
 
     if (!rawResponse) {
+      if (this.isSessionExecutionStale(params.session, params.sessionGeneration)) {
+        return;
+      }
+
       await this.memoryAgent.update({
         tenantId: params.tenantId,
         phoneNumber: params.resolvedContactNumber,
@@ -2665,6 +2727,10 @@ if (event.status === "CONNECTED") {
     console.log("[chatbot] rawResponse:", rawResponse.slice(0, 300));
     console.log("[chatbot] resumoDetectado:", !!resumoLead);
     console.log("[chatbot] clientText:", clientText.slice(0, 300));
+
+    if (this.isSessionExecutionStale(params.session, params.sessionGeneration)) {
+      return;
+    }
 
     let leadData: LeadData | null = null;
 
@@ -2752,6 +2818,10 @@ if (event.status === "CONNECTED") {
       leadData
     });
 
+    if (this.isSessionExecutionStale(params.session, params.sessionGeneration)) {
+      return;
+    }
+
     if (leadData?.isComplete && (!params.chatbotConfig?.leadsPhoneNumber || params.chatbotConfig.leadsEnabled === false)) {
       this.emitLog(buildWorkerKey(params.tenantId, params.instance.id), {
         context: {
@@ -2779,6 +2849,10 @@ if (event.status === "CONNECTED") {
           return;
         }
 
+        if (this.isSessionExecutionStale(params.session, params.sessionGeneration)) {
+          return;
+        }
+
         await this.sendAutomatedTextMessage(
           params.tenantId,
           params.instance.id,
@@ -2792,6 +2866,10 @@ if (event.status === "CONNECTED") {
         await new Promise((resolve) => setTimeout(resolve, delayDigitacao));
       }
     } else {
+      if (this.isSessionExecutionStale(params.session, params.sessionGeneration)) {
+        return;
+      }
+
       await this.sendAutomatedTextMessage(
         params.tenantId,
         params.instance.id,
@@ -2869,6 +2947,7 @@ if (event.status === "CONNECTED") {
     metadata: Record<string, unknown>;
     conversationId: string;
     session: ConversationSession;
+    sessionGeneration: number;
   }): Promise<void> {
     const prisma = await this.tenantPrismaRegistry.getClient(params.tenantId);
     const responseParts = params.text
@@ -2885,6 +2964,10 @@ if (event.status === "CONNECTED") {
         return;
       }
 
+      if (this.isSessionExecutionStale(params.session, params.sessionGeneration)) {
+        return;
+      }
+
       await this.sendAutomatedTextMessage(
         params.tenantId,
         params.instanceId,
@@ -2898,6 +2981,10 @@ if (event.status === "CONNECTED") {
       if (index < responseParts.length - 1) {
         const delayDigitacao = Math.floor(Math.random() * 1000) + 1500;
         await new Promise((resolve) => setTimeout(resolve, delayDigitacao));
+
+        if (this.isSessionExecutionStale(params.session, params.sessionGeneration)) {
+          return;
+        }
       }
     }
   }

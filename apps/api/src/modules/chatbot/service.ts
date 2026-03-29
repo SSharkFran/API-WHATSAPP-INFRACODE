@@ -272,6 +272,10 @@ export class ChatbotService {
     (this as unknown as { platformAlertService: PlatformAlertService }).platformAlertService = service;
   }
 
+  public invalidateGlobalSystemPromptCache(): void {
+    // Compat hook for admin routes. The chatbot service currently reads prompt state directly.
+  }
+
   public async getConfig(tenantId: string, instanceId: string): Promise<ChatbotConfig> {
     const { config } = await this.getContext(tenantId, instanceId);
     return config;
@@ -294,6 +298,7 @@ export class ChatbotService {
       audioEnabled?: boolean;
       visionEnabled?: boolean;
       visionPrompt?: string | null;
+      responseDelayMs?: number | null;
       leadAutoExtract?: boolean;
       leadVehicleTable?: Record<string, unknown>;
       leadPriceTable?: Record<string, unknown>;

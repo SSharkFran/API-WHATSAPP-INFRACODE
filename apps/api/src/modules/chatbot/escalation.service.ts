@@ -28,6 +28,13 @@ export class EscalationService {
       timeout: NodeJS.Timeout;
     }
   >();
+  private readonly adminAlertChatMap = new Map<
+    string,
+    {
+      conversationId: string;
+      timeout: NodeJS.Timeout;
+    }
+  >();
 
   public constructor(deps: EscalationServiceDeps) {
     this.tenantPrismaRegistry = deps.tenantPrismaRegistry;
@@ -45,6 +52,14 @@ export class EscalationService {
     }
 
     return this.adminAlertMessageMap.get(messageId)?.conversationId ?? null;
+  }
+
+  public resolveConversationIdByAdminAlertChat(remoteJid?: string | null): string | null {
+    if (!remoteJid?.trim()) {
+      return null;
+    }
+
+    return this.adminAlertChatMap.get(remoteJid.trim())?.conversationId ?? null;
   }
 
   /**
@@ -112,7 +127,7 @@ export class EscalationService {
         return false;
       }
 
-      this.trackAdminAlertMessage(result.externalMessageId, ctx.conversationId);
+      this.trackAdminAlertRouting(result.externalMessageId, result.remoteJid, ctx.conversationId);
 
       return true;
     } catch (err) {
@@ -185,6 +200,7 @@ export class EscalationService {
         pendingClientConversationId: null
       }
     });
+    this.clearTrackedAdminAlertForConversation(pausedConversation.id);
 
     console.log(
       `[escalation] admin respondeu para conversa ${pausedConversation.id}, cliente: ${clientJid}`
@@ -257,27 +273,67 @@ export class EscalationService {
         pendingClientConversationId: null
       }
     });
+    this.clearTrackedAdminAlertForConversation(ctx.conversationId);
   }
 
-  private trackAdminAlertMessage(messageId: string | null, conversationId: string): void {
-    if (!messageId) {
-      return;
+  private trackAdminAlertRouting(
+    messageId: string | null,
+    remoteJid: string | null,
+    conversationId: string
+  ): void {
+    const timeoutMs = 2 * 60 * 60 * 1000;
+
+    if (messageId) {
+      const existing = this.adminAlertMessageMap.get(messageId);
+      if (existing) {
+        clearTimeout(existing.timeout);
+      }
+
+      const timeout = setTimeout(() => {
+        this.adminAlertMessageMap.delete(messageId);
+      }, timeoutMs);
+
+      timeout.unref?.();
+
+      this.adminAlertMessageMap.set(messageId, {
+        conversationId,
+        timeout
+      });
     }
 
-    const existing = this.adminAlertMessageMap.get(messageId);
-    if (existing) {
-      clearTimeout(existing.timeout);
+    if (remoteJid?.trim()) {
+      const normalizedRemoteJid = remoteJid.trim();
+      const existing = this.adminAlertChatMap.get(normalizedRemoteJid);
+      if (existing) {
+        clearTimeout(existing.timeout);
+      }
+
+      const timeout = setTimeout(() => {
+        this.adminAlertChatMap.delete(normalizedRemoteJid);
+      }, timeoutMs);
+
+      timeout.unref?.();
+
+      this.adminAlertChatMap.set(normalizedRemoteJid, {
+        conversationId,
+        timeout
+      });
+    }
+  }
+
+  private clearTrackedAdminAlertForConversation(conversationId: string): void {
+    for (const [messageId, entry] of this.adminAlertMessageMap.entries()) {
+      if (entry.conversationId === conversationId) {
+        clearTimeout(entry.timeout);
+        this.adminAlertMessageMap.delete(messageId);
+      }
     }
 
-    const timeout = setTimeout(() => {
-      this.adminAlertMessageMap.delete(messageId);
-    }, 2 * 60 * 60 * 1000);
-
-    timeout.unref?.();
-
-    this.adminAlertMessageMap.set(messageId, {
-      conversationId,
-      timeout
-    });
+    for (const [remoteJid, entry] of this.adminAlertChatMap.entries()) {
+      if (entry.conversationId === conversationId) {
+        clearTimeout(entry.timeout);
+        this.adminAlertChatMap.delete(remoteJid);
+      }
+    }
   }
 }

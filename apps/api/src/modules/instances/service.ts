@@ -1406,7 +1406,8 @@ if (event.status === "CONNECTED") {
       this.extractLearningConversationIdFromText(rawTextInput) ??
       this.escalationService.resolveConversationIdByAdminAlertMessage(
         this.extractQuotedMessageExternalId(event.rawMessage)
-      );
+      ) ??
+      this.escalationService.resolveConversationIdByAdminAlertChat(event.remoteJid);
     const isAdminSender = Boolean(
       instanceAlertPhone &&
       this.phonesMatch(instanceAlertPhone, [

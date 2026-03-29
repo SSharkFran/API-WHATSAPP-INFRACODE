@@ -1376,15 +1376,29 @@ if (event.status === "CONNECTED") {
     const remoteChatNumber =
       normalizeWhatsAppPhoneNumber(event.remoteJid) ??
       normalizePhoneNumber(String(event.remoteJid ?? "").split("@")[0]?.split(":")[0] ?? "");
-    const instanceAlertPhone = normalizePhoneNumber(chatbotConfig?.leadsPhoneNumber ?? "");
-    const instanceOwnPhone = normalizePhoneNumber(currentInstance?.phoneNumber ?? instance.phoneNumber ?? "");
+    const instanceAlertPhone =
+      normalizeWhatsAppPhoneNumber(chatbotConfig?.leadsPhoneNumber) ??
+      normalizePhoneNumber(chatbotConfig?.leadsPhoneNumber ?? "");
+    const instanceOwnPhone =
+      normalizeWhatsAppPhoneNumber(currentInstance?.phoneNumber ?? instance.phoneNumber) ??
+      normalizePhoneNumber(currentInstance?.phoneNumber ?? instance.phoneNumber ?? "");
     const isAdminSender = Boolean(
       instanceAlertPhone &&
-      (senderNumber === instanceAlertPhone || remoteChatNumber === instanceAlertPhone)
+      (
+        senderNumber === instanceAlertPhone ||
+        remoteChatNumber === instanceAlertPhone ||
+        resolvedContactNumber === instanceAlertPhone ||
+        normalizePhoneNumber(contact.phoneNumber ?? "") === instanceAlertPhone
+      )
     );
     const isInstanceSender = Boolean(
       instanceOwnPhone &&
-      (senderNumber === instanceOwnPhone || remoteChatNumber === instanceOwnPhone)
+      (
+        senderNumber === instanceOwnPhone ||
+        remoteChatNumber === instanceOwnPhone ||
+        resolvedContactNumber === instanceOwnPhone ||
+        normalizePhoneNumber(contact.phoneNumber ?? "") === instanceOwnPhone
+      )
     );
     const isAdminOrInstanceSender = isAdminSender || isInstanceSender;
     const isAdminSelfChat = Boolean(isAdminSender && instanceAlertPhone && remoteChatNumber === instanceAlertPhone);

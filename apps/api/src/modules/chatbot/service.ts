@@ -10,6 +10,7 @@ import { decrypt } from "../../lib/crypto.js";
 import { ApiError } from "../../lib/errors.js";
 import {
   assertValidPhoneNumber,
+  ensurePhoneCountryCode,
   normalizePhoneNumber,
   normalizeWhatsAppPhoneNumber,
   toJid
@@ -325,7 +326,9 @@ export class ChatbotService {
     const rules = chatbotRulesArraySchema.parse(input.rules);
     const aiInput = chatbotAiUpsertSchema.parse(input.ai ?? defaultAiSettings);
     const leadsPhoneNumberRaw = input.leadsPhoneNumber?.trim() ?? null;
-    const normalizedLeadsPhoneNumber = leadsPhoneNumberRaw ? normalizePhoneNumber(leadsPhoneNumberRaw) : null;
+    const normalizedLeadsPhoneNumber = leadsPhoneNumberRaw
+      ? ensurePhoneCountryCode(leadsPhoneNumberRaw)
+      : null;
     const existingConfig = await prisma.chatbotConfig.findUnique({
       where: {
         instanceId
@@ -419,7 +422,7 @@ export class ChatbotService {
     phoneNumber: string
   ): Promise<ChatbotConfig> {
     const { prisma, managedAiProvider } = await this.getContext(tenantId, instanceId);
-    const normalizedPhoneNumber = normalizePhoneNumber(phoneNumber);
+    const normalizedPhoneNumber = ensurePhoneCountryCode(phoneNumber);
     assertValidPhoneNumber(normalizedPhoneNumber);
 
     const record = await prisma.chatbotConfig.upsert({
@@ -820,7 +823,9 @@ private async evaluateConfig(
       humanTakeoverEndMessage: record.humanTakeoverEndMessage ?? null,
       leadsGroupJid: record.leadsGroupJid ?? null,
       leadsGroupName: record.leadsGroupName ?? null,
-      leadsPhoneNumber: record.leadsPhoneNumber ?? null,
+      leadsPhoneNumber: record.leadsPhoneNumber
+        ? (normalizeWhatsAppPhoneNumber(record.leadsPhoneNumber) ?? normalizePhoneNumber(record.leadsPhoneNumber))
+        : null,
       leadsEnabled: record.leadsEnabled ?? true,
       fiadoEnabled: record.fiadoEnabled ?? false,
       audioEnabled: record.audioEnabled ?? false,

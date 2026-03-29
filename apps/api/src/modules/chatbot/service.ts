@@ -18,12 +18,14 @@ import type { ChatMessage } from "./agents/types.js";
 import { chatbotAiConfigSchema, chatbotRuleSchema, googleCalendarModuleSchema, upsertChatbotAiBodySchema } from "./schemas.js";
 import { GoogleCalendarTool } from "./tools/google-calendar.tool.js";
 import type { PlatformAlertService } from "../platform/alert.service.js";
+import type { KnowledgeService } from "./knowledge.service.js";
 
 interface ChatbotServiceDeps {
   config: AppConfig;
   platformPrisma: PlatformPrisma;
   tenantPrismaRegistry: TenantPrismaRegistry;
   platformAlertService?: PlatformAlertService;
+  knowledgeService?: KnowledgeService;
 }
 
 interface ChatbotRuntimeInput {
@@ -228,7 +230,7 @@ const matchesRule = (rule: ChatbotRule, normalizedInput: string, isFirstContact:
   }
 };
 
-const renderReplyTemplate = (
+export const renderReplyTemplate = (
   template: string,
   input: {
     contactName?: string | null;
@@ -256,12 +258,14 @@ export class ChatbotService {
   private readonly platformPrisma: PlatformPrisma;
   private readonly tenantPrismaRegistry: TenantPrismaRegistry;
   private readonly platformAlertService?: PlatformAlertService;
+  private readonly knowledgeService?: KnowledgeService;
 
   public constructor(deps: ChatbotServiceDeps) {
     this.config = deps.config;
     this.platformPrisma = deps.platformPrisma;
     this.tenantPrismaRegistry = deps.tenantPrismaRegistry;
     this.platformAlertService = deps.platformAlertService;
+    this.knowledgeService = deps.knowledgeService;
   }
 
   public setPlatformAlertService(service: PlatformAlertService): void {
@@ -444,6 +448,66 @@ public async simulate(
 
     const result = await this.evaluateConfig(tenantId, prisma, config, managedAiProvider, input);
     return result.action === "NO_MATCH" ? null : result;
+  }
+
+  public async formulateAdminAnswerForClient(
+    tenantId: string,
+    instanceId: string,
+    originalQuestion: string,
+    adminRawAnswer: string
+  ): Promise<string> {
+    const { config, managedAiProvider } = await this.getContext(tenantId, instanceId);
+
+    if (
+      !managedAiProvider.isConfigured ||
+      !managedAiProvider.isActive ||
+      !managedAiProvider.provider ||
+      !managedAiProvider.model.trim() ||
+      !managedAiProvider.apiKeyEncrypted
+    ) {
+      return adminRawAnswer.trim();
+    }
+
+    try {
+      const apiKey = decrypt(managedAiProvider.apiKeyEncrypted, this.config.API_ENCRYPTION_KEY);
+      const response = await this.callAiWithFallback(
+        tenantId,
+        managedAiProvider,
+        apiKey,
+        {
+          system: [
+            "Voce e um assistente de atendimento ao cliente via WhatsApp.",
+            "Sua tarefa e formular uma resposta clara, natural e profissional para o cliente,",
+            "baseada na informacao bruta fornecida pelo administrador.",
+            "Seja direto, cordial e use linguagem adequada para WhatsApp.",
+            "Nao mencione que houve consulta ao admin. Responda como se soubesse a informacao.",
+            "Maximo 3 frases."
+          ].join("\n"),
+          messages: [
+            {
+              role: "user",
+              content: [
+                `Pergunta original do cliente: "${originalQuestion}"`,
+                `Informacao do administrador: "${adminRawAnswer}"`,
+                "Formule a resposta para o cliente:"
+              ].join("\n")
+            }
+          ]
+        },
+        0.3,
+        config
+      );
+
+      const cleanedResponse = response
+        ?.replace(/\[TRANSBORDO_HUMANO\]/gi, "")
+        .replace(/\[ESCALATE_ADMIN\]/gi, "")
+        .trim();
+
+      return cleanedResponse || adminRawAnswer.trim();
+    } catch (err) {
+      console.error("[chatbot:admin-answer] erro ao formular resposta:", err);
+      return adminRawAnswer.trim();
+    }
   }
 
   private async getContext(tenantId: string, instanceId: string): Promise<{
@@ -1346,6 +1410,16 @@ private async evaluateConfig(
 
       const isHandoff = /\[TRANSBORDO_HUMANO\]/i.test(responseText);
       const cleanedText = responseText.replace(/\[TRANSBORDO_HUMANO\]/gi, "").trim();
+      const isEscalation = /\[ESCALATE_ADMIN\]/i.test(responseText);
+
+      if (isEscalation) {
+        return {
+          action: "ESCALATE_ADMIN",
+          matchedRuleId: null,
+          matchedRuleName: `${managedAiProvider.provider}:${managedAiProvider.model}`,
+          responseText: ""
+        };
+      }
 
       return {
         action: isHandoff ? "HUMAN_HANDOFF" : "AI",
@@ -1377,7 +1451,12 @@ private async evaluateConfig(
       `Numero exato do cliente: ${normalizedPhoneNumber}.`,
       "### REGRAS GERAIS ###",
       "1. Responda em 1 a 3 frases no maximo. Seja direto.",
-      '2. O cliente dita o nome: Se ele disser "me chamo X", use X.'
+      '2. O cliente dita o nome: Se ele disser "me chamo X", use X.',
+      "6. Nunca invente informacoes, precos, datas ou dados que nao estao no contexto.",
+      "7. Se o cliente parecer frustrado ou impaciente, reconheca antes de responder.",
+      "8. Quando o cliente se despedir (tchau, ate logo, obrigado etc), responda de forma calorosa e encerre a conversa.",
+      "9. Nunca diga que voce e uma IA a menos que o cliente pergunte diretamente.",
+      "10. Se o cliente perguntar seu nome, use o nome definido no prompt da instancia."
     ];
 
     const memoryFilePath = join(this.config.DATA_DIR, "tenants", tenantId, "instances", instanceId, "memory.md");
@@ -1395,6 +1474,24 @@ private async evaluateConfig(
     if (input.clientContext?.trim()) {
       systemParts.push(input.clientContext.trim());
     }
+
+    if (this.knowledgeService) {
+      const knowledgeBlock = await this.knowledgeService.buildContextBlock(tenantId, instanceId);
+      if (knowledgeBlock) {
+        systemParts.push(knowledgeBlock);
+      }
+    }
+
+    systemParts.push([
+      "### REGRA DE ESCALACAO ###",
+      "Se voce nao tem certeza sobre a resposta ou a informacao nao esta no seu contexto:",
+      "1. NAO invente ou adivinhe respostas",
+      "2. NAO responda de forma vaga como 'nao sei' ou 'entre em contato conosco'",
+      "3. Responda EXATAMENTE com o token: [ESCALATE_ADMIN]",
+      "4. Use [ESCALATE_ADMIN] somente quando genuinamente nao souber - para perguntas gerais, responda normalmente.",
+      "Exemplos de quando escalar: preco especifico de um produto, informacao interna da empresa, dado que nao foi fornecido.",
+      "Exemplos de quando NAO escalar: saudacoes, perguntas genericas, informacoes que estao no contexto."
+    ].join("\n"));
 
     const system = systemParts.join("\n");
 

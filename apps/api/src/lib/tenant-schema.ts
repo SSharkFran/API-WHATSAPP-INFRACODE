@@ -112,6 +112,10 @@ export const buildTenantSchemaSql = (schemaName: string): string[] => {
       "humanTakeover" BOOLEAN NOT NULL DEFAULT FALSE,
       "humanTakeoverAt" TIMESTAMPTZ,
       "aiDisabledPermanent" BOOLEAN NOT NULL DEFAULT FALSE,
+      "awaitingAdminResponse" BOOLEAN NOT NULL DEFAULT FALSE,
+      "pendingClientQuestion" TEXT,
+      "pendingClientJid" TEXT,
+      "pendingClientConversationId" TEXT,
       "slaDeadlineAt" TIMESTAMPTZ,
       "lastMessageAt" TIMESTAMPTZ,
       "createdAt" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -123,6 +127,10 @@ export const buildTenantSchemaSql = (schemaName: string): string[] => {
     `ALTER TABLE ${schema}."Conversation" ADD COLUMN IF NOT EXISTS "humanTakeover" BOOLEAN NOT NULL DEFAULT FALSE;`,
     `ALTER TABLE ${schema}."Conversation" ADD COLUMN IF NOT EXISTS "humanTakeoverAt" TIMESTAMPTZ;`,
     `ALTER TABLE ${schema}."Conversation" ADD COLUMN IF NOT EXISTS "aiDisabledPermanent" BOOLEAN NOT NULL DEFAULT FALSE;`,
+    `ALTER TABLE ${schema}."Conversation" ADD COLUMN IF NOT EXISTS "awaitingAdminResponse" BOOLEAN NOT NULL DEFAULT FALSE;`,
+    `ALTER TABLE ${schema}."Conversation" ADD COLUMN IF NOT EXISTS "pendingClientQuestion" TEXT;`,
+    `ALTER TABLE ${schema}."Conversation" ADD COLUMN IF NOT EXISTS "pendingClientJid" TEXT;`,
+    `ALTER TABLE ${schema}."Conversation" ADD COLUMN IF NOT EXISTS "pendingClientConversationId" TEXT;`,
     `CREATE INDEX IF NOT EXISTS "idx_${schemaName}_conversation_status" ON ${schema}."Conversation" ("status");`,
     `CREATE TABLE IF NOT EXISTS ${schema}."MessageTemplate" (
       "id" TEXT PRIMARY KEY,
@@ -209,6 +217,16 @@ export const buildTenantSchemaSql = (schemaName: string): string[] => {
       "createdAt" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       "updatedAt" TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );`,
+    `CREATE TABLE IF NOT EXISTS ${schema}."TenantKnowledge" (
+      "id" TEXT PRIMARY KEY,
+      "instanceId" TEXT NOT NULL REFERENCES ${schema}."Instance"("id") ON DELETE CASCADE,
+      "question" TEXT NOT NULL,
+      "answer" TEXT NOT NULL,
+      "rawAnswer" TEXT,
+      "taughtBy" TEXT,
+      "createdAt" TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );`,
+    `CREATE INDEX IF NOT EXISTS "idx_${schemaName}_knowledge_instance" ON ${schema}."TenantKnowledge" ("instanceId");`,
     `CREATE TABLE IF NOT EXISTS ${schema}."FiadoTab" (
       "id" TEXT PRIMARY KEY,
       "instanceId" TEXT NOT NULL REFERENCES ${schema}."Instance"("id") ON DELETE CASCADE,

@@ -22,8 +22,10 @@ import { PlatformAdminService } from "./modules/admin/service.js";
 import { AdminMemoryService } from "./modules/chatbot/admin-memory.service.js";
 import { AuthService } from "./modules/auth/service.js";
 import { ClientMemoryService } from "./modules/chatbot/memory.service.js";
+import { EscalationService } from "./modules/chatbot/escalation.service.js";
 import { ChatbotService } from "./modules/chatbot/service.js";
 import { FiadoService } from "./modules/chatbot/fiado.service.js";
+import { KnowledgeService } from "./modules/chatbot/knowledge.service.js";
 import { InstanceOrchestrator } from "./modules/instances/service.js";
 import { MessageService } from "./modules/messages/service.js";
 import { PlanEnforcementService } from "./modules/platform/plan-enforcement.service.js";
@@ -62,10 +64,14 @@ export const buildApp = async () => {
     platformPrisma,
     emailService
   });
+  const knowledgeService = new KnowledgeService({
+    tenantPrismaRegistry
+  });
   const chatbotService = new ChatbotService({
     config,
     platformPrisma,
-    tenantPrismaRegistry
+    tenantPrismaRegistry,
+    knowledgeService
   });
   const clientMemoryService = new ClientMemoryService({
     tenantPrismaRegistry
@@ -96,6 +102,10 @@ export const buildApp = async () => {
   const privacyService = new PrivacyService({
     tenantPrismaRegistry
   });
+  const escalationService = new EscalationService({
+    tenantPrismaRegistry,
+    knowledgeService
+  });
   const instanceOrchestrator = new InstanceOrchestrator({
     config,
     metricsService,
@@ -107,10 +117,12 @@ export const buildApp = async () => {
     chatbotService,
     clientMemoryService,
     adminMemoryService,
-    fiadoService
+    fiadoService,
+    escalationService
   });
   const platformAlertService = new PlatformAlertService(platformPrisma, instanceOrchestrator);
   chatbotService.setPlatformAlertService(platformAlertService);
+  escalationService.setPlatformAlertService(platformAlertService);
   instanceOrchestrator.setPlatformAlertService(platformAlertService);
   const platformAdminService = new PlatformAdminService({
     config,

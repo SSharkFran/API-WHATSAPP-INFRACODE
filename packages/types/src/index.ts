@@ -364,7 +364,7 @@ export interface ClientMemory {
 }
 
 export interface ChatbotSimulationResult {
-  action: "MATCHED" | "WELCOME" | "FALLBACK" | "AI" | "HUMAN_HANDOFF" | "NO_MATCH";
+  action: "MATCHED" | "WELCOME" | "FALLBACK" | "AI" | "HUMAN_HANDOFF" | "ESCALATE_ADMIN" | "NO_MATCH";
   matchedRuleId?: string | null;
   matchedRuleName?: string | null;
   responseText?: string | null;

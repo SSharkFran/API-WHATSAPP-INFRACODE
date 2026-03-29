@@ -150,7 +150,7 @@ export const chatbotSimulationBodySchema = z.object({
 });
 
 export const chatbotSimulationResponseSchema = z.object({
-  action: z.enum(["MATCHED", "WELCOME", "FALLBACK", "AI", "HUMAN_HANDOFF", "NO_MATCH"]),
+  action: z.enum(["MATCHED", "WELCOME", "FALLBACK", "AI", "HUMAN_HANDOFF", "ESCALATE_ADMIN", "NO_MATCH"]),
   matchedRuleId: z.string().nullable().optional(),
   matchedRuleName: z.string().nullable().optional(),
   responseText: z.string().nullable().optional()

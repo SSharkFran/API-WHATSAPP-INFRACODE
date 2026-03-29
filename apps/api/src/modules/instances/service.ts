@@ -23,8 +23,9 @@ import { FiadoAgent } from "../chatbot/agents/fiado.agent.js";
 import { MemoryAgent } from "../chatbot/agents/memory.agent.js";
 import { AdminMemoryService } from "../chatbot/admin-memory.service.js";
 import type { ChatMessage, ConversationSession as BaseConversationSession, LeadData } from "../chatbot/agents/types.js";
+import type { EscalationService } from "../chatbot/escalation.service.js";
 import type { ClientMemoryService } from "../chatbot/memory.service.js";
-import type { ChatbotService } from "../chatbot/service.js";
+import { renderReplyTemplate, type ChatbotService } from "../chatbot/service.js";
 import type { PlanEnforcementService } from "../platform/plan-enforcement.service.js";
 import type { WebhookService } from "../webhooks/service.js";
 import type { FiadoService } from "../chatbot/fiado.service.js";
@@ -42,6 +43,7 @@ interface InstanceOrchestratorDeps {
   clientMemoryService: ClientMemoryService;
   adminMemoryService: AdminMemoryService;
   fiadoService: FiadoService;
+  escalationService: EscalationService;
   platformAlertService?: PlatformAlertService;
 }
 
@@ -154,6 +156,8 @@ interface PendingConversationTurnContext {
   contactDisplayName: string | null;
   contactFields: Record<string, unknown> | null;
   chatbotConfig: {
+    isEnabled?: boolean | null;
+    welcomeMessage?: string | null;
     leadsPhoneNumber?: string | null;
     leadsEnabled?: boolean | null;
     fiadoEnabled?: boolean | null;
@@ -178,6 +182,7 @@ interface ConversationSession extends BaseConversationSession {
 const buildWorkerKey = (tenantId: string, instanceId: string): string => `${tenantId}:${instanceId}`;
 const leadExtractionAwaitingTimeoutMs = 120_000;
 const initialAiResponseDelayMs = 10_000;
+const adminEscalationTimeoutMs = 30 * 60 * 1000;
 const formatCurrencyValue = (value: number): string =>
   new Intl.NumberFormat("pt-BR", {
     minimumFractionDigits: 2,
@@ -201,6 +206,7 @@ export class InstanceOrchestrator {
   private readonly memoryAgent: MemoryAgent;
   private readonly conversationAgent: ConversationAgent;
   private readonly fiadoAgent: FiadoAgent;
+  private readonly escalationService: EscalationService;
   private readonly platformAlertService?: PlatformAlertService;
   private readonly logEmitter = new EventEmitter();
   private readonly qrEmitter = new EventEmitter();
@@ -228,6 +234,7 @@ export class InstanceOrchestrator {
     this.fiadoAgent = new FiadoAgent({
       fiadoService: deps.fiadoService
     });
+    this.escalationService = deps.escalationService;
     this.platformAlertService = deps.platformAlertService;
   }
 
@@ -1362,11 +1369,17 @@ if (event.status === "CONNECTED") {
     const senderNumber =
       normalizeWhatsAppPhoneNumber(senderJid) ??
       normalizePhoneNumber(String(senderJid ?? "").split("@")[0]?.split(":")[0] ?? "");
+    const remoteChatNumber =
+      normalizeWhatsAppPhoneNumber(event.remoteJid) ??
+      normalizePhoneNumber(String(event.remoteJid ?? "").split("@")[0]?.split(":")[0] ?? "");
     const instanceAlertPhone = normalizePhoneNumber(chatbotConfig?.leadsPhoneNumber ?? "");
     const instanceOwnPhone = normalizePhoneNumber(currentInstance?.phoneNumber ?? instance.phoneNumber ?? "");
     const isAdminSender = Boolean(instanceAlertPhone && senderNumber === instanceAlertPhone);
     const isInstanceSender = Boolean(instanceOwnPhone && senderNumber === instanceOwnPhone);
     const isAdminOrInstanceSender = isAdminSender || isInstanceSender;
+    const isAdminSelfChat = Boolean(isAdminSender && instanceAlertPhone && remoteChatNumber === instanceAlertPhone);
+    const isInstanceSelfChat = Boolean(isInstanceSender && instanceOwnPhone && remoteChatNumber === instanceOwnPhone);
+    const shouldBypassDirectSenderTakeover = isAdminSelfChat || isInstanceSelfChat;
 
     const conversation = await prisma.conversation.findFirst({
       where: {
@@ -1380,6 +1393,7 @@ if (event.status === "CONNECTED") {
         id: true,
         leadSent: true,
         awaitingLeadExtraction: true,
+        awaitingAdminResponse: true,
         humanTakeover: true,
         humanTakeoverAt: true,
         aiDisabledPermanent: true,
@@ -1407,6 +1421,7 @@ if (event.status === "CONNECTED") {
           id: true,
           leadSent: true,
           awaitingLeadExtraction: true,
+          awaitingAdminResponse: true,
           humanTakeover: true,
           humanTakeoverAt: true,
           aiDisabledPermanent: true,
@@ -1425,6 +1440,7 @@ if (event.status === "CONNECTED") {
             phoneNumber: cleanPhoneFromRemoteJid || resolvedContactNumber,
             lastMessageAt: new Date(),
             awaitingLeadExtraction: false,
+            awaitingAdminResponse: false,
             humanTakeover: false,
             aiDisabledPermanent: false
           },
@@ -1432,6 +1448,7 @@ if (event.status === "CONNECTED") {
             id: true,
             leadSent: true,
             awaitingLeadExtraction: true,
+            awaitingAdminResponse: true,
             humanTakeover: true,
             humanTakeoverAt: true,
             aiDisabledPermanent: true,
@@ -1439,7 +1456,7 @@ if (event.status === "CONNECTED") {
             phoneNumber: true
           }
         })
-      : resolvedConversation.awaitingLeadExtraction
+      : resolvedConversation.awaitingLeadExtraction || resolvedConversation.awaitingAdminResponse
         ? resolvedConversation
         : await prisma.conversation.update({
           where: { id: resolvedConversation.id },
@@ -1451,6 +1468,7 @@ if (event.status === "CONNECTED") {
             id: true,
             leadSent: true,
             awaitingLeadExtraction: true,
+            awaitingAdminResponse: true,
             humanTakeover: true,
             humanTakeoverAt: true,
             aiDisabledPermanent: true,
@@ -1571,6 +1589,10 @@ if (event.status === "CONNECTED") {
         data: {
           awaitingLeadExtraction: false,
           leadSent: false,
+          awaitingAdminResponse: false,
+          pendingClientQuestion: null,
+          pendingClientJid: null,
+          pendingClientConversationId: null,
           humanTakeover: false,
           humanTakeoverAt: null,
           aiDisabledPermanent: false
@@ -1589,7 +1611,7 @@ if (event.status === "CONNECTED") {
       return;
     }
 
-    if (isAdminOrInstanceSender && !isControlCommand) {
+    if (isAdminOrInstanceSender && !isControlCommand && !shouldBypassDirectSenderTakeover) {
       this.clearConversationSession(sessionKey);
 
       if (!activeConversation.aiDisabledPermanent) {
@@ -1790,6 +1812,16 @@ if (event.status === "CONNECTED") {
         return;
       }
 
+      if (
+        activeConversation.awaitingAdminResponse &&
+        Date.now() - activeConversation.updatedAt.getTime() > adminEscalationTimeoutMs
+      ) {
+        const releasedCount = await this.escalationService.releaseTimedOutEscalations(tenantId, instance.id);
+        if (releasedCount > 0) {
+          activeConversation.awaitingAdminResponse = false;
+        }
+      }
+
       if (activeConversation.awaitingLeadExtraction) {
         return;
       }
@@ -1811,6 +1843,70 @@ if (event.status === "CONNECTED") {
           finalInputText
         )
       ) {
+        return;
+      }
+
+      if (finalInputText && isAdminSender) {
+        await this.escalationService.releaseTimedOutEscalations(tenantId, instance.id);
+
+        const hasPendingEscalations = await this.escalationService.hasPendingEscalations(tenantId, instance.id);
+        if (hasPendingEscalations) {
+          const learningResult = await this.escalationService.processAdminReply(
+            tenantId,
+            instance.id,
+            finalInputText
+          );
+
+          if (learningResult) {
+            const clientResponse = await this.chatbotService.formulateAdminAnswerForClient(
+              tenantId,
+              instance.id,
+              learningResult.clientQuestion,
+              learningResult.formulatedAnswer
+            );
+            const clientRemoteNumber =
+              normalizeWhatsAppPhoneNumber(learningResult.clientJid) ??
+              normalizePhoneNumber(String(learningResult.clientJid).split("@")[0] ?? "");
+
+            if (clientRemoteNumber) {
+              await this.sendAutomatedTextMessage(
+                tenantId,
+                instance.id,
+                clientRemoteNumber,
+                learningResult.clientJid,
+                clientResponse,
+                { action: "admin_learning_reply", kind: "chatbot" }
+              );
+
+              const clientSessionKey = this.buildConversationSessionKey(instance.id, learningResult.clientJid);
+              const clientSession = this.conversationSessions.get(clientSessionKey);
+              if (clientSession) {
+                this.appendConversationHistory(clientSession, "assistant", clientResponse);
+              }
+            } else {
+              console.warn("[escalation] nao foi possivel derivar o numero do cliente a partir do JID");
+            }
+
+            const learningAdminPhone = chatbotConfig?.leadsPhoneNumber?.trim() ?? null;
+            if (learningAdminPhone) {
+              await this.platformAlertService?.sendAlertToPhone(
+                learningAdminPhone,
+                [
+                  "Aprendi e respondi o cliente!",
+                  "",
+                  `Pergunta: "${learningResult.clientQuestion}"`,
+                  `Resposta enviada: "${clientResponse}"`
+                ].join("\n")
+              );
+            }
+
+            return;
+          }
+        }
+      }
+
+      if (activeConversation.awaitingAdminResponse && !isAdminOrInstanceSender) {
+        console.log("[escalation] conversa pausada, ignorando mensagem do cliente");
         return;
       }
 
@@ -2360,11 +2456,14 @@ if (event.status === "CONNECTED") {
       },
       select: {
         humanTakeover: true,
-        aiDisabledPermanent: true
+        aiDisabledPermanent: true,
+        awaitingAdminResponse: true
       }
     });
 
-    return Boolean(conversation?.humanTakeover || conversation?.aiDisabledPermanent);
+    return Boolean(
+      conversation?.humanTakeover || conversation?.aiDisabledPermanent || conversation?.awaitingAdminResponse
+    );
   }
 
   private async processConversationTurn(params: PendingConversationTurnContext & {
@@ -2429,16 +2528,44 @@ if (event.status === "CONNECTED") {
       return;
     }
 
+    const welcomeTemplate = params.chatbotConfig?.welcomeMessage?.trim() ?? "";
+    const shouldSendWelcomeFirst =
+      params.isFirstContact && params.chatbotConfig?.isEnabled === true && welcomeTemplate.length > 0;
+
+    if (shouldSendWelcomeFirst) {
+      const welcomeMessage = renderReplyTemplate(welcomeTemplate, {
+        contactName: params.contactDisplayName,
+        phoneNumber: params.contactPhoneNumber ?? params.remoteNumber,
+        text: params.inputText
+      }).trim();
+
+      if (welcomeMessage) {
+        await this.sendConversationWithDelay({
+          tenantId: params.tenantId,
+          instanceId: params.instance.id,
+          remoteNumber: params.remoteNumber,
+          targetJid: params.targetJid,
+          text: welcomeMessage,
+          metadata: {
+            action: "welcome_message",
+            kind: "chatbot"
+          },
+          conversationId: params.conversationId,
+          session: params.session
+        });
+      }
+    }
+
     const chatbotResult = await this.conversationAgent.reply({
       tenantId: params.tenantId,
       instanceId: params.instance.id,
       message: params.inputText,
       history: params.session.history,
       clientContext: contextString,
-      isFirstContact: params.isFirstContact,
+      isFirstContact: shouldSendWelcomeFirst ? false : params.isFirstContact,
       contactName: undefined,
       phoneNumber: params.contactPhoneNumber ?? params.remoteNumber,
-      remoteJid: params.targetJid
+      remoteJid: shouldSendWelcomeFirst ? null : params.targetJid
     });
 
     if (chatbotResult?.action === "HUMAN_HANDOFF") {
@@ -2453,6 +2580,58 @@ if (event.status === "CONNECTED") {
           to: adminPhone,
           text: `Transbordo humano solicitado pelo cliente ${params.resolvedContactNumber}. O bot foi pausado para este contato.`
         });
+      }
+      return;
+    }
+
+    if (chatbotResult?.action === "ESCALATE_ADMIN") {
+      const pauseMessage = "Um momento, estou verificando essa informacao para voce \uD83D\uDD0D";
+      await this.sendAutomatedTextMessage(
+        params.tenantId,
+        params.instance.id,
+        params.remoteNumber,
+        params.targetJid,
+        pauseMessage,
+        { action: "escalate_admin_pause", kind: "chatbot" }
+      );
+      this.appendConversationHistory(params.session, "assistant", pauseMessage);
+
+      const adminPhone = params.chatbotConfig?.leadsPhoneNumber?.trim() ?? null;
+      if (!adminPhone) {
+        console.warn("[escalation] adminPhone nao configurado, escalacao ignorada");
+        const fallbackText = "Nao consegui obter essa informacao agora. Por favor, entre em contato com nossa equipe.";
+        await this.sendAutomatedTextMessage(
+          params.tenantId,
+          params.instance.id,
+          params.remoteNumber,
+          params.targetJid,
+          fallbackText,
+          { action: "escalate_admin_missing_phone", kind: "chatbot" }
+        );
+        this.appendConversationHistory(params.session, "assistant", fallbackText);
+        return;
+      }
+
+      const escalated = await this.escalationService.escalateToAdmin({
+        tenantId: params.tenantId,
+        instanceId: params.instance.id,
+        conversationId: params.conversationId,
+        clientJid: params.targetJid,
+        clientQuestion: params.inputText,
+        adminPhone
+      });
+
+      if (!escalated) {
+        const fallbackText = "Nao consegui obter essa informacao agora. Por favor, entre em contato com nossa equipe.";
+        await this.sendAutomatedTextMessage(
+          params.tenantId,
+          params.instance.id,
+          params.remoteNumber,
+          params.targetJid,
+          fallbackText,
+          { action: "escalate_admin_failed", kind: "chatbot" }
+        );
+        this.appendConversationHistory(params.session, "assistant", fallbackText);
       }
       return;
     }

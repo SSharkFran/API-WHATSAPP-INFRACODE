@@ -24,7 +24,12 @@ export class AdminMemoryService {
       return false;
     }
 
-    await this.appendMemory(instanceId, tenantId, this.extractMemoryContent(trimmed));
+    const memoryContent = this.extractMemoryContent(trimmed);
+    if (!memoryContent) {
+      return false;
+    }
+
+    await this.appendMemory(instanceId, tenantId, memoryContent);
     return true;
   }
 
@@ -38,14 +43,14 @@ export class AdminMemoryService {
     return phone.replace(/\D/g, "");
   }
 
-  private extractMemoryContent(text: string): string {
+  private extractMemoryContent(text: string): string | null {
     if (text.startsWith("/pitaco ")) {
       return text.slice("/pitaco ".length).trim();
     }
     if (text.startsWith("/regra ")) {
       return text.slice("/regra ".length).trim();
     }
-    return text;
+    return null;
   }
 
   private async appendMemory(instanceId: string, tenantId: string, content: string): Promise<void> {

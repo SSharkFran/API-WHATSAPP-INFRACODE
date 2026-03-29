@@ -34,6 +34,7 @@ model Instance {
   fiadoTabs         FiadoTab[]
   contacts          Contact[]
   conversations     Conversation[]
+  knowledge         TenantKnowledge[]
 
   @@index([status])
 }
@@ -132,6 +133,10 @@ model Conversation {
   humanTakeover    Boolean  @default(false)
   humanTakeoverAt  DateTime?
   aiDisabledPermanent Boolean @default(false)
+  awaitingAdminResponse Boolean @default(false)
+  pendingClientQuestion String?
+  pendingClientJid      String?
+  pendingClientConversationId String?
   slaDeadlineAt    DateTime?
   lastMessageAt    DateTime?
   createdAt        DateTime @default(now())
@@ -212,6 +217,20 @@ model ClientMemory {
   scheduledAt        DateTime?
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
+}
+
+model TenantKnowledge {
+  id         String   @id @default(cuid())
+  instanceId String
+  question   String
+  answer     String
+  rawAnswer  String?
+  taughtBy   String?
+  createdAt  DateTime @default(now())
+
+  instance   Instance @relation(fields: [instanceId], references: [id], onDelete: Cascade)
+
+  @@index([instanceId])
 }
 
 model FiadoTab {

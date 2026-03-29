@@ -1964,10 +1964,10 @@ if (event.status === "CONNECTED") {
               console.warn("[escalation] nao foi possivel derivar o numero do cliente a partir do JID");
             }
 
-            const learningAdminPhone =
-              platformConfig?.adminAlertPhone?.trim() ??
-              chatbotConfig?.leadsPhoneNumber?.trim() ??
-              null;
+            const learningAdminPhone = this.resolveConfiguredPhone(
+              chatbotConfig?.leadsPhoneNumber,
+              platformConfig?.adminAlertPhone
+            );
             if (learningAdminPhone) {
               const delivered = await this.platformAlertService?.sendInstanceAlert(
                 tenantId,
@@ -2435,6 +2435,17 @@ if (event.status === "CONNECTED") {
     return null;
   }
 
+  private resolveConfiguredPhone(...candidates: Array<string | null | undefined>): string | null {
+    for (const candidate of candidates) {
+      const trimmed = candidate?.trim();
+      if (trimmed) {
+        return trimmed;
+      }
+    }
+
+    return null;
+  }
+
   private extractQuotedMessageText(rawMessage?: Record<string, unknown>): string | null {
     if (!rawMessage) {
       return null;
@@ -2777,7 +2788,10 @@ if (event.status === "CONNECTED") {
     const platformConfig = await this.platformPrisma.platformConfig.findUnique({
       where: { id: "singleton" }
     });
-    const adminPhone = platformConfig?.adminAlertPhone ?? null;
+    const adminPhone = this.resolveConfiguredPhone(
+      params.chatbotConfig?.leadsPhoneNumber,
+      platformConfig?.adminAlertPhone
+    );
 
     if (clientMemory?.tags.includes("paused_by_human")) {
       return;
@@ -2924,10 +2938,10 @@ if (event.status === "CONNECTED") {
       );
       this.appendConversationHistory(params.session, "assistant", pauseMessage);
 
-      const adminPhone =
-        platformConfig?.adminAlertPhone?.trim() ??
-        params.chatbotConfig?.leadsPhoneNumber?.trim() ??
-        null;
+      const adminPhone = this.resolveConfiguredPhone(
+        params.chatbotConfig?.leadsPhoneNumber,
+        platformConfig?.adminAlertPhone
+      );
       if (!adminPhone) {
         console.warn("[escalation] adminPhone nao configurado, escalacao ignorada");
         const fallbackText = "Nao consegui obter essa informacao agora. Por favor, entre em contato com nossa equipe.";
@@ -2942,6 +2956,12 @@ if (event.status === "CONNECTED") {
         this.appendConversationHistory(params.session, "assistant", fallbackText);
         return;
       }
+
+      console.log("[escalation] enviando pergunta ao admin", {
+        instanceId: params.instance.id,
+        conversationId: params.conversationId,
+        adminPhone
+      });
 
       const escalated = await this.escalationService.escalateToAdmin({
         tenantId: params.tenantId,

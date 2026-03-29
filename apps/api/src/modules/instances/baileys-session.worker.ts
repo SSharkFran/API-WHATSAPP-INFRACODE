@@ -87,9 +87,11 @@ let reconnectPromise: Promise<void> | null = null;
 let reconnectToken = 0;
 let activeStartPromise: Promise<void> | null = null;
 let socketGeneration = 0;
+let decryptFailureRecoveryPromise: Promise<void> | null = null;
 const store = makeInMemoryStore({});
 const RESOLVED_JID_CACHE_TTL_MS = 5 * 60 * 1000;
 const resolvedJidCache = new Map<string, { jid: string; timeout: NodeJS.Timeout }>();
+const recentDecryptFailureTimestamps: number[] = [];
 
 const clearResolvedJidCache = (): void => {
   for (const entry of resolvedJidCache.values()) {
@@ -176,6 +178,118 @@ const log = (level: "info" | "warn" | "error", message: string, context?: Record
     timestamp: new Date().toISOString(),
     context
   });
+};
+
+const normalizeBaileysContext = (value: unknown): Record<string, unknown> | undefined => {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+
+  const input = value as Record<string, unknown>;
+  const output: Record<string, unknown> = {};
+
+  for (const [key, raw] of Object.entries(input)) {
+    if (raw instanceof Error) {
+      output[key] = raw.message;
+      continue;
+    }
+
+    if (raw && typeof raw === "object") {
+      const nested = raw as Record<string, unknown>;
+      if (nested.message && typeof nested.message === "string") {
+        output[key] = nested.message;
+        continue;
+      }
+    }
+
+    if (typeof raw === "string" || typeof raw === "number" || typeof raw === "boolean") {
+      output[key] = raw;
+    }
+  }
+
+  return Object.keys(output).length > 0 ? output : undefined;
+};
+
+const scheduleDecryptFailureRecovery = (): void => {
+  if (stopping || decryptFailureRecoveryPromise) {
+    return;
+  }
+
+  decryptFailureRecoveryPromise = (async () => {
+    log("warn", "Rajada de falhas de decrypt detectada, reiniciando o socket", {
+      instanceId: init.instanceId,
+      recentFailures: recentDecryptFailureTimestamps.length
+    });
+
+    try {
+      await disconnectSocket();
+    } catch (error) {
+      log("warn", "Falha ao encerrar socket apos rajada de decrypt", {
+        error: error instanceof Error ? error.message : "unknown",
+        instanceId: init.instanceId
+      });
+    }
+
+    await scheduleReconnect("Rajada de Bad MAC detectada");
+  })().finally(() => {
+    decryptFailureRecoveryPromise = null;
+  });
+};
+
+const recordDecryptFailureSignal = (message: string, context?: Record<string, unknown>): void => {
+  const errorText = [message, context?.error, context?.err, context?.reason]
+    .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+    .join(" ");
+
+  if (!/bad mac|failed to decrypt|decrypt message/i.test(errorText)) {
+    return;
+  }
+
+  const now = Date.now();
+  recentDecryptFailureTimestamps.push(now);
+
+  while (recentDecryptFailureTimestamps.length > 0 && now - recentDecryptFailureTimestamps[0]! > 30_000) {
+    recentDecryptFailureTimestamps.shift();
+  }
+
+  if (recentDecryptFailureTimestamps.length >= 4) {
+    recentDecryptFailureTimestamps.length = 0;
+    scheduleDecryptFailureRecovery();
+  }
+};
+
+interface BaileysLoggerLike {
+  level: string;
+  child: () => BaileysLoggerLike;
+  trace: (obj?: unknown, msg?: string) => void;
+  debug: (obj?: unknown, msg?: string) => void;
+  info: (obj?: unknown, msg?: string) => void;
+  warn: (obj?: unknown, msg?: string) => void;
+  error: (obj?: unknown, msg?: string) => void;
+  fatal: (obj?: unknown, msg?: string) => void;
+}
+
+const createBaileysLogger = (): BaileysLoggerLike => {
+  const forward = (level: "info" | "warn" | "error", obj?: unknown, msg?: string): void => {
+    const message = typeof obj === "string" ? obj : msg ?? "Evento do Baileys";
+    const context = normalizeBaileysContext(typeof obj === "string" ? undefined : obj) ?? {};
+    context.instanceId = init.instanceId;
+    log(level, message, context);
+    recordDecryptFailureSignal(message, context);
+  };
+
+  const logger = {
+    level: "info",
+    child: () => logger,
+    trace: (obj?: unknown, msg?: string) => forward("info", obj, msg),
+    debug: (obj?: unknown, msg?: string) => forward("info", obj, msg),
+    info: (obj?: unknown, msg?: string) => forward("info", obj, msg),
+    warn: (obj?: unknown, msg?: string) => forward("warn", obj, msg),
+    error: (obj?: unknown, msg?: string) => forward("error", obj, msg),
+    fatal: (obj?: unknown, msg?: string) => forward("error", obj, msg)
+  };
+
+  return logger;
 };
 
 const emitStatus = (
@@ -533,6 +647,7 @@ const startSocket = async (): Promise<void> => {
       const nextSocket = makeWASocket({
         auth: authState.state,
         browser: ["InfraCode", "Chrome", "1.0.0"],
+        logger: createBaileysLogger() as never,
         printQRInTerminal: false,
         syncFullHistory: false,
         ...(versionData.version ? { version: versionData.version } : {})

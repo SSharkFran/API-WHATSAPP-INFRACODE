@@ -217,6 +217,7 @@ export class InstanceOrchestrator {
   private readonly latestQrCodes = new Map<string, QrCodeEvent>();
   private readonly conversationSessions = new Map<string, ConversationSession>();
   private readonly workers = new Map<string, ManagedWorker>();
+  private readonly workerStartLocks = new Map<string, Promise<InstanceSummary>>();
 
   public constructor(deps: InstanceOrchestratorDeps) {
     this.config = deps.config;
@@ -342,31 +343,48 @@ export class InstanceOrchestrator {
    * Inicia ou reinicia o worker associado a uma instancia.
    */
   public async startInstance(tenantId: string, instanceId: string): Promise<InstanceSummary> {
-    const prisma = await this.tenantPrismaRegistry.getClient(tenantId);
-    const instance = await this.requireInstanceWithUsage(tenantId, instanceId);
-
-    if (instance.status === "BANNED") {
-      throw new ApiError(409, "INSTANCE_BANNED", "Instancia marcada como banida e nao pode ser iniciada");
-    }
-
     const workerKey = buildWorkerKey(tenantId, instanceId);
+    const ongoingStart = this.workerStartLocks.get(workerKey);
 
-    if (this.workers.has(workerKey)) {
-      return this.mapInstanceSummary(tenantId, instance);
+    if (ongoingStart) {
+      return ongoingStart;
     }
 
-    await prisma.instance.update({
-      where: { id: instanceId },
-      data: {
-        pausedAt: null,
-        status: "INITIALIZING",
-        lastError: null
-      }
-    });
+    const startPromise = (async () => {
+      const prisma = await this.tenantPrismaRegistry.getClient(tenantId);
+      const instance = await this.requireInstanceWithUsage(tenantId, instanceId);
 
-    await this.spawnWorker(tenantId, instance);
-    const updated = await this.requireInstanceWithUsage(tenantId, instanceId);
-    return this.mapInstanceSummary(tenantId, updated);
+      if (instance.status === "BANNED") {
+        throw new ApiError(409, "INSTANCE_BANNED", "Instancia marcada como banida e nao pode ser iniciada");
+      }
+
+      if (this.workers.has(workerKey)) {
+        return this.mapInstanceSummary(tenantId, instance);
+      }
+
+      await prisma.instance.update({
+        where: { id: instanceId },
+        data: {
+          pausedAt: null,
+          status: "INITIALIZING",
+          lastError: null
+        }
+      });
+
+      await this.spawnWorker(tenantId, instance);
+      const updated = await this.requireInstanceWithUsage(tenantId, instanceId);
+      return this.mapInstanceSummary(tenantId, updated);
+    })();
+
+    this.workerStartLocks.set(workerKey, startPromise);
+
+    try {
+      return await startPromise;
+    } finally {
+      if (this.workerStartLocks.get(workerKey) === startPromise) {
+        this.workerStartLocks.delete(workerKey);
+      }
+    }
   }
 
   /**

@@ -1585,7 +1585,7 @@ if (event.status === "CONNECTED") {
       return;
     }
 
-    if (isAdminOrInstanceSender && isResetCommand) {
+    if (isResetCommand && !event.remoteJid.endsWith("@g.us")) {
       await prisma.conversation.update({
         where: {
           id: activeConversation.id

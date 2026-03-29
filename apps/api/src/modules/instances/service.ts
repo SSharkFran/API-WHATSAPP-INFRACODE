@@ -1171,6 +1171,7 @@ if (event.status === "CONNECTED") {
     const remoteNumber = remotePhoneFromJid ?? normalizePhoneNumber(event.remoteJid.split("@")[0] ?? "");
     const sessionKey = this.buildConversationSessionKey(instance.id, event.remoteJid);
     const msgText = typeof event.payload.text === "string" ? event.payload.text.trim().toLowerCase() : "";
+    const rawTextInput = typeof event.payload.text === "string" ? event.payload.text.trim() : "";
     const isTemporaryTakeoverCommand = msgText === "*";
     const isPermanentDisableCommand = msgText === "**";
     const isResetCommand = msgText === "/reset";
@@ -1400,7 +1401,12 @@ if (event.status === "CONNECTED") {
     const instanceOwnPhone =
       normalizeWhatsAppPhoneNumber(currentInstance?.phoneNumber ?? instance.phoneNumber) ??
       normalizePhoneNumber(currentInstance?.phoneNumber ?? instance.phoneNumber ?? "");
-    const quotedLearningConversationId = this.extractQuotedLearningConversationId(event.rawMessage);
+    const quotedLearningConversationId =
+      this.extractQuotedLearningConversationId(event.rawMessage) ??
+      this.extractLearningConversationIdFromText(rawTextInput) ??
+      this.escalationService.resolveConversationIdByAdminAlertMessage(
+        this.extractQuotedMessageExternalId(event.rawMessage)
+      );
     const isAdminSender = Boolean(
       instanceAlertPhone &&
       this.phonesMatch(instanceAlertPhone, [
@@ -2438,6 +2444,50 @@ if (event.status === "CONNECTED") {
     }
 
     return null;
+  }
+
+  private extractQuotedMessageExternalId(rawMessage?: Record<string, unknown>): string | null {
+    if (!rawMessage) {
+      return null;
+    }
+
+    const candidateContainers = [
+      rawMessage.extendedTextMessage,
+      rawMessage.imageMessage,
+      rawMessage.videoMessage,
+      rawMessage.documentMessage,
+      rawMessage.audioMessage,
+      rawMessage.pttMessage
+    ];
+
+    for (const container of candidateContainers) {
+      if (!container || typeof container !== "object") {
+        continue;
+      }
+
+      const contextInfo =
+        "contextInfo" in container && typeof container.contextInfo === "object"
+          ? (container.contextInfo as Record<string, unknown>)
+          : null;
+      const stanzaId =
+        typeof contextInfo?.stanzaId === "string" && contextInfo.stanzaId.trim()
+          ? contextInfo.stanzaId.trim()
+          : null;
+
+      if (stanzaId) {
+        return stanzaId;
+      }
+    }
+
+    return null;
+  }
+
+  private extractLearningConversationIdFromText(text?: string | null): string | null {
+    if (!text?.trim()) {
+      return null;
+    }
+
+    return text.match(/\bID:\s*([a-z0-9]+)\b/i)?.[1] ?? null;
   }
 
   private extractQuotedLearningConversationId(rawMessage?: Record<string, unknown>): string | null {

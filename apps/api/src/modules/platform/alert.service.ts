@@ -160,24 +160,47 @@ export class PlatformAlertService {
     return this.sendAdminAlert(phone, message);
   }
 
+  async sendTrackedInstanceAlert(
+    tenantId: string,
+    instanceId: string,
+    phone: string,
+    message: string
+  ): Promise<{
+    delivered: boolean;
+    externalMessageId: string | null;
+    remoteJid: string | null;
+  }> {
+    try {
+      const result = await this.instanceOrchestrator.sendMessage(tenantId, instanceId, {
+        type: "text",
+        to: phone,
+        targetJid: `${phone}@s.whatsapp.net`,
+        text: message
+      });
+
+      return {
+        delivered: true,
+        externalMessageId: (result.externalMessageId as string | undefined) ?? null,
+        remoteJid: (result.remoteJid as string | undefined) ?? null
+      };
+    } catch (err) {
+      console.error("[alert] erro ao enviar alerta rastreado pela instancia:", err);
+      return {
+        delivered: false,
+        externalMessageId: null,
+        remoteJid: null
+      };
+    }
+  }
+
   async sendInstanceAlert(
     tenantId: string,
     instanceId: string,
     phone: string,
     message: string
   ): Promise<boolean> {
-    try {
-      await this.instanceOrchestrator.sendMessage(tenantId, instanceId, {
-        type: "text",
-        to: phone,
-        targetJid: `${phone}@s.whatsapp.net`,
-        text: message
-      });
-      return true;
-    } catch (err) {
-      console.error("[alert] erro ao enviar alerta pela instancia:", err);
-      return false;
-    }
+    const result = await this.sendTrackedInstanceAlert(tenantId, instanceId, phone, message);
+    return result.delivered;
   }
 
   async alertCriticalError(

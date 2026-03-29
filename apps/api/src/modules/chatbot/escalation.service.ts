@@ -21,6 +21,13 @@ export class EscalationService {
   private readonly tenantPrismaRegistry: TenantPrismaRegistry;
   private readonly knowledgeService: KnowledgeService;
   private readonly platformAlertService?: PlatformAlertService;
+  private readonly adminAlertMessageMap = new Map<
+    string,
+    {
+      conversationId: string;
+      timeout: NodeJS.Timeout;
+    }
+  >();
 
   public constructor(deps: EscalationServiceDeps) {
     this.tenantPrismaRegistry = deps.tenantPrismaRegistry;
@@ -30,6 +37,14 @@ export class EscalationService {
 
   public setPlatformAlertService(service: PlatformAlertService): void {
     (this as unknown as { platformAlertService: PlatformAlertService }).platformAlertService = service;
+  }
+
+  public resolveConversationIdByAdminAlertMessage(messageId?: string | null): string | null {
+    if (!messageId) {
+      return null;
+    }
+
+    return this.adminAlertMessageMap.get(messageId)?.conversationId ?? null;
   }
 
   /**
@@ -84,18 +99,20 @@ export class EscalationService {
         return false;
       }
 
-      const delivered = await this.platformAlertService.sendInstanceAlert(
+      const result = await this.platformAlertService.sendTrackedInstanceAlert(
         ctx.tenantId,
         ctx.instanceId,
         ctx.adminPhone,
         adminMessage
       );
 
-      if (!delivered) {
+      if (!result.delivered) {
         console.warn("[escalation] falha ao entregar pergunta ao admin");
         await this.rollbackEscalationState(prisma, ctx);
         return false;
       }
+
+      this.trackAdminAlertMessage(result.externalMessageId, ctx.conversationId);
 
       return true;
     } catch (err) {
@@ -239,6 +256,28 @@ export class EscalationService {
         pendingClientJid: null,
         pendingClientConversationId: null
       }
+    });
+  }
+
+  private trackAdminAlertMessage(messageId: string | null, conversationId: string): void {
+    if (!messageId) {
+      return;
+    }
+
+    const existing = this.adminAlertMessageMap.get(messageId);
+    if (existing) {
+      clearTimeout(existing.timeout);
+    }
+
+    const timeout = setTimeout(() => {
+      this.adminAlertMessageMap.delete(messageId);
+    }, 2 * 60 * 60 * 1000);
+
+    timeout.unref?.();
+
+    this.adminAlertMessageMap.set(messageId, {
+      conversationId,
+      timeout
     });
   }
 }

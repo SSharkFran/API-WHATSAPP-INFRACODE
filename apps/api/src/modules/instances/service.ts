@@ -1892,7 +1892,9 @@ if (event.status === "CONNECTED") {
 
             const learningAdminPhone = chatbotConfig?.leadsPhoneNumber?.trim() ?? null;
             if (learningAdminPhone) {
-              await this.platformAlertService?.sendAlertToPhone(
+              const delivered = await this.platformAlertService?.sendInstanceAlert(
+                tenantId,
+                instance.id,
                 learningAdminPhone,
                 [
                   "Aprendi e respondi o cliente!",
@@ -1901,6 +1903,10 @@ if (event.status === "CONNECTED") {
                   `Resposta enviada: "${clientResponse}"`
                 ].join("\n")
               );
+
+              if (delivered === false) {
+                console.warn("[escalation] falha ao enviar confirmacao de aprendizado ao admin");
+              }
             }
 
             return;

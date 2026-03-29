@@ -160,6 +160,26 @@ export class PlatformAlertService {
     return this.sendAdminAlert(phone, message);
   }
 
+  async sendInstanceAlert(
+    tenantId: string,
+    instanceId: string,
+    phone: string,
+    message: string
+  ): Promise<boolean> {
+    try {
+      await this.instanceOrchestrator.sendMessage(tenantId, instanceId, {
+        type: "text",
+        to: phone,
+        targetJid: `${phone}@s.whatsapp.net`,
+        text: message
+      });
+      return true;
+    } catch (err) {
+      console.error("[alert] erro ao enviar alerta pela instancia:", err);
+      return false;
+    }
+  }
+
   async alertCriticalError(
     tenantId: string,
     instanceId: string,

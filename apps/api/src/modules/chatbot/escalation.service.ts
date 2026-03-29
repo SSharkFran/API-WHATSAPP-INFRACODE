@@ -78,24 +78,29 @@ export class EscalationService {
     ].join("\n");
 
     try {
-      await this.platformAlertService?.sendAlertToPhone(ctx.adminPhone, adminMessage);
+      if (!this.platformAlertService) {
+        console.warn("[escalation] platformAlertService indisponivel");
+        await this.rollbackEscalationState(prisma, ctx);
+        return false;
+      }
+
+      const delivered = await this.platformAlertService.sendInstanceAlert(
+        ctx.tenantId,
+        ctx.instanceId,
+        ctx.adminPhone,
+        adminMessage
+      );
+
+      if (!delivered) {
+        console.warn("[escalation] falha ao entregar pergunta ao admin");
+        await this.rollbackEscalationState(prisma, ctx);
+        return false;
+      }
+
       return true;
     } catch (err) {
       console.error("[escalation] erro ao notificar admin:", err);
-
-      await prisma.conversation.updateMany({
-        where: {
-          instanceId: ctx.instanceId,
-          id: ctx.conversationId
-        },
-        data: {
-          awaitingAdminResponse: false,
-          pendingClientQuestion: null,
-          pendingClientJid: null,
-          pendingClientConversationId: null
-        }
-      });
-
+      await this.rollbackEscalationState(prisma, ctx);
       return false;
     }
   }
@@ -211,5 +216,23 @@ export class EscalationService {
     }
 
     return result.count;
+  }
+
+  private async rollbackEscalationState(
+    prisma: Awaited<ReturnType<TenantPrismaRegistry["getClient"]>>,
+    ctx: EscalationContext
+  ): Promise<void> {
+    await prisma.conversation.updateMany({
+      where: {
+        instanceId: ctx.instanceId,
+        id: ctx.conversationId
+      },
+      data: {
+        awaitingAdminResponse: false,
+        pendingClientQuestion: null,
+        pendingClientJid: null,
+        pendingClientConversationId: null
+      }
+    });
   }
 }

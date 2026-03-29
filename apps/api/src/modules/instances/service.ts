@@ -1378,8 +1378,14 @@ if (event.status === "CONNECTED") {
       normalizePhoneNumber(String(event.remoteJid ?? "").split("@")[0]?.split(":")[0] ?? "");
     const instanceAlertPhone = normalizePhoneNumber(chatbotConfig?.leadsPhoneNumber ?? "");
     const instanceOwnPhone = normalizePhoneNumber(currentInstance?.phoneNumber ?? instance.phoneNumber ?? "");
-    const isAdminSender = Boolean(instanceAlertPhone && senderNumber === instanceAlertPhone);
-    const isInstanceSender = Boolean(instanceOwnPhone && senderNumber === instanceOwnPhone);
+    const isAdminSender = Boolean(
+      instanceAlertPhone &&
+      (senderNumber === instanceAlertPhone || remoteChatNumber === instanceAlertPhone)
+    );
+    const isInstanceSender = Boolean(
+      instanceOwnPhone &&
+      (senderNumber === instanceOwnPhone || remoteChatNumber === instanceOwnPhone)
+    );
     const isAdminOrInstanceSender = isAdminSender || isInstanceSender;
     const isAdminSelfChat = Boolean(isAdminSender && instanceAlertPhone && remoteChatNumber === instanceAlertPhone);
     const isInstanceSelfChat = Boolean(isInstanceSender && instanceOwnPhone && remoteChatNumber === instanceOwnPhone);

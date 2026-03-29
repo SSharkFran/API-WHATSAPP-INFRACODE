@@ -1460,6 +1460,25 @@ if (event.status === "CONNECTED") {
       }
     }
     const quotedLearningConversationId = quotedLearningConversationIdFromSignals ?? persistedAdminPromptConversationId;
+    if (
+      rawTextInput &&
+      (
+        Boolean(matchedAdminPhone) ||
+        Boolean(quotedLearningConversationId) ||
+        /aprendizado necessario/i.test(rawTextInput) ||
+        /\bID:\s*[a-z0-9]+\b/i.test(rawTextInput)
+      )
+    ) {
+      console.log("[escalation] inbound admin candidate", {
+        instanceId: instance.id,
+        externalMessageId: event.externalMessageId,
+        matchedAdminPhone,
+        quotedLearningConversationId,
+        remoteJid: event.remoteJid,
+        senderJid,
+        textPreview: rawTextInput.slice(0, 500)
+      });
+    }
     const isAdminSender = Boolean(matchedAdminPhone);
     const isAdminLearningReply = Boolean(quotedLearningConversationId);
     const isInstanceSender = Boolean(

@@ -204,6 +204,43 @@ const detectMessageType = (message: Record<string, unknown>): MessageType => {
   return "text";
 };
 
+const unwrapIncomingMessageContent = (
+  rawMessage?: Record<string, unknown> | null
+): Record<string, unknown> | null => {
+  if (!rawMessage || typeof rawMessage !== "object") {
+    return null;
+  }
+
+  const wrapperCandidates = [
+    rawMessage.ephemeralMessage,
+    rawMessage.viewOnceMessage,
+    rawMessage.viewOnceMessageV2,
+    rawMessage.viewOnceMessageV2Extension,
+    rawMessage.documentWithCaptionMessage,
+    rawMessage.editedMessage,
+    rawMessage.deviceSentMessage
+  ];
+
+  for (const candidate of wrapperCandidates) {
+    if (!candidate || typeof candidate !== "object") {
+      continue;
+    }
+
+    const nestedMessage =
+      "message" in candidate && candidate.message && typeof candidate.message === "object"
+        ? (candidate.message as Record<string, unknown>)
+        : null;
+
+    if (!nestedMessage) {
+      continue;
+    }
+
+    return unwrapIncomingMessageContent(nestedMessage) ?? nestedMessage;
+  }
+
+  return rawMessage;
+};
+
 const serializeIncomingPayload = (rawMessage: Record<string, unknown>): Record<string, unknown> => {
   if ("conversation" in rawMessage) {
     return {
@@ -570,7 +607,10 @@ const startSocket = async (): Promise<void> => {
               continue;
             }
 
-            const serializedPayload = serializeIncomingPayload(message.message as Record<string, unknown>);
+            const normalizedMessage =
+              unwrapIncomingMessageContent(message.message as Record<string, unknown>) ??
+              (message.message as Record<string, unknown>);
+            const serializedPayload = serializeIncomingPayload(normalizedMessage);
             const senderJid =
               message.key.participant ??
               (message.key.fromMe
@@ -586,8 +626,8 @@ const startSocket = async (): Promise<void> => {
                 ...serializedPayload,
                 pushName: message.pushName ?? null
               },
-              messageType: detectMessageType(message.message as Record<string, unknown>),
-              rawMessage: message.message as Record<string, unknown>,
+              messageType: detectMessageType(normalizedMessage),
+              rawMessage: normalizedMessage,
               messageKey: {
                 remoteJid: message.key.remoteJid,
                 id: message.key.id,

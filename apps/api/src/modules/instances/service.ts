@@ -1423,7 +1423,8 @@ if (event.status === "CONNECTED") {
       this.escalationService.resolveConversationIdByAdminAlertMessage(
         this.extractQuotedMessageExternalId(event.rawMessage)
       ) ??
-      this.escalationService.resolveConversationIdByAdminAlertChat(event.remoteJid);
+      this.escalationService.resolveConversationIdByAdminAlertChat(event.remoteJid) ??
+      this.escalationService.resolveConversationIdByAdminAlertChat(senderJid);
     const isAdminSender = Boolean(matchedAdminPhone);
     const isAdminLearningReply = Boolean(quotedLearningConversationId);
     const isInstanceSender = Boolean(
@@ -1563,6 +1564,10 @@ if (event.status === "CONNECTED") {
       activeConversation.humanTakeoverAt = null;
     }
 
+    const hasPendingEscalationsForAdminBypass = isAdminOrInstanceSender
+      ? await this.escalationService.hasPendingEscalations(tenantId, instance.id)
+      : false;
+
     if (isAdminOrInstanceSender && isPermanentDisableCommand) {
       this.clearConversationSession(sessionKey);
 
@@ -1692,7 +1697,12 @@ if (event.status === "CONNECTED") {
       return;
     }
 
-    if (isAdminOrInstanceSender && !isControlCommand && !shouldBypassDirectSenderTakeover) {
+    if (
+      isAdminOrInstanceSender &&
+      !isControlCommand &&
+      !shouldBypassDirectSenderTakeover &&
+      !hasPendingEscalationsForAdminBypass
+    ) {
       this.clearConversationSession(sessionKey);
 
       if (!activeConversation.aiDisabledPermanent) {
@@ -1925,7 +1935,7 @@ if (event.status === "CONNECTED") {
       if (finalInputText && isAdminOrInstanceSender) {
         await this.escalationService.releaseTimedOutEscalations(tenantId, instance.id);
 
-        const hasPendingEscalations = await this.escalationService.hasPendingEscalations(tenantId, instance.id);
+        const hasPendingEscalations = hasPendingEscalationsForAdminBypass;
         if (hasPendingEscalations) {
           const learningResult = await this.escalationService.processAdminReply(
             tenantId,

@@ -55,11 +55,14 @@ export class EscalationService {
   }
 
   public resolveConversationIdByAdminAlertChat(remoteJid?: string | null): string | null {
-    if (!remoteJid?.trim()) {
-      return null;
+    for (const key of this.buildAdminAlertChatKeys(remoteJid)) {
+      const resolved = this.adminAlertChatMap.get(key)?.conversationId ?? null;
+      if (resolved) {
+        return resolved;
+      }
     }
 
-    return this.adminAlertChatMap.get(remoteJid.trim())?.conversationId ?? null;
+    return null;
   }
 
   /**
@@ -301,24 +304,46 @@ export class EscalationService {
       });
     }
 
-    if (remoteJid?.trim()) {
-      const normalizedRemoteJid = remoteJid.trim();
-      const existing = this.adminAlertChatMap.get(normalizedRemoteJid);
+    for (const key of this.buildAdminAlertChatKeys(remoteJid)) {
+      const existing = this.adminAlertChatMap.get(key);
       if (existing) {
         clearTimeout(existing.timeout);
       }
 
       const timeout = setTimeout(() => {
-        this.adminAlertChatMap.delete(normalizedRemoteJid);
+        this.adminAlertChatMap.delete(key);
       }, timeoutMs);
 
       timeout.unref?.();
 
-      this.adminAlertChatMap.set(normalizedRemoteJid, {
+      this.adminAlertChatMap.set(key, {
         conversationId,
         timeout
       });
     }
+  }
+
+  private buildAdminAlertChatKeys(remoteJid?: string | null): string[] {
+    const trimmed = remoteJid?.trim();
+
+    if (!trimmed) {
+      return [];
+    }
+
+    const keys = new Set<string>([trimmed]);
+    const withoutDevice = trimmed.replace(/:\d+(?=@)/, "");
+    keys.add(withoutDevice);
+
+    const localPart = withoutDevice.split("@")[0] ?? "";
+    const digits = localPart.replace(/\D/g, "");
+
+    if (digits) {
+      keys.add(digits);
+      keys.add(`${digits}@s.whatsapp.net`);
+      keys.add(`${digits}@c.us`);
+    }
+
+    return [...keys];
   }
 
   private clearTrackedAdminAlertForConversation(conversationId: string): void {

@@ -153,6 +153,7 @@ const defaultAiSettings = {
   temperature: 0.4,
   maxContextMessages: 12
 } as const;
+const chatbotGlobalSystemPromptSettingKey = "chatbot.globalSystemPrompt";
 
 const formatDate = (date: Date): string =>
   new Intl.DateTimeFormat("pt-BR", {
@@ -176,6 +177,16 @@ const normalizeLeadLookup = (value: string): string =>
     .replace(/[^a-z0-9]+/g, " ")
     .trim()
     .replace(/\s+/g, " ");
+const institutionalQuestionPatterns = [
+  /\b(?:atende|atendem|atendimento|horario|expediente|sabado|domingo|feriado)\b/,
+  /\b(?:funcionario|funcionarios|equipe|time|colaborador|colaboradores)\b/,
+  /\b(?:visita|visitar|presencial|reuniao presencial|ir ate)\b/,
+  /\b(?:preco|precos|valor|valores|orcamento|orcamentos|custo|custos)\b/,
+  /\b(?:servidor|servidores|infraestrutura|cloud|hosting|hospedagem|banco de dados)\b/,
+  /\b(?:inteligencia artificial|ia propria|modelo proprio|ia)\b/,
+  /\b(?:telefone|whatsapp|email|endereco|cnpj|site|localizacao)\b/,
+  /\b(?:fazem|faz|oferecem|oferece|conseguem|consegue|mexem com|trabalham com|desenvolvem|desenvolve)\b/
+];
 const leadExtractionAiSystemPrompt = [
   "You are a data extraction assistant. Analyze this conversation and return ONLY a valid JSON object, no markdown, no explanation, nothing else.",
   "",
@@ -259,6 +270,7 @@ export class ChatbotService {
   private readonly tenantPrismaRegistry: TenantPrismaRegistry;
   private readonly platformAlertService?: PlatformAlertService;
   private readonly knowledgeService?: KnowledgeService;
+  private globalSystemPromptCache: string | null | undefined;
 
   public constructor(deps: ChatbotServiceDeps) {
     this.config = deps.config;
@@ -273,7 +285,7 @@ export class ChatbotService {
   }
 
   public invalidateGlobalSystemPromptCache(): void {
-    // Compat hook for admin routes. The chatbot service currently reads prompt state directly.
+    this.globalSystemPromptCache = undefined;
   }
 
   public async getConfig(tenantId: string, instanceId: string): Promise<ChatbotConfig> {
@@ -322,6 +334,7 @@ export class ChatbotService {
     const audioEnabled = input.audioEnabled ?? existingConfig?.audioEnabled ?? false;
     const visionEnabled = input.visionEnabled ?? existingConfig?.visionEnabled ?? false;
     const visionPrompt = input.visionPrompt?.trim() ?? existingConfig?.visionPrompt ?? null;
+    const responseDelayMs = Math.min(60_000, Math.max(0, input.responseDelayMs ?? existingConfig?.responseDelayMs ?? 3_000));
     const leadAutoExtract = input.leadAutoExtract ?? existingConfig?.leadAutoExtract ?? false;
     const leadVehicleTable =
       input.leadVehicleTable !== undefined
@@ -360,6 +373,7 @@ export class ChatbotService {
         audioEnabled,
         visionEnabled,
         visionPrompt,
+        responseDelayMs,
         leadAutoExtract,
         leadVehicleTable: leadVehicleTable as unknown as Prisma.InputJsonValue,
         leadPriceTable: leadPriceTable as unknown as Prisma.InputJsonValue,
@@ -384,6 +398,7 @@ export class ChatbotService {
         audioEnabled,
         visionEnabled,
         visionPrompt,
+        responseDelayMs,
         leadAutoExtract,
         leadVehicleTable: leadVehicleTable as unknown as Prisma.InputJsonValue,
         leadPriceTable: leadPriceTable as unknown as Prisma.InputJsonValue,
@@ -515,6 +530,87 @@ public async simulate(
     }
   }
 
+  private isInstitutionalQuestion(input: string): boolean {
+    const normalizedInput = normalizeLeadLookup(input);
+
+    if (!normalizedInput) {
+      return false;
+    }
+
+    const hasCompanyAnchor =
+      /\b(?:voces|vcs|empresa|infracode|time|equipe|na infracode|com voces)\b/.test(normalizedInput) ||
+      /\b(?:quantos|quais|qual|tem|fazem|faz|oferecem|oferece|atendem|atende|conseguem|consegue)\b/.test(normalizedInput);
+
+    return hasCompanyAnchor && institutionalQuestionPatterns.some((pattern) => pattern.test(normalizedInput));
+  }
+
+  private async shouldEscalateInstitutionalQuestion(params: {
+    tenantId: string;
+    question: string;
+    groundingContext: string;
+    managedAiProvider: ManagedAiProviderRuntime;
+    apiKey: string;
+    config: ChatbotConfig;
+  }): Promise<boolean> {
+    if (!params.groundingContext.trim()) {
+      return true;
+    }
+
+    try {
+      const response = await this.callAiWithFallback(
+        params.tenantId,
+        params.managedAiProvider,
+        params.apiKey,
+        {
+          system: [
+            "Voce e um fiscal de contexto para um chatbot comercial.",
+            "Sua tarefa e decidir se a pergunta do cliente pode ser respondida SOMENTE com base no contexto autorizado.",
+            "Se a pergunta depender de informacao sobre a propria empresa, servicos, horarios, equipe, visitas, capacidade operacional, precos, politicas internas ou qualquer dado institucional nao EXPLICITAMENTE presente no contexto, responda exatamente com [ESCALATE_ADMIN].",
+            "Se o contexto trouxer suporte explicito e suficiente para responder com seguranca, responda exatamente com [ALLOW].",
+            "Conhecimento geral sobre empresas de tecnologia NAO conta como contexto.",
+            "Nao explique, nao invente e nao use nenhuma outra palavra."
+          ].join("\n"),
+          messages: [
+            {
+              role: "user",
+              content: [
+                `Pergunta do cliente: "${params.question}"`,
+                "",
+                "Contexto autorizado:",
+                params.groundingContext,
+                "",
+                "Responda somente com [ALLOW] ou [ESCALATE_ADMIN]."
+              ].join("\n")
+            }
+          ]
+        },
+        0,
+        params.config
+      );
+
+      return !/\[ALLOW\]/i.test(response ?? "");
+    } catch (err) {
+      console.error("[chatbot:grounding-check] erro ao validar contexto institucional:", err);
+      return true;
+    }
+  }
+
+  private async getGlobalSystemPrompt(): Promise<string | null> {
+    if (this.globalSystemPromptCache !== undefined) {
+      return this.globalSystemPromptCache;
+    }
+
+    const setting = await this.platformPrisma.platformSetting.findUnique({
+      where: {
+        key: chatbotGlobalSystemPromptSettingKey
+      }
+    });
+
+    const resolvedPrompt = typeof setting?.value === "string" && setting.value.trim() ? setting.value.trim() : null;
+    this.globalSystemPromptCache = resolvedPrompt;
+    return resolvedPrompt;
+  }
+
   private async getContext(tenantId: string, instanceId: string): Promise<{
     prisma: Awaited<ReturnType<TenantPrismaRegistry["getClient"]>>;
     config: ChatbotConfig;
@@ -562,6 +658,7 @@ public async simulate(
             audioEnabled: false,
             visionEnabled: false,
             visionPrompt: null,
+            responseDelayMs: 3_000,
             leadAutoExtract: false,
             leadVehicleTable: {},
             leadPriceTable: {},
@@ -692,6 +789,7 @@ private async evaluateConfig(
       audioEnabled?: boolean | null;
       visionEnabled?: boolean | null;
       visionPrompt?: string | null;
+      responseDelayMs?: number | null;
       leadAutoExtract?: boolean | null;
       leadVehicleTable?: unknown;
       leadPriceTable?: unknown;
@@ -728,6 +826,7 @@ private async evaluateConfig(
       audioEnabled: record.audioEnabled ?? false,
       visionEnabled: record.visionEnabled ?? false,
       visionPrompt: record.visionPrompt ?? null,
+      responseDelayMs: record.responseDelayMs ?? 3_000,
       leadAutoExtract: record.leadAutoExtract ?? false,
       leadVehicleTable:
         record.leadVehicleTable && typeof record.leadVehicleTable === "object"
@@ -1340,6 +1439,27 @@ private async evaluateConfig(
         config.ai.systemPrompt,
         config.ai.maxContextMessages
       );
+
+      if (
+        input.text?.trim() &&
+        this.isInstitutionalQuestion(input.text) &&
+        await this.shouldEscalateInstitutionalQuestion({
+          tenantId,
+          question: input.text,
+          groundingContext: conversation.groundingContext,
+          managedAiProvider,
+          apiKey,
+          config
+        })
+      ) {
+        return {
+          action: "ESCALATE_ADMIN",
+          matchedRuleId: null,
+          matchedRuleName: `${managedAiProvider.provider}:${managedAiProvider.model}`,
+          responseText: ""
+        };
+      }
+
       let toolRuntime: ChatbotToolRuntime | undefined;
       const googleCalendarConfigResult = googleCalendarModuleSchema.safeParse(config.modules?.googleCalendar);
 
@@ -1448,10 +1568,14 @@ private async evaluateConfig(
   ): Promise<{
     system: string;
     messages: Array<{ role: "user" | "assistant"; content: string }>;
+    groundingContext: string;
   }> {
     const normalizedPhoneNumber = normalizePhoneNumber(input.phoneNumber);
+    const baseSystemPrompt = systemPrompt.trim() || defaultAiSettings.systemPrompt;
+    const globalSystemPrompt = await this.getGlobalSystemPrompt();
     const systemParts = [
-      systemPrompt.trim() || defaultAiSettings.systemPrompt,
+      ...(globalSystemPrompt ? [`### PROMPT GLOBAL DA PLATAFORMA ###\n${globalSystemPrompt}`] : []),
+      baseSystemPrompt,
       `Data atual: ${formatDate(new Date())} ${formatTime(new Date())}.`,
       `Numero exato do cliente: ${normalizedPhoneNumber}.`,
       "### REGRAS GERAIS ###",
@@ -1461,7 +1585,14 @@ private async evaluateConfig(
       "7. Se o cliente parecer frustrado ou impaciente, reconheca antes de responder.",
       "8. Quando o cliente se despedir (tchau, ate logo, obrigado etc), responda de forma calorosa e encerre a conversa.",
       "9. Nunca diga que voce e uma IA a menos que o cliente pergunte diretamente.",
-      "10. Se o cliente perguntar seu nome, use o nome definido no prompt da instancia."
+      "10. Se o cliente perguntar seu nome, use o nome definido no prompt da instancia.",
+      "11. Perguntas sobre a propria empresa, servicos oferecidos, horarios, equipe, visitas presenciais, quantidade de funcionarios, capacidade tecnica ou politicas internas so podem ser respondidas se a informacao estiver EXPLICITAMENTE no contexto autorizado.",
+      "12. Se a pergunta institucional nao estiver explicitamente documentada no prompt da instancia, no memory.md ou no conhecimento aprendido, responda com [ESCALATE_ADMIN].",
+      "13. Nunca use suposicoes sobre o que empresas de tecnologia normalmente fazem."
+    ];
+    const groundingSources = [
+      ...(globalSystemPrompt ? [globalSystemPrompt] : []),
+      baseSystemPrompt
     ];
 
     const memoryFilePath = join(this.config.DATA_DIR, "tenants", tenantId, "instances", instanceId, "memory.md");
@@ -1469,6 +1600,7 @@ private async evaluateConfig(
       const memoryContent = await readFile(memoryFilePath, "utf-8");
       if (memoryContent.trim()) {
         systemParts.push(`\n--- CONTEXTO LOCAL (memory.md) ---\n${memoryContent.trim()}`);
+        groundingSources.push(memoryContent.trim());
       }
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
@@ -1478,12 +1610,14 @@ private async evaluateConfig(
 
     if (input.clientContext?.trim()) {
       systemParts.push(input.clientContext.trim());
+      groundingSources.push(input.clientContext.trim());
     }
 
     if (this.knowledgeService) {
       const knowledgeBlock = await this.knowledgeService.buildContextBlock(tenantId, instanceId);
       if (knowledgeBlock) {
         systemParts.push(knowledgeBlock);
+        groundingSources.push(knowledgeBlock);
       }
     }
 
@@ -1556,7 +1690,8 @@ private async evaluateConfig(
 
     return {
       system,
-      messages
+      messages,
+      groundingContext: groundingSources.join("\n\n").trim()
     };
   }
 

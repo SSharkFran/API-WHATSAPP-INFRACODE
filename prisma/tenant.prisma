@@ -178,6 +178,7 @@ model ChatbotConfig {
   audioEnabled     Boolean  @default(false)
   visionEnabled    Boolean  @default(false)
   visionPrompt     String?
+  responseDelayMs  Int      @default(3000)
   leadAutoExtract  Boolean  @default(false)
   leadVehicleTable Json     @default("{}")
   leadPriceTable   Json     @default("{}")

@@ -164,6 +164,7 @@ interface PendingConversationTurnContext {
     audioEnabled?: boolean | null;
     visionEnabled?: boolean | null;
     visionPrompt?: string | null;
+    responseDelayMs?: number | null;
     leadAutoExtract?: boolean | null;
   } | null;
   conversationId: string;
@@ -181,13 +182,15 @@ interface ConversationSession extends BaseConversationSession {
 
 const buildWorkerKey = (tenantId: string, instanceId: string): string => `${tenantId}:${instanceId}`;
 const leadExtractionAwaitingTimeoutMs = 120_000;
-const initialAiResponseDelayMs = 10_000;
+const defaultChatbotResponseDelayMs = 3_000;
 const adminEscalationTimeoutMs = 30 * 60 * 1000;
 const formatCurrencyValue = (value: number): string =>
   new Intl.NumberFormat("pt-BR", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2
   }).format(value);
+const resolveChatbotResponseDelayMs = (value?: number | null): number =>
+  Math.min(60_000, Math.max(0, value ?? defaultChatbotResponseDelayMs));
 
 /**
  * Orquestra o ciclo de vida das instancias WhatsApp em workers isolados.
@@ -2388,6 +2391,8 @@ if (event.status === "CONNECTED") {
       clearTimeout(session.debounceTimer);
     }
 
+    const responseDelayMs = resolveChatbotResponseDelayMs(context.chatbotConfig?.responseDelayMs);
+
     session.debounceTimer = setTimeout(() => {
       session.debounceTimer = null;
 
@@ -2397,7 +2402,7 @@ if (event.status === "CONNECTED") {
       }
 
       void this.processQueuedConversationTurn(session);
-    }, initialAiResponseDelayMs);
+    }, responseDelayMs);
   }
 
   private async processQueuedConversationTurn(session: ConversationSession): Promise<void> {

@@ -855,6 +855,22 @@ private async evaluateConfig(
       return aiResult;
     }
 
+    const aprendizadoContinuoModule = getAprendizadoContinuoModuleConfig(config.modules);
+
+    if (
+      normalizedInput &&
+      aprendizadoContinuoModule?.isEnabled === true &&
+      aprendizadoContinuoModule.verificationStatus === "VERIFIED" &&
+      this.isInstitutionalQuestion(input.text ?? "")
+    ) {
+      return {
+        action: "ESCALATE_ADMIN",
+        matchedRuleId: null,
+        matchedRuleName: "Fallback:institutional_question_without_ai_result",
+        responseText: ""
+      };
+    }
+
     if (normalizedInput && config.fallbackMessage?.trim()) {
       return {
         action: "FALLBACK",
@@ -864,12 +880,20 @@ private async evaluateConfig(
       };
     }
 
-    const aprendizadoContinuoModule = getAprendizadoContinuoModuleConfig(config.modules);
     if (normalizedInput && aprendizadoContinuoModule?.isEnabled !== true) {
       return {
         action: "FALLBACK",
         matchedRuleId: null,
         matchedRuleName: "Fallback:aprendizado_continuo_disabled",
+        responseText: defaultNoEscalationFallbackMessage
+      };
+    }
+
+    if (normalizedInput) {
+      return {
+        action: "FALLBACK",
+        matchedRuleId: null,
+        matchedRuleName: "Fallback:no_match_without_response",
         responseText: defaultNoEscalationFallbackMessage
       };
     }

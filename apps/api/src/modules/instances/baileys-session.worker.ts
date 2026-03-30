@@ -10,6 +10,7 @@ import {
   fetchLatestBaileysVersion,
   makeInMemoryStore,
   makeWASocket,
+  proto,
   type AnyMessageContent,
   type WASocket
 } from "@whiskeysockets/baileys";
@@ -67,6 +68,8 @@ interface UpsertMessageEvent {
       participant?: string | null;
     };
     message?: Record<string, unknown> | null;
+    messageStubType?: number | null;
+    messageStubParameters?: unknown[] | null;
     pushName?: string | null;
   }>;
 }
@@ -725,7 +728,30 @@ const startSocket = async (): Promise<void> => {
 
           const { messages } = payload as UpsertMessageEvent;
           for (const message of messages) {
-            if (!message.key.remoteJid || !message.message) {
+            if (!message.key.remoteJid) {
+              continue;
+            }
+
+            if (message.messageStubType === proto.WebMessageInfo.StubType.CIPHERTEXT) {
+              const stubReason = Array.isArray(message.messageStubParameters)
+                ? message.messageStubParameters
+                    .filter((value: unknown): value is string => typeof value === "string")
+                    .join(" | ")
+                : undefined;
+
+              log("warn", "Mensagem recebida como ciphertext no worker", {
+                instanceId: init.instanceId,
+                remoteJid: message.key.remoteJid,
+                externalMessageId: message.key.id ?? undefined,
+                stubReason
+              });
+              recordDecryptFailureSignal("failed to decrypt message", {
+                reason: stubReason ?? "ciphertext_stub"
+              });
+              continue;
+            }
+
+            if (!message.message) {
               continue;
             }
 

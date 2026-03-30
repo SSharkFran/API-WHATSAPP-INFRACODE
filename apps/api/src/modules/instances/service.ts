@@ -1389,7 +1389,15 @@ if (event.status === "CONNECTED") {
       [params.event.remoteJid, params.senderJid]
     );
 
-    if (!matchesConfiguredPhone && !matchesChallengeMessage && !matchesChallengeChat) {
+    const matchesChallengeAlias = this.matchesAnyExpectedJids(
+      [aprendizadoContinuoModule.challengeRemoteJid],
+      [
+        (params.contactFields?.sharedPhoneJid as string) ?? null,
+        (params.contactFields?.lastRemoteJid as string) ?? null
+      ]
+    );
+
+    if (!matchesConfiguredPhone && !matchesChallengeMessage && !matchesChallengeChat && !matchesChallengeAlias) {
       console.warn("[aprendizado-continuo] codigo de verificacao recebido, mas remetente nao corresponde ao admin esperado", {
         challengeRemoteJid: aprendizadoContinuoModule.challengeRemoteJid,
         configuredAdminPhone: aprendizadoContinuoModule.configuredAdminPhone,

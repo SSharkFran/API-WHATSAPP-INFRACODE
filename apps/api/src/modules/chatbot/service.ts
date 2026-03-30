@@ -607,9 +607,9 @@ public async simulate(
             {
               role: "user",
               content: [
-                `Pergunta original do cliente: "${originalQuestion}"`,
-                `Informacao do administrador: "${adminRawAnswer}"`,
-                "Formule a resposta para o cliente:"
+                `Pergunta original do cliente: ${originalQuestion}`,
+                `Informacao do administrador: ${adminRawAnswer}`,
+                "Formule a resposta para o cliente (sem usar aspas ao redor da resposta):"
               ].join("\n")
             }
           ]
@@ -1918,7 +1918,7 @@ private async evaluateConfig(
       '2. O cliente dita o nome: Se ele disser "me chamo X", use X.',
       "6. Nunca invente informacoes, precos, datas ou dados que nao estao no contexto.",
       "7. Se o cliente parecer frustrado ou impaciente, reconheca antes de responder.",
-      "8. Quando o cliente se despedir (tchau, ate logo, obrigado etc), responda de forma calorosa e encerre a conversa.",
+      "8. Quando o cliente se despedir explicitamente (tchau, ate logo, boa noite, ate mais etc), responda de forma calorosa e diga que fica a disposicao. Nao force o encerramento da conversa. Se o cliente disser apenas 'obrigado' ou 'valeu', responda brevemente e deixe claro que continua disponivel.",
       "9. Nunca diga que voce e uma IA a menos que o cliente pergunte diretamente.",
       "10. Se o cliente perguntar seu nome, use o nome definido no prompt da instancia.",
       "11. Perguntas sobre a propria empresa, servicos oferecidos, horarios, equipe, visitas presenciais, quantidade de funcionarios, capacidade tecnica ou politicas internas so podem ser respondidas se a informacao estiver EXPLICITAMENTE no contexto autorizado.",

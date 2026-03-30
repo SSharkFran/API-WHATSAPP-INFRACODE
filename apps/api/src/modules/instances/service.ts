@@ -1873,10 +1873,10 @@ if (event.status === "CONNECTED") {
       | null;
     const humanTakeoverStartMessage =
       chatbotConfigWithTakeoverMessages?.humanTakeoverStartMessage?.trim() ||
-      "A partir de agora, seu atendimento será realizado por um especialista da Zelo. Em instantes ele entrará em contato. 🚗✨";
+      "A partir de agora, seu atendimento será realizado por um de nossos especialistas. Em instantes ele entrará em contato.";
     const humanTakeoverEndMessage =
       chatbotConfigWithTakeoverMessages?.humanTakeoverEndMessage?.trim() ||
-      "Olá! Estou de volta para te ajudar. Como posso te atender? 🚗";
+      "Olá! Estou de volta para te ajudar. Como posso te atender?";
     const sanitizedChatbotModules = sanitizeChatbotModules(chatbotConfig?.modules);
     const aprendizadoContinuoModule = getAprendizadoContinuoModuleConfig(sanitizedChatbotModules);
     const senderJid = event.senderJid?.trim() || event.remoteJid;
@@ -2681,17 +2681,6 @@ if (event.status === "CONNECTED") {
           }
         }
 
-        if (canProcessAprendizadoContinuoReply) {
-          await this.sendAutomatedTextMessage(
-            tenantId,
-            instance.id,
-            remoteNumber,
-            event.remoteJid,
-            "Nao encontrei nenhum aprendizado pendente nesta instancia agora.",
-            { action: "admin_learning_no_pending", kind: "chatbot" }
-          );
-          return;
-        }
       }
 
       if (finalInputText && activeConversation.awaitingAdminResponse && !canProcessAprendizadoContinuoReply) {

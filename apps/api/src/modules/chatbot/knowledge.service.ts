@@ -68,7 +68,7 @@ export class KnowledgeService {
     }
 
     const lines = records.map(
-      (record, index) => `${index + 1}. Pergunta: "${record.question}"\n   Resposta: "${record.answer}"`
+      (record, index) => `${index + 1}. Pergunta: "${record.question}"\n   Resposta: ${record.answer}`
     );
 
     return [

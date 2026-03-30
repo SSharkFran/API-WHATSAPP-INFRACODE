@@ -625,7 +625,7 @@ const startSocket = async (): Promise<void> => {
   const currentStartPromise = (async () => {
     try {
       stopping = false;
-      recentDecryptFailureTimestamps.length = 0;
+      decryptFailureBurstDetector.reset();
       emitStatus("INITIALIZING");
       await disconnectSocket();
       closeAuthStore?.();
@@ -692,7 +692,7 @@ const startSocket = async (): Promise<void> => {
 
           if (event.connection === "open") {
             reconnectAttempts = 0;
-            recentDecryptFailureTimestamps.length = 0;
+            decryptFailureBurstDetector.reset();
             clearPendingReconnect();
             emitStatus("CONNECTED");
             log("info", "Instancia conectada com sucesso");

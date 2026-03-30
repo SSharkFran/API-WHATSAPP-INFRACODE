@@ -10,6 +10,10 @@ import type { MessageType, SendMessagePayload } from "@infracode/types";
 import QRCode from "qrcode";
 import { resolveReconnectDelay } from "../../lib/backoff.js";
 import { useSqliteAuthState } from "./baileys-auth-store.js";
+import {
+  DECRYPT_FAILURE_BURST_THRESHOLD,
+  createDecryptFailureBurstDetector
+} from "./decrypt-failure-burst.js";
 
 const {
   DisconnectReason,
@@ -94,10 +98,8 @@ let socketGeneration = 0;
 let decryptFailureRecoveryPromise: Promise<void> | null = null;
 const store = makeInMemoryStore({});
 const RESOLVED_JID_CACHE_TTL_MS = 5 * 60 * 1000;
-const DECRYPT_FAILURE_BURST_WINDOW_MS = 30_000;
-const DECRYPT_FAILURE_BURST_THRESHOLD = 2;
 const resolvedJidCache = new Map<string, { jid: string; timeout: NodeJS.Timeout }>();
-const recentDecryptFailureTimestamps: number[] = [];
+const decryptFailureBurstDetector = createDecryptFailureBurstDetector();
 
 const clearResolvedJidCache = (): void => {
   for (const entry of resolvedJidCache.values()) {
@@ -216,7 +218,7 @@ const normalizeBaileysContext = (value: unknown): Record<string, unknown> | unde
   return Object.keys(output).length > 0 ? output : undefined;
 };
 
-const scheduleDecryptFailureRecovery = (): void => {
+const scheduleDecryptFailureRecovery = (recentFailures: number): void => {
   if (stopping || decryptFailureRecoveryPromise) {
     return;
   }
@@ -224,7 +226,8 @@ const scheduleDecryptFailureRecovery = (): void => {
   decryptFailureRecoveryPromise = (async () => {
     log("warn", "Rajada de falhas de decrypt detectada, reiniciando o socket", {
       instanceId: init.instanceId,
-      recentFailures: recentDecryptFailureTimestamps.length
+      recentFailures,
+      threshold: DECRYPT_FAILURE_BURST_THRESHOLD
     });
 
     try {
@@ -249,27 +252,10 @@ const scheduleDecryptFailureRecovery = (): void => {
 };
 
 const recordDecryptFailureSignal = (message: string, context?: Record<string, unknown>): void => {
-  const errorText = [message, context?.error, context?.err, context?.reason]
-    .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
-    .join(" ");
+  const result = decryptFailureBurstDetector.recordSignal(message, context);
 
-  if (!/bad mac|failed to decrypt|decrypt message/i.test(errorText)) {
-    return;
-  }
-
-  const now = Date.now();
-  recentDecryptFailureTimestamps.push(now);
-
-  while (
-    recentDecryptFailureTimestamps.length > 0 &&
-    now - recentDecryptFailureTimestamps[0]! > DECRYPT_FAILURE_BURST_WINDOW_MS
-  ) {
-    recentDecryptFailureTimestamps.shift();
-  }
-
-  if (recentDecryptFailureTimestamps.length >= DECRYPT_FAILURE_BURST_THRESHOLD) {
-    recentDecryptFailureTimestamps.length = 0;
-    scheduleDecryptFailureRecovery();
+  if (result.shouldRecover) {
+    scheduleDecryptFailureRecovery(result.failureCount);
   }
 };
 
@@ -753,6 +739,8 @@ const startSocket = async (): Promise<void> => {
                 stubReason
               });
               recordDecryptFailureSignal("failed to decrypt message", {
+                externalMessageId: message.key.id ?? undefined,
+                remoteJid: message.key.remoteJid,
                 reason: stubReason ?? "ciphertext_stub"
               });
               continue;

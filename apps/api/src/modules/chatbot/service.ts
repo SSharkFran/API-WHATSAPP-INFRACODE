@@ -15,6 +15,7 @@ import {
   normalizeWhatsAppPhoneNumber,
   toJid
 } from "../../lib/phone.js";
+import { GroqKeyRotator } from "../../lib/groq-key-rotator.js";
 import type { ChatMessage } from "./agents/types.js";
 import { getAprendizadoContinuoModuleConfig, sanitizeChatbotModules } from "./module-runtime.js";
 import { chatbotAiConfigSchema, chatbotRuleSchema, googleCalendarModuleSchema, upsertChatbotAiBodySchema } from "./schemas.js";
@@ -280,6 +281,7 @@ export class ChatbotService {
   private readonly tenantPrismaRegistry: TenantPrismaRegistry;
   private readonly platformAlertService?: PlatformAlertService;
   private readonly knowledgeService?: KnowledgeService;
+  private readonly groqKeyRotator: GroqKeyRotator;
   private globalSystemPromptCache: string | null | undefined;
 
   public constructor(deps: ChatbotServiceDeps) {
@@ -288,6 +290,13 @@ export class ChatbotService {
     this.tenantPrismaRegistry = deps.tenantPrismaRegistry;
     this.platformAlertService = deps.platformAlertService;
     this.knowledgeService = deps.knowledgeService;
+
+    const extraKeys = (deps.config.GROQ_EXTRA_API_KEYS ?? "")
+      .split(",")
+      .map((k) => k.trim())
+      .filter(Boolean);
+    this.groqKeyRotator = new GroqKeyRotator([deps.config.GROQ_API_KEY, ...extraKeys]);
+    console.log(`[groq-rotator] inicializado com ${this.groqKeyRotator.size} chave(s)`);
   }
 
   public setPlatformAlertService(service: PlatformAlertService): void {
@@ -2054,20 +2063,51 @@ private async evaluateConfig(
     toolRuntime?: ChatbotToolRuntime
   ): Promise<string | null> {
     const primaryProviderLabel = managedAiProvider.provider ?? "provider principal";
+    const isGroqProvider = primaryProviderLabel === "GROQ" || primaryProviderLabel === "OPENAI_COMPATIBLE";
 
     try {
-      return await this.requestOpenAiCompatibleCompletion(
+      const result = await this.requestOpenAiCompatibleCompletion(
         managedAiProvider,
         apiKey,
         conversation,
         temperature,
         toolRuntime
       );
+      if (isGroqProvider) {
+        this.groqKeyRotator.reportSuccess(apiKey);
+      }
+      return result;
     } catch (err: unknown) {
       const fetchErr = err as { status?: number; statusCode?: number; message?: string };
       const status = fetchErr?.status ?? fetchErr?.statusCode;
       const isRateLimit = status === 429;
       const isServerError = status !== undefined && status >= 500;
+
+      if (isGroqProvider && isRateLimit) {
+        this.groqKeyRotator.reportFailure(apiKey, status ?? 429);
+
+        const alternativeKeys = this.groqKeyRotator.availableKeys().filter((k) => k !== apiKey);
+        for (const altKey of alternativeKeys) {
+          console.warn(`[chatbot:ai] ${primaryProviderLabel} 429, tentando chave alternativa GROQ ...${altKey.slice(-6)}`);
+          try {
+            const result = await this.requestOpenAiCompatibleCompletion(
+              managedAiProvider,
+              altKey,
+              conversation,
+              temperature,
+              toolRuntime
+            );
+            this.groqKeyRotator.reportSuccess(altKey);
+            return result;
+          } catch (altErr: unknown) {
+            const altStatus = (altErr as { status?: number })?.status;
+            this.groqKeyRotator.reportFailure(altKey, altStatus ?? 500);
+            console.warn(`[chatbot:ai] chave alternativa ...${altKey.slice(-6)} falhou (${altStatus})`);
+          }
+        }
+
+        console.warn(`[chatbot:ai] todas as chaves GROQ indisponiveis, tentando fallback externo`);
+      }
 
       if (
         (isRateLimit || isServerError) &&

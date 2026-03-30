@@ -1985,8 +1985,23 @@ if (event.status === "CONNECTED") {
         }
       }
 
-      if (activeConversation.awaitingLeadExtraction) {
+      if (
+        activeConversation.awaitingLeadExtraction &&
+        !isAdminOrInstanceSender &&
+        !hasPendingEscalationsForAdminBypass
+      ) {
         return;
+      }
+
+      if (activeConversation.awaitingLeadExtraction && (isAdminOrInstanceSender || hasPendingEscalationsForAdminBypass)) {
+        console.log("[escalation] ignorando awaitingLeadExtraction do chat do admin para processar aprendizado pendente", {
+          activeConversationId: activeConversation.id,
+          hasPendingEscalationsForAdminBypass,
+          instanceId: instance.id,
+          isAdminOrInstanceSender,
+          remoteJid: event.remoteJid,
+          senderJid
+        });
       }
 
       const clientMemory = await this.clientMemoryService.findByPhone(tenantId, resolvedContactNumber);

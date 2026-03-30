@@ -1,0 +1,250 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../prisma/generated/tenant-client"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("TENANT_DATABASE_URL")
+  directUrl = env("TENANT_DIRECT_DATABASE_URL")
+}
+
+model Instance {
+  id                String          @id @default(cuid())
+  name              String
+  phoneNumber       String?
+  avatarUrl         String?
+  status            String          @default("INITIALIZING")
+  authDirectory     String
+  sessionDbPath     String
+  proxyUrl          String?
+  workerHeartbeatAt DateTime?
+  reconnectAttempts Int             @default(0)
+  riskScore         Int             @default(0)
+  lastError         String?
+  lastActivityAt    DateTime?
+  connectedAt       DateTime?
+  pausedAt          DateTime?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  usage             InstanceUsage?
+  messages          Message[]
+  webhookEndpoint   WebhookEndpoint?
+  chatbotConfig     ChatbotConfig?
+  fiadoTabs         FiadoTab[]
+  contacts          Contact[]
+  conversations     Conversation[]
+  knowledge         TenantKnowledge[]
+
+  @@index([status])
+}
+
+model InstanceUsage {
+  id               String   @id @default(cuid())
+  instanceId       String   @unique
+  messagesSent     Int      @default(0)
+  messagesReceived Int      @default(0)
+  errors           Int      @default(0)
+  uptimeSeconds    Int      @default(0)
+  lastResetAt      DateTime @default(now())
+  instance         Instance @relation(fields: [instanceId], references: [id], onDelete: Cascade)
+}
+
+model Message {
+  id                String   @id @default(cuid())
+  instanceId        String
+  remoteJid         String
+  externalMessageId String?
+  direction         String
+  type              String
+  status            String
+  payload           Json
+  traceId           String?
+  errorMessage      String?
+  scheduledAt       DateTime?
+  sentAt            DateTime?
+  deliveredAt       DateTime?
+  readAt            DateTime?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  instance          Instance @relation(fields: [instanceId], references: [id], onDelete: Cascade)
+
+  @@index([instanceId, createdAt])
+  @@index([status])
+}
+
+model WebhookEndpoint {
+  id               String            @id @default(cuid())
+  instanceId       String            @unique
+  url              String
+  secretEncrypted  String
+  headers          Json
+  subscribedEvents String[]
+  isActive         Boolean           @default(true)
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  instance         Instance          @relation(fields: [instanceId], references: [id], onDelete: Cascade)
+  deliveries       WebhookDelivery[]
+}
+
+model WebhookDelivery {
+  id                String          @id @default(cuid())
+  webhookEndpointId String
+  eventType         String
+  payload           Json
+  status            String          @default("PENDING")
+  attempt           Int             @default(0)
+  httpStatus        Int?
+  responseBody      String?
+  nextRetryAt       DateTime?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  webhookEndpoint   WebhookEndpoint @relation(fields: [webhookEndpointId], references: [id], onDelete: Cascade)
+
+  @@index([webhookEndpointId, status])
+}
+
+model Contact {
+  id            String         @id @default(cuid())
+  instanceId    String
+  phoneNumber   String
+  displayName   String?
+  fields        Json?
+  notes         String?
+  isBlacklisted Boolean        @default(false)
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  instance      Instance       @relation(fields: [instanceId], references: [id], onDelete: Cascade)
+  conversations Conversation[]
+
+  @@unique([instanceId, phoneNumber])
+}
+
+model Conversation {
+  id               String   @id @default(cuid())
+  instanceId       String
+  contactId        String
+  phoneNumber      String?
+  assignedToUserId String?
+  status           String   @default("OPEN")
+  tags             String[] @default([])
+  leadSent         Boolean  @default(false)
+  awaitingLeadExtraction Boolean @default(false)
+  humanTakeover    Boolean  @default(false)
+  humanTakeoverAt  DateTime?
+  aiDisabledPermanent Boolean @default(false)
+  awaitingAdminResponse Boolean @default(false)
+  pendingClientQuestion String?
+  pendingClientJid      String?
+  pendingClientConversationId String?
+  slaDeadlineAt    DateTime?
+  lastMessageAt    DateTime?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  instance         Instance @relation(fields: [instanceId], references: [id], onDelete: Cascade)
+  contact          Contact  @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  @@index([status])
+}
+
+model MessageTemplate {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  body      String
+  variables String[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model ChatbotConfig {
+  id              String   @id @default(cuid())
+  instanceId      String   @unique
+  isEnabled       Boolean  @default(false)
+  welcomeMessage  String?
+  fallbackMessage String?
+  humanTakeoverStartMessage String?
+  humanTakeoverEndMessage String?
+  rules           Json
+  aiSettings      Json?
+  aiApiKeyEncrypted   String?
+  aiFallbackProvider String?
+  aiFallbackApiKey   String?
+  aiFallbackModel    String?
+  leadsGroupJid      String?
+  leadsGroupName  String?
+  leadsPhoneNumber String?
+  leadsEnabled     Boolean  @default(true)
+  fiadoEnabled     Boolean  @default(false)
+  audioEnabled     Boolean  @default(false)
+  visionEnabled    Boolean  @default(false)
+  visionPrompt     String?
+  responseDelayMs  Int      @default(3000)
+  leadAutoExtract  Boolean  @default(false)
+  leadVehicleTable Json     @default("{}")
+  leadPriceTable   Json     @default("{}")
+  leadSurchargeTable Json   @default("{}")
+  modules          Json     @default("{}")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  instance        Instance @relation(fields: [instanceId], references: [id], onDelete: Cascade)
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  actorType  String
+  actorId    String
+  action     String
+  ipAddress  String
+  targetType String
+  targetId   String
+  payload    Json
+  signature  String
+  createdAt  DateTime @default(now())
+
+  @@index([createdAt])
+}
+
+model ClientMemory {
+  id                 String   @id @default(cuid())
+  phoneNumber        String   @unique
+  name               String?
+  isExistingClient   Boolean  @default(false)
+  projectDescription String?
+  serviceInterest    String?
+  status             String   @default("lead_frio")
+  tags               String[] @default([])
+  notes              String?
+  lastContactAt      DateTime @default(now())
+  scheduledAt        DateTime?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+}
+
+model TenantKnowledge {
+  id         String   @id @default(cuid())
+  instanceId String
+  question   String
+  answer     String
+  rawAnswer  String?
+  taughtBy   String?
+  createdAt  DateTime @default(now())
+
+  instance   Instance @relation(fields: [instanceId], references: [id], onDelete: Cascade)
+
+  @@index([instanceId])
+}
+
+model FiadoTab {
+  id          String    @id
+  instanceId  String
+  phoneNumber String
+  displayName String?
+  total       Decimal   @default(0) @db.Decimal(10, 2)
+  items       Json
+  paidAt      DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  instance    Instance  @relation(fields: [instanceId], references: [id], onDelete: Cascade)
+
+  @@unique([instanceId, phoneNumber])
+}

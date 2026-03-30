@@ -1667,10 +1667,15 @@ if (event.status === "CONNECTED") {
     const sessionKey = this.buildConversationSessionKey(instance.id, event.remoteJid);
     const msgText = typeof event.payload.text === "string" ? event.payload.text.trim().toLowerCase() : "";
     const rawTextInput = typeof event.payload.text === "string" ? event.payload.text.trim() : "";
+    const hasMeaningfulInboundContent = event.messageType !== "text" || rawTextInput.length > 0;
     const isTemporaryTakeoverCommand = msgText === "*";
     const isPermanentDisableCommand = msgText === "**";
     const isResetCommand = msgText === "/reset";
     const isControlCommand = isTemporaryTakeoverCommand || isPermanentDisableCommand || isResetCommand;
+    if (event.messageKey?.fromMe && !hasMeaningfulInboundContent) {
+      return;
+    }
+
     if (event.messageKey?.fromMe && event.externalMessageId) {
       if (this.consumeAutomatedOutboundEcho(instance.id, event.externalMessageId)) {
         return;
@@ -2340,6 +2345,7 @@ if (event.status === "CONNECTED") {
 
     if (
       isAdminOrInstanceSender &&
+      hasMeaningfulInboundContent &&
       !isControlCommand &&
       !shouldBypassDirectSenderTakeover &&
       !hasPendingEscalationsForAdminBypass

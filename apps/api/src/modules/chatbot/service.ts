@@ -549,10 +549,24 @@ public async simulate(
     const { config, managedAiProvider, prisma } = await this.getContext(tenantId, instanceId);
 
     if (!config.isEnabled) {
+      console.warn("[chatbot] mensagem ignorada porque o chatbot principal esta desativado", {
+        instanceId,
+        tenantId,
+        textPreview: input.text?.slice(0, 120) ?? ""
+      });
       return null;
     }
 
     const result = await this.evaluateConfig(tenantId, prisma, config, managedAiProvider, input);
+
+    if (result.action === "NO_MATCH") {
+      console.warn("[chatbot] mensagem sem resposta apos avaliacao", {
+        instanceId,
+        tenantId,
+        textPreview: input.text?.slice(0, 120) ?? ""
+      });
+    }
+
     return result.action === "NO_MATCH" ? null : result;
   }
 

@@ -825,12 +825,20 @@ export class InstanceOrchestrator {
       });
     });
 
-    worker.on("exit", () => {
+    worker.on("exit", (code) => {
       const current = this.workers.get(workerKey);
 
       if (!current) {
         return;
       }
+
+      console.warn("[orchestrator] worker da instancia encerrado", {
+        code,
+        instanceId: instance.id,
+        paused: current.paused,
+        status: current.currentStatus,
+        tenantId
+      });
 
       for (const pending of current.pendingRequests.values()) {
         clearTimeout(pending.timeout);
@@ -977,6 +985,13 @@ export class InstanceOrchestrator {
 
     if (event.type === "status") {
       managedWorker.currentStatus = event.status;
+      console.log("[worker-status]", {
+        instanceId: instance.id,
+        lastError: event.lastError ?? null,
+        reconnectAttempts: event.reconnectAttempts ?? 0,
+        status: event.status,
+        tenantId
+      });
       this.metricsService.setInstanceStatus(instance.id, tenantId, event.status);
 
       const updated = await prisma.instance.update({
@@ -1976,6 +1991,12 @@ if (event.status === "CONNECTED") {
       });
       activeConversation.humanTakeover = false;
       activeConversation.humanTakeoverAt = null;
+      await this.clearPausedByHumanIfReleased({
+        tenantId,
+        phoneNumber: resolvedContactNumber,
+        conversation: activeConversation,
+        reason: "stale_tag"
+      });
     }
 
     if (
@@ -2064,6 +2085,12 @@ if (event.status === "CONNECTED") {
 
         activeConversation.humanTakeover = false;
         activeConversation.humanTakeoverAt = null;
+        await this.clearPausedByHumanIfReleased({
+          tenantId,
+          phoneNumber: resolvedContactNumber,
+          conversation: activeConversation,
+          reason: "takeover_ended"
+        });
 
         await this.sendAutomatedTextMessage(
           tenantId,
@@ -2521,7 +2548,16 @@ if (event.status === "CONNECTED") {
       }
 
       if (clientMemory?.tags.includes("paused_by_human")) {
-        return;
+        const removedPausedTag = await this.clearPausedByHumanIfReleased({
+          tenantId,
+          phoneNumber: resolvedContactNumber,
+          conversation: activeConversation,
+          reason: "stale_tag"
+        });
+
+        if (!removedPausedTag) {
+          return;
+        }
       }
 
       if (!finalInputText) {
@@ -2865,6 +2901,35 @@ if (event.status === "CONNECTED") {
     }
 
     this.conversationSessions.delete(sessionKey);
+  }
+
+  private async clearPausedByHumanIfReleased(params: {
+    tenantId: string;
+    phoneNumber: string;
+    conversation: {
+      id: string;
+      humanTakeover: boolean;
+      aiDisabledPermanent: boolean;
+    };
+    reason: "takeover_ended" | "stale_tag";
+  }): Promise<boolean> {
+    const normalizedPhoneNumber = normalizePhoneNumber(params.phoneNumber);
+
+    if (!normalizedPhoneNumber) {
+      return false;
+    }
+
+    if (params.conversation.humanTakeover || params.conversation.aiDisabledPermanent) {
+      return false;
+    }
+
+    await this.clientMemoryService.removeTag(params.tenantId, normalizedPhoneNumber, "paused_by_human");
+    console.log("[chatbot] removendo paused_by_human residual", {
+      conversationId: params.conversation.id,
+      phoneNumber: normalizedPhoneNumber,
+      reason: params.reason
+    });
+    return true;
   }
 
   private isSessionExecutionStale(session: ConversationSession, expectedGeneration: number): boolean {
@@ -3358,7 +3423,22 @@ if (event.status === "CONNECTED") {
     );
 
     if (clientMemory?.tags.includes("paused_by_human")) {
-      return;
+      const conversationStillBlocked = await this.isConversationAiBlocked(prisma, params.conversationId);
+
+      if (conversationStillBlocked) {
+        return;
+      }
+
+      await this.clearPausedByHumanIfReleased({
+        tenantId: params.tenantId,
+        phoneNumber: params.resolvedContactNumber,
+        conversation: {
+          id: params.conversationId,
+          humanTakeover: false,
+          aiDisabledPermanent: false
+        },
+        reason: "stale_tag"
+      });
     }
 
     if (await this.isConversationAiBlocked(prisma, params.conversationId)) {

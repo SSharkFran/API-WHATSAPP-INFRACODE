@@ -1873,7 +1873,20 @@ if (event.status === "CONNECTED") {
       this.matchesAnyExpectedPhones(adminCandidatePhones, [remoteChatNumber])
     );
     const isInstanceSelfChat = Boolean(isInstanceSender && instanceOwnPhone && remoteChatNumber === instanceOwnPhone);
-    const shouldBypassDirectSenderTakeover = isAdminSelfChat || isInstanceSelfChat;
+    // Admin verificado do aprendizadoContinuo nunca deve acionar human takeover no chat de alerta
+    const isVerifiedAdminEscalationChat = Boolean(isVerifiedAprendizadoContinuoAdminSender || isAdminLearningReply);
+    const shouldBypassDirectSenderTakeover = isAdminSelfChat || isInstanceSelfChat || isVerifiedAdminEscalationChat;
+
+    if (isVerifiedAprendizadoContinuoAdminSender) {
+      console.log("[aprendizado-continuo] remetente reconhecido como admin verificado", {
+        instanceId: instance.id,
+        remoteJid: event.remoteJid,
+        senderJid,
+        quotedLearningConversationId,
+        matchedVerifiedAdminPhone,
+        textPreview: rawTextInput.slice(0, 120)
+      });
+    }
 
     const conversation = await prisma.conversation.findFirst({
       where: {
@@ -2419,14 +2432,19 @@ if (event.status === "CONNECTED") {
       }
 
       const clientMemory = await this.clientMemoryService.findByPhone(tenantId, resolvedContactNumber);
+      // Permite comandos de ensino (/pitaco, /regra) para admin verificado via aprendizadoContinuo
+      const effectiveAdminPhone = matchedAdminPhone ??
+        (isVerifiedAprendizadoContinuoAdminSender
+          ? (matchedVerifiedAdminPhone ?? aprendizadoContinuoModule?.verifiedPhone ?? aprendizadoContinuoModule?.configuredAdminPhone ?? null)
+          : null);
       if (
         finalInputText &&
-        matchedAdminPhone &&
+        effectiveAdminPhone &&
         await this.adminMemoryService.handleAdminMessage(
           instance.id,
           tenantId,
-          matchedAdminPhone,
-          matchedAdminPhone,
+          effectiveAdminPhone,
+          effectiveAdminPhone,
           finalInputText
         )
       ) {

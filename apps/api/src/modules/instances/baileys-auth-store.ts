@@ -15,6 +15,7 @@ export interface SqliteAuthState {
  */
 export const useSqliteAuthState = async (databasePath: string): Promise<SqliteAuthState> => {
   const db = new Database(databasePath);
+  let closed = false;
   db.pragma("journal_mode = WAL");
   db.pragma("synchronous = NORMAL");
   db.exec(`
@@ -32,8 +33,30 @@ export const useSqliteAuthState = async (databasePath: string): Promise<SqliteAu
   `);
   const deleteStmt = db.prepare("DELETE FROM auth_state WHERE key = ?");
 
+  const isClosedConnectionError = (error: unknown): boolean =>
+    error instanceof Error && /database connection is not open/i.test(error.message);
+
+  const markClosed = (): void => {
+    closed = true;
+  };
+
   const readData = <TValue>(key: string): TValue | null => {
-    const row = selectStmt.get(key) as { value: string } | undefined;
+    if (closed) {
+      return null;
+    }
+
+    let row: { value: string } | undefined;
+    try {
+      row = selectStmt.get(key) as { value: string } | undefined;
+    } catch (error) {
+      if (isClosedConnectionError(error)) {
+        markClosed();
+        console.warn("[baileys-auth-store] leitura ignorada apos fechamento do SQLite auth store");
+        return null;
+      }
+
+      throw error;
+    }
 
     if (!row) {
       return null;
@@ -43,12 +66,36 @@ export const useSqliteAuthState = async (databasePath: string): Promise<SqliteAu
   };
 
   const writeData = (key: string, value: unknown | null): void => {
-    if (value === null) {
-      deleteStmt.run(key);
+    if (closed) {
       return;
     }
 
-    upsertStmt.run(key, JSON.stringify(value, BufferJSON.replacer));
+    if (value === null) {
+      try {
+        deleteStmt.run(key);
+      } catch (error) {
+        if (isClosedConnectionError(error)) {
+          markClosed();
+          console.warn("[baileys-auth-store] remocao ignorada apos fechamento do SQLite auth store");
+          return;
+        }
+
+        throw error;
+      }
+      return;
+    }
+
+    try {
+      upsertStmt.run(key, JSON.stringify(value, BufferJSON.replacer));
+    } catch (error) {
+      if (isClosedConnectionError(error)) {
+        markClosed();
+        console.warn("[baileys-auth-store] gravacao ignorada apos fechamento do SQLite auth store");
+        return;
+      }
+
+      throw error;
+    }
   };
 
   const creds = readData<AuthenticationState["creds"]>("creds") ?? initAuthCreds();
@@ -78,6 +125,10 @@ export const useSqliteAuthState = async (databasePath: string): Promise<SqliteAu
         return result;
       },
       set: async (data: SignalDataSet): Promise<void> => {
+        if (closed) {
+          return;
+        }
+
         const transaction = db.transaction((payload: SignalDataSet) => {
           for (const [category, values] of Object.entries(
             payload as Record<string, Record<string, unknown | null>>
@@ -88,7 +139,17 @@ export const useSqliteAuthState = async (databasePath: string): Promise<SqliteAu
           }
         });
 
-        transaction(data);
+        try {
+          transaction(data);
+        } catch (error) {
+          if (isClosedConnectionError(error)) {
+            markClosed();
+            console.warn("[baileys-auth-store] transacao ignorada apos fechamento do SQLite auth store");
+            return;
+          }
+
+          throw error;
+        }
       }
     }
   };
@@ -99,6 +160,11 @@ export const useSqliteAuthState = async (databasePath: string): Promise<SqliteAu
       writeData("creds", state.creds);
     },
     close: () => {
+      if (closed) {
+        return;
+      }
+
+      markClosed();
       try {
         db.close();
       } catch (error) {

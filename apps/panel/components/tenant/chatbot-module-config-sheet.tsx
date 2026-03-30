@@ -177,6 +177,21 @@ const defaultChatbotModuleConfigs: ChatbotModuleConfigByKey = {
     palavras: ["sair", "parar", "atendente"],
     mensagemPausa: "Tudo bem. Vou pausar o atendimento automático por aqui."
   },
+  aprendizadoContinuo: {
+    isEnabled: false,
+    verificationStatus: "UNVERIFIED",
+    configuredAdminPhone: null,
+    verifiedPhone: null,
+    pendingCode: null,
+    pendingCodeExpiresAt: null,
+    lastVerificationRequestedAt: null,
+    verifiedAt: null,
+    challengeMessageId: null,
+    challengeRemoteJid: null,
+    verifiedPhones: [],
+    verifiedRemoteJids: [],
+    verifiedSenderJids: []
+  },
   disparoMassa: {
     isEnabled: false,
     modeloMensagem: "",
@@ -595,6 +610,65 @@ export const ChatbotModuleConfigSheet = ({
                 value={moduleConfig.mensagemPausa}
                 onChange={(event) => updateConfig({ ...moduleConfig, mensagemPausa: event.target.value })}
               />
+            </div>
+          </div>
+        );
+      }
+
+      case "aprendizadoContinuo": {
+        const moduleConfig = currentConfig as NonNullable<ChatbotModules["aprendizadoContinuo"]>;
+        const statusLabel =
+          moduleConfig.verificationStatus === "VERIFIED"
+            ? "Verificado"
+            : moduleConfig.verificationStatus === "PENDING"
+              ? "Pendente"
+              : "Nao verificado";
+
+        return (
+          <div className="space-y-4">
+            <div className="rounded-[18px] border border-[var(--border-subtle)] bg-[var(--bg-tertiary)] p-4">
+              <p className="text-sm font-medium text-[var(--text-primary)]">Vinculo do admin</p>
+              <p className="mt-1 text-xs text-[var(--text-secondary)]">
+                Este modulo usa o numero do admin/leads configurado na instancia. Ao salvar com o modulo ativo,
+                o sistema envia uma mensagem pedindo a confirmacao do codigo exibido aqui no painel.
+              </p>
+              <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                <div className={checkboxPillClass}>
+                  <span className="text-[var(--text-tertiary)]">Status</span>
+                  <strong className="text-[var(--text-primary)]">{statusLabel}</strong>
+                </div>
+                <div className={checkboxPillClass}>
+                  <span className="text-[var(--text-tertiary)]">Admin configurado</span>
+                  <strong className="text-[var(--text-primary)]">{moduleConfig.configuredAdminPhone || "Nao definido"}</strong>
+                </div>
+                <div className={checkboxPillClass}>
+                  <span className="text-[var(--text-tertiary)]">Admin validado</span>
+                  <strong className="text-[var(--text-primary)]">{moduleConfig.verifiedPhone || "Aguardando"}</strong>
+                </div>
+                <div className={checkboxPillClass}>
+                  <span className="text-[var(--text-tertiary)]">Confirmado em</span>
+                  <strong className="text-[var(--text-primary)]">{moduleConfig.verifiedAt || "Ainda nao"}</strong>
+                </div>
+              </div>
+            </div>
+
+            <div className="rounded-[18px] border border-[var(--border-subtle)] bg-[var(--bg-tertiary)] p-4">
+              <p className="text-sm font-medium text-[var(--text-primary)]">Codigo do painel</p>
+              <p className="mt-1 text-xs text-[var(--text-secondary)]">
+                Responda no WhatsApp da instancia com este codigo para vincular esse chat como admin verificado.
+              </p>
+              <div className="mt-4 rounded-[16px] border border-dashed border-[var(--border-default)] bg-[var(--bg-primary)] px-4 py-5">
+                <p className="text-[10px] uppercase tracking-[0.24em] text-[var(--text-tertiary)]">Codigo atual</p>
+                <p className="mt-2 font-mono text-3xl font-semibold tracking-[0.3em] text-[var(--text-primary)]">
+                  {moduleConfig.pendingCode || "------"}
+                </p>
+                <p className="mt-3 text-xs text-[var(--text-secondary)]">
+                  Expira em: {moduleConfig.pendingCodeExpiresAt || "sem verificacao pendente"}
+                </p>
+                <p className="mt-1 text-xs text-[var(--text-secondary)]">
+                  Ultima solicitacao: {moduleConfig.lastVerificationRequestedAt || "nunca"}
+                </p>
+              </div>
             </div>
           </div>
         );

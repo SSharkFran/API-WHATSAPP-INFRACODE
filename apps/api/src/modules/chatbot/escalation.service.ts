@@ -1,6 +1,7 @@
 import type { TenantPrismaRegistry } from "../../lib/database.js";
 import type { PlatformAlertService } from "../platform/alert.service.js";
 import type { KnowledgeService } from "./knowledge.service.js";
+import type { Prisma } from "../../../../../prisma/generated/tenant-client/index.js";
 
 interface EscalationServiceDeps {
   tenantPrismaRegistry: TenantPrismaRegistry;
@@ -63,6 +64,24 @@ export class EscalationService {
     }
 
     return null;
+  }
+
+  public linkAdminAlertChatAlias(
+    aliasRemoteJid?: string | null,
+    canonicalRemoteJid?: string | null
+  ): string | null {
+    const resolvedConversationId =
+      this.resolveConversationIdByAdminAlertChat(canonicalRemoteJid) ??
+      this.resolveConversationIdByAdminAlertChat(aliasRemoteJid);
+
+    if (!resolvedConversationId) {
+      return null;
+    }
+
+    this.trackAdminAlertChat(aliasRemoteJid, resolvedConversationId);
+    this.trackAdminAlertChat(canonicalRemoteJid, resolvedConversationId);
+
+    return resolvedConversationId;
   }
 
   /**
@@ -132,6 +151,48 @@ export class EscalationService {
       }
 
       this.trackAdminAlertRouting(result.externalMessageId, result.remoteJid, ctx.conversationId);
+      const existingAdminContact = await prisma.contact.findUnique({
+        where: {
+          instanceId_phoneNumber: {
+            instanceId: ctx.instanceId,
+            phoneNumber: normalizedAdminPhone
+          }
+        },
+        select: {
+          fields: true
+        }
+      });
+      const existingAdminContactFields =
+        existingAdminContact?.fields && typeof existingAdminContact.fields === "object"
+          ? (existingAdminContact.fields as Record<string, unknown>)
+          : {};
+
+      await prisma.contact.upsert({
+        where: {
+          instanceId_phoneNumber: {
+            instanceId: ctx.instanceId,
+            phoneNumber: normalizedAdminPhone
+          }
+        },
+        update: {
+          fields: {
+            ...existingAdminContactFields,
+            adminAlertPhone: true,
+            lastRemoteJid: result.remoteJid ?? `${normalizedAdminPhone}@s.whatsapp.net`,
+            sharedPhoneJid: `${normalizedAdminPhone}@s.whatsapp.net`
+          } as Prisma.InputJsonValue
+        },
+        create: {
+          instanceId: ctx.instanceId,
+          phoneNumber: normalizedAdminPhone,
+          displayName: "Admin",
+          fields: {
+            adminAlertPhone: true,
+            lastRemoteJid: result.remoteJid ?? `${normalizedAdminPhone}@s.whatsapp.net`,
+            sharedPhoneJid: `${normalizedAdminPhone}@s.whatsapp.net`
+          } as Prisma.InputJsonValue
+        }
+      });
       await prisma.message.create({
         data: {
           instanceId: ctx.instanceId,
@@ -390,6 +451,14 @@ export class EscalationService {
       });
     }
 
+    this.trackAdminAlertChat(remoteJid, conversationId, timeoutMs);
+  }
+
+  private trackAdminAlertChat(
+    remoteJid: string | null | undefined,
+    conversationId: string,
+    timeoutMs = 2 * 60 * 60 * 1000
+  ): void {
     for (const key of this.buildAdminAlertChatKeys(remoteJid)) {
       const existing = this.adminAlertChatMap.get(key);
       if (existing) {

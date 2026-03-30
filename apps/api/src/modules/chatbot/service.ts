@@ -16,6 +16,7 @@ import {
   toJid
 } from "../../lib/phone.js";
 import type { ChatMessage } from "./agents/types.js";
+import { getAprendizadoContinuoModuleConfig, sanitizeChatbotModules } from "./module-runtime.js";
 import { chatbotAiConfigSchema, chatbotRuleSchema, googleCalendarModuleSchema, upsertChatbotAiBodySchema } from "./schemas.js";
 import { GoogleCalendarTool } from "./tools/google-calendar.tool.js";
 import type { PlatformAlertService } from "../platform/alert.service.js";
@@ -156,7 +157,13 @@ const defaultAiSettings = {
 } as const;
 const defaultAiErrorFallbackMessage =
   "Tive uma instabilidade para responder agora. Pode me chamar novamente em instantes?";
+const defaultNoEscalationFallbackMessage =
+  "Nao tenho essa informacao agora, mas posso ajudar com outras duvidas.";
 const chatbotGlobalSystemPromptSettingKey = "chatbot.globalSystemPrompt";
+const aprendizadoContinuoVerificationTtlMs = 10 * 60 * 1000;
+
+const generateAprendizadoContinuoVerificationCode = (): string =>
+  String(Math.floor(100000 + Math.random() * 900000));
 
 const formatDate = (date: Date): string =>
   new Intl.DateTimeFormat("pt-BR", {
@@ -353,6 +360,11 @@ export class ChatbotService {
       input.leadSurchargeTable !== undefined
         ? input.leadSurchargeTable
         : ((existingConfig?.leadSurchargeTable as Record<string, unknown> | null | undefined) ?? {});
+    const preparedModules = this.prepareModulesForPersist(
+      input.modules,
+      existingConfig?.modules,
+      normalizedLeadsPhoneNumber
+    );
 
     if (leadsPhoneNumberRaw && normalizedLeadsPhoneNumber) {
       assertValidPhoneNumber(normalizedLeadsPhoneNumber);
@@ -386,7 +398,7 @@ export class ChatbotService {
         aiFallbackProvider: input.aiFallbackProvider ?? null,
         aiFallbackApiKey: input.aiFallbackApiKey?.trim() || null,
         aiFallbackModel: input.aiFallbackModel?.trim() || null,
-        modules: (input.modules ?? {}) as unknown as Prisma.InputJsonValue
+        modules: preparedModules.modules as unknown as Prisma.InputJsonValue
       } as Prisma.ChatbotConfigUncheckedCreateInput,
       update: {
         isEnabled: input.isEnabled,
@@ -411,9 +423,44 @@ export class ChatbotService {
         aiFallbackProvider: input.aiFallbackProvider ?? null,
         aiFallbackApiKey: input.aiFallbackApiKey?.trim() || null,
         aiFallbackModel: input.aiFallbackModel?.trim() || null,
-        modules: (input.modules ?? {}) as unknown as Prisma.InputJsonValue
+        modules: preparedModules.modules as unknown as Prisma.InputJsonValue
       } as Prisma.ChatbotConfigUncheckedUpdateInput
     });
+
+    if (preparedModules.verificationChallenge) {
+      const trackedVerification = await this.sendAprendizadoContinuoVerificationChallenge({
+        tenantId,
+        instanceId,
+        adminPhone: preparedModules.verificationChallenge.adminPhone,
+        code: preparedModules.verificationChallenge.code
+      });
+
+      if (trackedVerification) {
+        const aprendizadoContinuoModule = getAprendizadoContinuoModuleConfig(preparedModules.modules);
+
+        if (aprendizadoContinuoModule) {
+          const modulesWithTrackedChallenge = sanitizeChatbotModules({
+            ...preparedModules.modules,
+            aprendizadoContinuo: {
+              ...aprendizadoContinuoModule,
+              challengeMessageId: trackedVerification.externalMessageId,
+              challengeRemoteJid: trackedVerification.remoteJid
+            }
+          });
+
+          const updatedRecord = await prisma.chatbotConfig.update({
+            where: {
+              instanceId
+            },
+            data: {
+              modules: modulesWithTrackedChallenge as unknown as Prisma.InputJsonValue
+            }
+          });
+
+          return this.mapConfig(updatedRecord, managedAiProvider);
+        }
+      }
+    }
 
     return this.mapConfig(record, managedAiProvider);
   }
@@ -814,6 +861,7 @@ private async evaluateConfig(
       ...defaultAiSettings,
       ...(record.aiSettings && typeof record.aiSettings === "object" ? record.aiSettings : {})
     });
+    const sanitizedModules = sanitizeChatbotModules(record.modules);
 
     return {
       id: record.id,
@@ -852,9 +900,177 @@ private async evaluateConfig(
       aiFallbackProvider: normalizeFallbackProvider(record.aiFallbackProvider),
       aiFallbackApiKey: record.aiFallbackApiKey ?? null,
       aiFallbackModel: record.aiFallbackModel ?? null,
-      modules: (record.modules && typeof record.modules === "object" ? record.modules : {}) as ChatbotModules,
+      modules: sanitizedModules,
       createdAt: record.createdAt.toISOString(),
       updatedAt: record.updatedAt.toISOString()
+    };
+  }
+
+  private prepareModulesForPersist(
+    nextModules: ChatbotModules | undefined,
+    existingModules: unknown,
+    configuredAdminPhone: string | null
+  ): {
+    modules: ChatbotModules;
+    verificationChallenge: {
+      adminPhone: string;
+      code: string;
+    } | null;
+  } {
+    const sanitizedExistingModules = sanitizeChatbotModules(existingModules);
+    const sanitizedModules = sanitizeChatbotModules(nextModules ?? sanitizedExistingModules);
+    const aprendizadoContinuoModule = getAprendizadoContinuoModuleConfig(sanitizedModules);
+
+    if (!aprendizadoContinuoModule) {
+      return {
+        modules: sanitizedModules,
+        verificationChallenge: null
+      };
+    }
+
+    if (!aprendizadoContinuoModule.isEnabled) {
+      return {
+        modules: sanitizeChatbotModules({
+          ...sanitizedModules,
+          aprendizadoContinuo: {
+            ...aprendizadoContinuoModule,
+            isEnabled: false
+          }
+        }),
+        verificationChallenge: null
+      };
+    }
+
+    const normalizedConfiguredAdminPhone = configuredAdminPhone
+      ? ensurePhoneCountryCode(configuredAdminPhone)
+      : null;
+    const isVerifiedForCurrentPhone = Boolean(
+      normalizedConfiguredAdminPhone &&
+      aprendizadoContinuoModule.verificationStatus === "VERIFIED" &&
+      [aprendizadoContinuoModule.verifiedPhone, ...aprendizadoContinuoModule.verifiedPhones]
+        .map((phone) => normalizePhoneNumber(phone ?? ""))
+        .includes(normalizePhoneNumber(normalizedConfiguredAdminPhone))
+    );
+
+    if (!normalizedConfiguredAdminPhone) {
+      return {
+        modules: sanitizeChatbotModules({
+          ...sanitizedModules,
+          aprendizadoContinuo: {
+            ...aprendizadoContinuoModule,
+            isEnabled: true,
+            verificationStatus: "UNVERIFIED",
+            configuredAdminPhone: null,
+            verifiedPhone: null,
+            pendingCode: null,
+            pendingCodeExpiresAt: null,
+            lastVerificationRequestedAt: null,
+            verifiedAt: null,
+            challengeMessageId: null,
+            challengeRemoteJid: null,
+            verifiedPhones: [],
+            verifiedRemoteJids: [],
+            verifiedSenderJids: []
+          }
+        }),
+        verificationChallenge: null
+      };
+    }
+
+    if (isVerifiedForCurrentPhone) {
+      return {
+        modules: sanitizeChatbotModules({
+          ...sanitizedModules,
+          aprendizadoContinuo: {
+            ...aprendizadoContinuoModule,
+            isEnabled: true,
+            configuredAdminPhone: normalizedConfiguredAdminPhone
+          }
+        }),
+        verificationChallenge: null
+      };
+    }
+
+    const currentPendingStillValid = Boolean(
+      aprendizadoContinuoModule.verificationStatus === "PENDING" &&
+      aprendizadoContinuoModule.configuredAdminPhone &&
+      normalizePhoneNumber(aprendizadoContinuoModule.configuredAdminPhone) ===
+        normalizePhoneNumber(normalizedConfiguredAdminPhone) &&
+      aprendizadoContinuoModule.pendingCode &&
+      aprendizadoContinuoModule.pendingCodeExpiresAt &&
+      new Date(aprendizadoContinuoModule.pendingCodeExpiresAt).getTime() > Date.now()
+    );
+    const pendingCode = currentPendingStillValid && aprendizadoContinuoModule.pendingCode
+      ? aprendizadoContinuoModule.pendingCode
+      : generateAprendizadoContinuoVerificationCode();
+    const requestedAt = new Date();
+
+    return {
+      modules: sanitizeChatbotModules({
+        ...sanitizedModules,
+        aprendizadoContinuo: {
+          ...aprendizadoContinuoModule,
+          isEnabled: true,
+          verificationStatus: "PENDING",
+          configuredAdminPhone: normalizedConfiguredAdminPhone,
+          verifiedPhone: null,
+          pendingCode,
+          pendingCodeExpiresAt: new Date(requestedAt.getTime() + aprendizadoContinuoVerificationTtlMs).toISOString(),
+          lastVerificationRequestedAt: requestedAt.toISOString(),
+          verifiedAt: null,
+          challengeMessageId: null,
+          challengeRemoteJid: null,
+          verifiedPhones: [],
+          verifiedRemoteJids: [],
+          verifiedSenderJids: []
+        }
+      }),
+      verificationChallenge: {
+        adminPhone: normalizedConfiguredAdminPhone,
+        code: pendingCode
+      }
+    };
+  }
+
+  private async sendAprendizadoContinuoVerificationChallenge(params: {
+    tenantId: string;
+    instanceId: string;
+    adminPhone: string;
+    code: string;
+  }): Promise<{
+    externalMessageId: string | null;
+    remoteJid: string | null;
+  } | null> {
+    if (!this.platformAlertService) {
+      console.warn("[aprendizado-continuo] platformAlertService indisponivel para verificacao do admin");
+      return null;
+    }
+
+    const message = [
+      "*Confirmacao do admin*",
+      "---------------",
+      `Instancia: ${params.instanceId}`,
+      `Codigo do painel: ${params.code}`,
+      "",
+      "Responda exatamente com este codigo para confirmar este chat como admin da instancia.",
+      "Se nao foi voce, ignore esta mensagem."
+    ].join("\n");
+
+    const result = await this.platformAlertService.sendTrackedInstanceAlert(
+      params.tenantId,
+      params.instanceId,
+      params.adminPhone,
+      message
+    );
+
+    if (!result.delivered) {
+      console.warn("[aprendizado-continuo] falha ao entregar desafio de verificacao do admin");
+      return null;
+    }
+
+    return {
+      externalMessageId: result.externalMessageId,
+      remoteJid: result.remoteJid
     };
   }
 
@@ -1426,6 +1642,11 @@ private async evaluateConfig(
       return null;
     }
 
+    const aprendizadoContinuoModule = getAprendizadoContinuoModuleConfig(config.modules);
+    const allowAdminEscalation =
+      aprendizadoContinuoModule?.isEnabled === true &&
+      aprendizadoContinuoModule.verificationStatus === "VERIFIED";
+
     if (
       !managedAiProvider.isConfigured ||
       !managedAiProvider.isActive ||
@@ -1444,10 +1665,12 @@ private async evaluateConfig(
         config.instanceId,
         input,
         config.ai.systemPrompt,
-        config.ai.maxContextMessages
+        config.ai.maxContextMessages,
+        allowAdminEscalation
       );
 
       if (
+        allowAdminEscalation &&
         input.text?.trim() &&
         this.isInstitutionalQuestion(input.text) &&
         await this.shouldEscalateInstitutionalQuestion({
@@ -1545,6 +1768,15 @@ private async evaluateConfig(
       const isEscalation = /\[ESCALATE_ADMIN\]/i.test(responseText);
 
       if (isEscalation) {
+        if (!allowAdminEscalation) {
+          return {
+            action: "AI",
+            matchedRuleId: null,
+            matchedRuleName: `${managedAiProvider.provider}:${managedAiProvider.model}:fallback_without_escalation`,
+            responseText: cleanedText || config.fallbackMessage?.trim() || defaultNoEscalationFallbackMessage
+          };
+        }
+
         return {
           action: "ESCALATE_ADMIN",
           matchedRuleId: null,
@@ -1579,7 +1811,8 @@ private async evaluateConfig(
     instanceId: string,
     input: ChatbotRuntimeInput,
     systemPrompt: string,
-    maxContextMessages: number
+    maxContextMessages: number,
+    allowAdminEscalation: boolean
   ): Promise<{
     system: string;
     messages: Array<{ role: "user" | "assistant"; content: string }>;
@@ -1602,7 +1835,9 @@ private async evaluateConfig(
       "9. Nunca diga que voce e uma IA a menos que o cliente pergunte diretamente.",
       "10. Se o cliente perguntar seu nome, use o nome definido no prompt da instancia.",
       "11. Perguntas sobre a propria empresa, servicos oferecidos, horarios, equipe, visitas presenciais, quantidade de funcionarios, capacidade tecnica ou politicas internas so podem ser respondidas se a informacao estiver EXPLICITAMENTE no contexto autorizado.",
-      "12. Se a pergunta institucional nao estiver explicitamente documentada no prompt da instancia, no memory.md ou no conhecimento aprendido, responda com [ESCALATE_ADMIN].",
+      allowAdminEscalation
+        ? "12. Se a pergunta institucional nao estiver explicitamente documentada no prompt da instancia, no memory.md ou no conhecimento aprendido, responda com [ESCALATE_ADMIN]."
+        : "12. Se faltar contexto institucional, diga de forma breve e honesta que nao tem essa informacao agora, sem inventar e sem usar [ESCALATE_ADMIN].",
       "13. Nunca use suposicoes sobre o que empresas de tecnologia normalmente fazem."
     ];
     const groundingSources = [
@@ -1636,16 +1871,25 @@ private async evaluateConfig(
       }
     }
 
-    systemParts.push([
-      "### REGRA DE ESCALACAO ###",
-      "Se voce nao tem certeza sobre a resposta ou a informacao nao esta no seu contexto:",
-      "1. NAO invente ou adivinhe respostas",
-      "2. NAO responda de forma vaga como 'nao sei' ou 'entre em contato conosco'",
-      "3. Responda EXATAMENTE com o token: [ESCALATE_ADMIN]",
-      "4. Use [ESCALATE_ADMIN] somente quando genuinamente nao souber - para perguntas gerais, responda normalmente.",
-      "Exemplos de quando escalar: preco especifico de um produto, informacao interna da empresa, dado que nao foi fornecido.",
-      "Exemplos de quando NAO escalar: saudacoes, perguntas genericas, informacoes que estao no contexto."
-    ].join("\n"));
+    if (allowAdminEscalation) {
+      systemParts.push([
+        "### REGRA DE ESCALACAO ###",
+        "Se voce nao tem certeza sobre a resposta ou a informacao nao esta no seu contexto:",
+        "1. NAO invente ou adivinhe respostas",
+        "2. NAO responda de forma vaga como 'nao sei' ou 'entre em contato conosco'",
+        "3. Responda EXATAMENTE com o token: [ESCALATE_ADMIN]",
+        "4. Use [ESCALATE_ADMIN] somente quando genuinamente nao souber - para perguntas gerais, responda normalmente.",
+        "Exemplos de quando escalar: preco especifico de um produto, informacao interna da empresa, dado que nao foi fornecido.",
+        "Exemplos de quando NAO escalar: saudacoes, perguntas genericas, informacoes que estao no contexto."
+      ].join("\n"));
+    } else {
+      systemParts.push([
+        "### REGRA QUANDO FALTAR CONTEXTO ###",
+        "Se a informacao nao estiver clara no contexto, responda de forma breve e honesta.",
+        "Nao invente, nao use [ESCALATE_ADMIN] e nao transfira para o admin.",
+        "Ofereca ajuda apenas com o que estiver realmente disponivel no contexto."
+      ].join("\n"));
+    }
 
     const system = systemParts.join("\n");
 

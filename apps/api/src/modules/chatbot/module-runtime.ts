@@ -1,4 +1,5 @@
 import type {
+  AprendizadoContinuoModuleConfig,
   AgendaModuleConfig,
   AntiSpamModuleConfig,
   BlacklistModuleConfig,
@@ -77,6 +78,22 @@ const palavraPausaModuleSchema = z.object({
   mensagemPausa: z.string().min(1).default("Tudo bem. Vou pausar o atendimento automático por aqui.")
 });
 
+const aprendizadoContinuoModuleSchema = z.object({
+  isEnabled: z.boolean().default(false),
+  verificationStatus: z.enum(["UNVERIFIED", "PENDING", "VERIFIED"]).default("UNVERIFIED"),
+  configuredAdminPhone: z.string().min(8).nullable().optional().default(null),
+  verifiedPhone: z.string().min(8).nullable().optional().default(null),
+  pendingCode: z.string().regex(/^\d{6}$/).nullable().optional().default(null),
+  pendingCodeExpiresAt: z.string().datetime().nullable().optional().default(null),
+  lastVerificationRequestedAt: z.string().datetime().nullable().optional().default(null),
+  verifiedAt: z.string().datetime().nullable().optional().default(null),
+  challengeMessageId: z.string().min(1).nullable().optional().default(null),
+  challengeRemoteJid: z.string().min(1).nullable().optional().default(null),
+  verifiedPhones: z.array(z.string().min(8)).default([]),
+  verifiedRemoteJids: z.array(z.string().min(1)).default([]),
+  verifiedSenderJids: z.array(z.string().min(1)).default([])
+});
+
 const moduleSchemas = {
   faq: faqModuleSchema,
   horarioAtendimento: horarioAtendimentoModuleSchema,
@@ -87,7 +104,8 @@ const moduleSchemas = {
   listaBranca: listaBrancaModuleSchema,
   blacklist: blacklistModuleSchema,
   limiteMensagens: limiteMensagensModuleSchema,
-  palavraPausa: palavraPausaModuleSchema
+  palavraPausa: palavraPausaModuleSchema,
+  aprendizadoContinuo: aprendizadoContinuoModuleSchema
 } satisfies Record<string, z.ZodTypeAny>;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -187,6 +205,11 @@ export const getPalavraPausaModuleConfig = (
   modules: ChatbotModules | undefined
 ): PalavraPausaModuleConfig | null =>
   getParsedModuleConfig(palavraPausaModuleSchema, modules?.palavraPausa);
+
+export const getAprendizadoContinuoModuleConfig = (
+  modules: ChatbotModules | undefined
+): AprendizadoContinuoModuleConfig | null =>
+  getParsedModuleConfig(aprendizadoContinuoModuleSchema, modules?.aprendizadoContinuo);
 
 export const buildOperationalModuleInstructions = (modules: ChatbotModules | undefined): string[] => {
   const instructions: string[] = [];

@@ -399,6 +399,7 @@ export interface ChatbotModules {
   blacklist?: BlacklistModuleConfig;
   limiteMensagens?: LimiteMensagensModuleConfig;
   palavraPausa?: PalavraPausaModuleConfig;
+  aprendizadoContinuo?: AprendizadoContinuoModuleConfig;
   disparoMassa?: DisparoMassaModuleConfig;
   campanhaSegmento?: CampanhaSegmentoModuleConfig;
   reativacao?: ReativacaoModuleConfig;
@@ -673,6 +674,15 @@ export const CHATBOT_MODULE_CATALOG: ChatbotModuleCatalogItem[] = [
     requiresConfig: true
   },
   {
+    key: "aprendizadoContinuo",
+    label: "Aprendizado Contínuo",
+    description: "Escala perguntas sem contexto para o admin verificado e aprende a resposta para usos futuros.",
+    category: "controle",
+    supportLevel: "operational",
+    executionMode: "runtime",
+    requiresConfig: true
+  },
+  {
     key: "disparoMassa",
     label: "Disparo em Massa",
     description: "Placeholder visual; ainda não possui motor de campanha/envio em lote aqui.",
@@ -854,6 +864,23 @@ export interface LimiteMensagensModuleConfig extends BaseModuleConfig {
 export interface PalavraPausaModuleConfig extends BaseModuleConfig {
   palavras: string[];
   mensagemPausa: string;
+}
+
+export type AprendizadoContinuoVerificationStatus = "UNVERIFIED" | "PENDING" | "VERIFIED";
+
+export interface AprendizadoContinuoModuleConfig extends BaseModuleConfig {
+  verificationStatus: AprendizadoContinuoVerificationStatus;
+  configuredAdminPhone?: string | null;
+  verifiedPhone?: string | null;
+  pendingCode?: string | null;
+  pendingCodeExpiresAt?: string | null;
+  lastVerificationRequestedAt?: string | null;
+  verifiedAt?: string | null;
+  challengeMessageId?: string | null;
+  challengeRemoteJid?: string | null;
+  verifiedPhones: string[];
+  verifiedRemoteJids: string[];
+  verifiedSenderJids: string[];
 }
 
 export interface DisparoMassaModuleConfig extends BaseModuleConfig {

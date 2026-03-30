@@ -90,6 +90,8 @@ let socketGeneration = 0;
 let decryptFailureRecoveryPromise: Promise<void> | null = null;
 const store = makeInMemoryStore({});
 const RESOLVED_JID_CACHE_TTL_MS = 5 * 60 * 1000;
+const DECRYPT_FAILURE_BURST_WINDOW_MS = 30_000;
+const DECRYPT_FAILURE_BURST_THRESHOLD = 2;
 const resolvedJidCache = new Map<string, { jid: string; timeout: NodeJS.Timeout }>();
 const recentDecryptFailureTimestamps: number[] = [];
 
@@ -248,11 +250,14 @@ const recordDecryptFailureSignal = (message: string, context?: Record<string, un
   const now = Date.now();
   recentDecryptFailureTimestamps.push(now);
 
-  while (recentDecryptFailureTimestamps.length > 0 && now - recentDecryptFailureTimestamps[0]! > 30_000) {
+  while (
+    recentDecryptFailureTimestamps.length > 0 &&
+    now - recentDecryptFailureTimestamps[0]! > DECRYPT_FAILURE_BURST_WINDOW_MS
+  ) {
     recentDecryptFailureTimestamps.shift();
   }
 
-  if (recentDecryptFailureTimestamps.length >= 4) {
+  if (recentDecryptFailureTimestamps.length >= DECRYPT_FAILURE_BURST_THRESHOLD) {
     recentDecryptFailureTimestamps.length = 0;
     scheduleDecryptFailureRecovery();
   }
@@ -624,6 +629,7 @@ const startSocket = async (): Promise<void> => {
   const currentStartPromise = (async () => {
     try {
       stopping = false;
+      recentDecryptFailureTimestamps.length = 0;
       emitStatus("INITIALIZING");
       await disconnectSocket();
       closeAuthStore?.();
@@ -690,6 +696,7 @@ const startSocket = async (): Promise<void> => {
 
           if (event.connection === "open") {
             reconnectAttempts = 0;
+            recentDecryptFailureTimestamps.length = 0;
             clearPendingReconnect();
             emitStatus("CONNECTED");
             log("info", "Instancia conectada com sucesso");

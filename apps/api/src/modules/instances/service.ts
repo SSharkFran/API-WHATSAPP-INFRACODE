@@ -1374,6 +1374,21 @@ if (event.status === "CONNECTED") {
       return false;
     }
 
+    const extractedVerificationCode =
+      params.rawTextInput.match(/\b(\d{6})\b/)?.[1] ??
+      (() => {
+        const digitsOnly = params.rawTextInput.replace(/\D/g, "");
+        return digitsOnly.length === 6 ? digitsOnly : null;
+      })();
+    const normalizedConfiguredAdminPhone = normalizePhoneNumber(
+      aprendizadoContinuoModule.configuredAdminPhone ?? params.configuredAdminPhone ?? ""
+    ) || null;
+    const matchesPendingCode = extractedVerificationCode === aprendizadoContinuoModule.pendingCode;
+    const canPromoteCurrentConversationToAdmin = Boolean(
+      matchesPendingCode &&
+      normalizedConfiguredAdminPhone &&
+      !params.event.remoteJid.endsWith("@g.us")
+    );
     const quotedExternalMessageId = this.extractQuotedMessageExternalId(params.event.rawMessage);
     const matchesConfiguredPhone = this.phonesMatch(
       aprendizadoContinuoModule.configuredAdminPhone ?? params.configuredAdminPhone,
@@ -1410,6 +1425,7 @@ if (event.status === "CONNECTED") {
     );
 
     if (
+      !canPromoteCurrentConversationToAdmin &&
       !matchesConfiguredPhone &&
       !matchesChallengeMessage &&
       !matchesChallengeChat &&
@@ -1433,19 +1449,13 @@ if (event.status === "CONNECTED") {
       return false;
     }
 
-    const extractedVerificationCode =
-      params.rawTextInput.match(/\b(\d{6})\b/)?.[1] ??
-      (() => {
-        const digitsOnly = params.rawTextInput.replace(/\D/g, "");
-        return digitsOnly.length === 6 ? digitsOnly : null;
-      })();
-
     console.log("[aprendizado-continuo] mensagem recebida durante verificacao pendente", {
       hasCodeCandidate: Boolean(extractedVerificationCode),
       instanceId: params.instanceId,
       matchesChallengeChat,
       matchesChallengeMessage,
       matchesConfiguredPhone,
+      matchesPendingCode,
       remoteJid: params.event.remoteJid,
       senderJid: params.senderJid,
       textPreview: params.rawTextInput.slice(0, 120)
@@ -1464,13 +1474,31 @@ if (event.status === "CONNECTED") {
       return true;
     }
 
+    if (
+      canPromoteCurrentConversationToAdmin &&
+      !matchesConfiguredPhone &&
+      !matchesChallengeMessage &&
+      !matchesChallengeChat &&
+      !matchesChallengeAlias &&
+      !matchesEscalationAlias
+    ) {
+      console.warn("[aprendizado-continuo] codigo correto recebido fora dos aliases conhecidos; promovendo conversa atual a admin", {
+        configuredAdminPhone: aprendizadoContinuoModule.configuredAdminPhone,
+        instanceId: params.instanceId,
+        remoteJid: params.event.remoteJid,
+        senderJid: params.senderJid
+      });
+    }
+
     const verifiedPhone =
       this.findMatchingExpectedPhone(
-        [aprendizadoContinuoModule.configuredAdminPhone ?? params.configuredAdminPhone],
+        [normalizedConfiguredAdminPhone],
         params.adminSenderCandidates
       ) ??
+      normalizedConfiguredAdminPhone ??
       params.resolvedContactNumber ??
       params.remoteNumber;
+    const verifiedPhoneJid = verifiedPhone ? `${normalizePhoneNumber(verifiedPhone)}@s.whatsapp.net` : null;
     const updatedModules = sanitizeChatbotModules({
       ...params.chatbotConfigModules,
       aprendizadoContinuo: {
@@ -1497,12 +1525,14 @@ if (event.status === "CONNECTED") {
         verifiedRemoteJids: this.appendUniqueStrings([
           ...aprendizadoContinuoModule.verifiedRemoteJids,
           aprendizadoContinuoModule.challengeRemoteJid,
-          params.event.remoteJid
+          params.event.remoteJid,
+          verifiedPhoneJid
         ]),
         verifiedSenderJids: this.appendUniqueStrings([
           ...aprendizadoContinuoModule.verifiedSenderJids,
           params.senderJid,
-          params.event.remoteJid
+          params.event.remoteJid,
+          verifiedPhoneJid
         ])
       }
     });
@@ -1516,21 +1546,55 @@ if (event.status === "CONNECTED") {
       }
     });
 
+    if (verifiedPhoneJid && params.event.remoteJid.endsWith("@lid")) {
+      await this.persistLidPhoneMapping(params.prisma, params.instanceId, params.event.remoteJid, verifiedPhoneJid);
+    }
+
+    const verifiedContact =
+      verifiedPhone
+        ? await params.prisma.contact.findUnique({
+            where: {
+              instanceId_phoneNumber: {
+                instanceId: params.instanceId,
+                phoneNumber: verifiedPhone
+              }
+            }
+          })
+        : null;
+    const targetContactId = verifiedContact?.id ?? params.contactId;
+    const targetContactFields =
+      verifiedContact?.fields && typeof verifiedContact.fields === "object"
+        ? (verifiedContact.fields as Record<string, unknown>)
+        : {};
     const nextContactFields = {
+      ...targetContactFields,
       ...(params.contactFields ?? {}),
       adminVerified: true,
       lastRemoteJid: params.event.remoteJid,
-      ...(params.resolvedContactNumber ? { sharedPhoneJid: `${params.resolvedContactNumber}@s.whatsapp.net` } : {})
+      ...(verifiedPhoneJid ? { sharedPhoneJid: verifiedPhoneJid } : {})
     } as Prisma.InputJsonValue;
 
     await params.prisma.contact.update({
       where: {
-        id: params.contactId
+        id: targetContactId
       },
       data: {
+        ...(verifiedPhone ? { phoneNumber: verifiedPhone } : {}),
         fields: nextContactFields
       }
     });
+
+    if (verifiedPhone) {
+      await params.prisma.conversation.updateMany({
+        where: {
+          instanceId: params.instanceId,
+          contactId: targetContactId
+        },
+        data: {
+          phoneNumber: verifiedPhone
+        }
+      });
+    }
 
     console.log("[aprendizado-continuo] admin verificado com sucesso", {
       instanceId: params.instanceId,

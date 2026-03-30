@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(powershell -Command \"Get-Command gh -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source\")",
+      "Bash(powershell -Command \"& ''C:\\\\Program Files\\\\GitHub CLI\\\\gh.exe'' --version\")",
+      "Bash(powershell -Command \"& ''C:\\\\Users\\\\franc\\\\AppData\\\\Local\\\\Programs\\\\GitHub CLI\\\\gh.exe'' --version\")",
+      "Bash(\"C:\\\\Program Files\\\\GitHub CLI\\\\gh.exe\" auth status)",
+      "Bash(\"C:\\\\Program Files\\\\GitHub CLI\\\\gh.exe\" api repos/SSharkFran/API-WHATSAPP-INFRACODE/branches/master/protection)"
+    ]
+  }
+}

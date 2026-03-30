@@ -222,6 +222,7 @@ export class InstanceOrchestrator {
   private readonly conversationSessions = new Map<string, ConversationSession>();
   private readonly workers = new Map<string, ManagedWorker>();
   private readonly workerStartLocks = new Map<string, Promise<InstanceSummary>>();
+  private readonly automatedOutboundEchoIgnoreMap = new Map<string, NodeJS.Timeout>();
 
   public constructor(deps: InstanceOrchestratorDeps) {
     this.config = deps.config;
@@ -249,6 +250,46 @@ export class InstanceOrchestrator {
 
   public setPlatformAlertService(service: PlatformAlertService): void {
     (this as unknown as { platformAlertService: PlatformAlertService }).platformAlertService = service;
+  }
+
+  private buildAutomatedOutboundEchoKey(instanceId: string, externalMessageId: string): string {
+    return `${instanceId}:${externalMessageId}`;
+  }
+
+  private rememberAutomatedOutboundEcho(instanceId: string, externalMessageId?: string | null): void {
+    const normalizedExternalMessageId = externalMessageId?.trim();
+    if (!normalizedExternalMessageId) {
+      return;
+    }
+
+    const key = this.buildAutomatedOutboundEchoKey(instanceId, normalizedExternalMessageId);
+    const existingTimeout = this.automatedOutboundEchoIgnoreMap.get(key);
+    if (existingTimeout) {
+      clearTimeout(existingTimeout);
+    }
+
+    const timeout = setTimeout(() => {
+      this.automatedOutboundEchoIgnoreMap.delete(key);
+    }, 2 * 60 * 1000);
+    timeout.unref?.();
+    this.automatedOutboundEchoIgnoreMap.set(key, timeout);
+  }
+
+  private consumeAutomatedOutboundEcho(instanceId: string, externalMessageId?: string | null): boolean {
+    const normalizedExternalMessageId = externalMessageId?.trim();
+    if (!normalizedExternalMessageId) {
+      return false;
+    }
+
+    const key = this.buildAutomatedOutboundEchoKey(instanceId, normalizedExternalMessageId);
+    const timeout = this.automatedOutboundEchoIgnoreMap.get(key);
+    if (!timeout) {
+      return false;
+    }
+
+    clearTimeout(timeout);
+    this.automatedOutboundEchoIgnoreMap.delete(key);
+    return true;
   }
 
   /**
@@ -1631,6 +1672,10 @@ if (event.status === "CONNECTED") {
     const isResetCommand = msgText === "/reset";
     const isControlCommand = isTemporaryTakeoverCommand || isPermanentDisableCommand || isResetCommand;
     if (event.messageKey?.fromMe && event.externalMessageId) {
+      if (this.consumeAutomatedOutboundEcho(instance.id, event.externalMessageId)) {
+        return;
+      }
+
       const echoedOutboundMessage = await prisma.message.findFirst({
         where: {
           instanceId: instance.id,
@@ -4080,12 +4125,14 @@ if (event.status === "CONNECTED") {
       text
     };
     const rpcResult = await this.sendMessage(tenantId, instanceId, payload);
+    const externalMessageId = (rpcResult.externalMessageId as string | undefined) ?? null;
+    this.rememberAutomatedOutboundEcho(instanceId, externalMessageId);
     const prisma = await this.tenantPrismaRegistry.getClient(tenantId);
     const created = await prisma.message.create({
       data: {
         instanceId,
         remoteJid: (rpcResult.remoteJid as string | undefined) ?? targetJid ?? toJid(remoteNumber),
-        externalMessageId: (rpcResult.externalMessageId as string | undefined) ?? null,
+        externalMessageId,
         direction: "OUTBOUND",
         type: "text",
         status: "SENT",
@@ -4132,7 +4179,7 @@ if (event.status === "CONNECTED") {
       instanceId,
       eventType: "message.sent",
       payload: {
-        externalMessageId: (rpcResult.externalMessageId as string | undefined) ?? null,
+        externalMessageId,
         instanceId,
         messageId: created.id,
         status: created.status,

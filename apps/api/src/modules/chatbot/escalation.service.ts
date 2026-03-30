@@ -389,10 +389,20 @@ export class EscalationService {
           instanceId,
           direction: "OUTBOUND",
           createdAt: { gte: cutoff },
-          payload: {
-            path: ["to"],
-            equals: phone
-          },
+          AND: [
+            {
+              payload: {
+                path: ["automation", "action"],
+                equals: "admin_learning_prompt"
+              }
+            },
+            {
+              payload: {
+                path: ["to"],
+                equals: phone
+              }
+            }
+          ],
           traceId: { not: null }
         },
         orderBy: { createdAt: "desc" },

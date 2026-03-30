@@ -2139,8 +2139,9 @@ private async evaluateConfig(
     }
 
     if (provider === "gemini") {
+      const geminiModel = model?.trim() || "gemini-1.5-flash";
       const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model ?? "gemini-2.0-flash"}:generateContent?key=${apiKey}`,
+        `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent?key=${apiKey}`,
         {
           method: "POST",
           signal: AbortSignal.timeout(30_000),
@@ -2162,6 +2163,13 @@ private async evaluateConfig(
         }
       );
       if (!response.ok) {
+        let errorBody = "";
+        try {
+          errorBody = await response.text();
+        } catch {
+          // ignore
+        }
+        console.error(`[chatbot:ai:gemini] erro ${response.status} para modelo "${geminiModel}":`, errorBody.slice(0, 300));
         throw new Error(`Gemini error ${response.status}`);
       }
       const json = (await response.json()) as {

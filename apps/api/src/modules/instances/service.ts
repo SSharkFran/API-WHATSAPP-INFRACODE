@@ -1394,17 +1394,12 @@ if (event.status === "CONNECTED") {
 
     if (extractedVerificationCode !== aprendizadoContinuoModule.pendingCode) {
       if (params.rawTextInput.trim()) {
-        await this.sendAutomatedTextMessage(
-          params.tenantId,
-          params.instanceId,
-          params.resolvedContactNumber,
-          params.event.remoteJid,
-          "Para confirmar este chat como admin, responda somente com o codigo exibido no painel do tenant.",
-          {
-            action: "aprendizado_continuo_admin_pending_code",
-            kind: "chatbot"
-          }
-        );
+        console.log("[aprendizado-continuo] mensagem do admin recebida durante verificacao pendente, aguardando codigo correto", {
+          instanceId: params.instanceId,
+          remoteJid: params.event.remoteJid,
+          senderJid: params.senderJid,
+          textPreview: params.rawTextInput.slice(0, 120)
+        });
       }
 
       return true;
@@ -1477,18 +1472,6 @@ if (event.status === "CONNECTED") {
         fields: nextContactFields
       }
     });
-
-    await this.sendAutomatedTextMessage(
-      params.tenantId,
-      params.instanceId,
-      verifiedPhone,
-      params.event.remoteJid,
-      "Admin verificado com sucesso. O aprendizado continuo agora pode usar este chat com seguranca.",
-      {
-        action: "aprendizado_continuo_admin_verified",
-        kind: "chatbot"
-      }
-    );
 
     console.log("[aprendizado-continuo] admin verificado com sucesso", {
       instanceId: params.instanceId,

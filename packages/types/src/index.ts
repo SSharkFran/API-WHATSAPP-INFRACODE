@@ -400,6 +400,7 @@ export interface ChatbotModules {
   limiteMensagens?: LimiteMensagensModuleConfig;
   palavraPausa?: PalavraPausaModuleConfig;
   aprendizadoContinuo?: AprendizadoContinuoModuleConfig;
+  memoriaPersonalizada?: MemoriaPersonalizadaModuleConfig;
   disparoMassa?: DisparoMassaModuleConfig;
   campanhaSegmento?: CampanhaSegmentoModuleConfig;
   reativacao?: ReativacaoModuleConfig;
@@ -902,4 +903,14 @@ export interface ReativacaoModuleConfig extends BaseModuleConfig {
 export interface CupomPromocaoModuleConfig extends BaseModuleConfig {
   cupons: Array<{ codigo: string; desconto: number; tipo: "percentual" | "fixo"; validade: string }>;
   palavrasGatilho: string[];
+}
+
+export interface MemoriaPersonalizadaField {
+  key: string;
+  label: string;
+  description: string;
+}
+
+export interface MemoriaPersonalizadaModuleConfig extends BaseModuleConfig {
+  fields: MemoriaPersonalizadaField[];
 }

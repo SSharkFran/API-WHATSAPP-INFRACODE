@@ -35,6 +35,7 @@ model Instance {
   contacts          Contact[]
   conversations     Conversation[]
   knowledge         TenantKnowledge[]
+  persistentMemories ContactPersistentMemory[]
 
   @@index([status])
 }
@@ -231,6 +232,19 @@ model TenantKnowledge {
 
   instance   Instance @relation(fields: [instanceId], references: [id], onDelete: Cascade)
 
+  @@index([instanceId])
+}
+
+model ContactPersistentMemory {
+  id          String   @id @default(cuid())
+  instanceId  String
+  phoneNumber String
+  data        Json     @default("{}")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  instance    Instance @relation(fields: [instanceId], references: [id], onDelete: Cascade)
+
+  @@unique([instanceId, phoneNumber])
   @@index([instanceId])
 }
 

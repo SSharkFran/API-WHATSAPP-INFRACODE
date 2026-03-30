@@ -9,6 +9,7 @@ import type {
   HorarioAtendimentoModuleConfig,
   LimiteMensagensModuleConfig,
   ListaBrancaModuleConfig,
+  MemoriaPersonalizadaModuleConfig,
   MultiIdiomaModuleConfig,
   PalavraPausaModuleConfig
 } from "@infracode/types";
@@ -78,6 +79,17 @@ const palavraPausaModuleSchema = z.object({
   mensagemPausa: z.string().min(1).default("Tudo bem. Vou pausar o atendimento automático por aqui.")
 });
 
+const memoriaPersonalizadaModuleSchema = z.object({
+  isEnabled: z.boolean().default(false),
+  fields: z.array(
+    z.object({
+      key: z.string().min(1).max(64),
+      label: z.string().min(1).max(128),
+      description: z.string().min(1).max(512)
+    })
+  ).default([])
+});
+
 const aprendizadoContinuoModuleSchema = z.object({
   isEnabled: z.boolean().default(false),
   verificationStatus: z.enum(["UNVERIFIED", "PENDING", "VERIFIED"]).default("UNVERIFIED"),
@@ -105,7 +117,8 @@ const moduleSchemas = {
   blacklist: blacklistModuleSchema,
   limiteMensagens: limiteMensagensModuleSchema,
   palavraPausa: palavraPausaModuleSchema,
-  aprendizadoContinuo: aprendizadoContinuoModuleSchema
+  aprendizadoContinuo: aprendizadoContinuoModuleSchema,
+  memoriaPersonalizada: memoriaPersonalizadaModuleSchema
 } satisfies Record<string, z.ZodTypeAny>;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -210,6 +223,11 @@ export const getAprendizadoContinuoModuleConfig = (
   modules: ChatbotModules | undefined
 ): AprendizadoContinuoModuleConfig | null =>
   getParsedModuleConfig(aprendizadoContinuoModuleSchema, modules?.aprendizadoContinuo);
+
+export const getMemoriaPersonalizadaModuleConfig = (
+  modules: ChatbotModules | undefined
+): MemoriaPersonalizadaModuleConfig | null =>
+  getParsedModuleConfig(memoriaPersonalizadaModuleSchema, modules?.memoriaPersonalizada);
 
 export const buildOperationalModuleInstructions = (modules: ChatbotModules | undefined): string[] => {
   const instructions: string[] = [];

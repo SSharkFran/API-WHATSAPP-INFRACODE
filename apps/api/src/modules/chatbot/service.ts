@@ -17,7 +17,8 @@ import {
 } from "../../lib/phone.js";
 import { GroqKeyRotator } from "../../lib/groq-key-rotator.js";
 import type { ChatMessage } from "./agents/types.js";
-import { getAprendizadoContinuoModuleConfig, sanitizeChatbotModules } from "./module-runtime.js";
+import { getAprendizadoContinuoModuleConfig, getMemoriaPersonalizadaModuleConfig, sanitizeChatbotModules } from "./module-runtime.js";
+import type { PersistentMemoryService } from "./persistent-memory.service.js";
 import { chatbotAiConfigSchema, chatbotRuleSchema, googleCalendarModuleSchema, upsertChatbotAiBodySchema } from "./schemas.js";
 import { GoogleCalendarTool } from "./tools/google-calendar.tool.js";
 import type { PlatformAlertService } from "../platform/alert.service.js";
@@ -29,6 +30,7 @@ interface ChatbotServiceDeps {
   tenantPrismaRegistry: TenantPrismaRegistry;
   platformAlertService?: PlatformAlertService;
   knowledgeService?: KnowledgeService;
+  persistentMemoryService?: PersistentMemoryService;
 }
 
 interface ChatbotRuntimeInput {
@@ -281,6 +283,7 @@ export class ChatbotService {
   private readonly tenantPrismaRegistry: TenantPrismaRegistry;
   private readonly platformAlertService?: PlatformAlertService;
   private readonly knowledgeService?: KnowledgeService;
+  private readonly persistentMemoryService?: PersistentMemoryService;
   private readonly groqKeyRotator: GroqKeyRotator;
   private globalSystemPromptCache: string | null | undefined;
 
@@ -290,6 +293,7 @@ export class ChatbotService {
     this.tenantPrismaRegistry = deps.tenantPrismaRegistry;
     this.platformAlertService = deps.platformAlertService;
     this.knowledgeService = deps.knowledgeService;
+    this.persistentMemoryService = deps.persistentMemoryService;
 
     const extraKeys = (deps.config.GROQ_EXTRA_API_KEYS ?? "")
       .split(",")
@@ -305,6 +309,30 @@ export class ChatbotService {
 
   public invalidateGlobalSystemPromptCache(): void {
     this.globalSystemPromptCache = undefined;
+  }
+
+  public async extractPersistentMemory(
+    tenantId: string,
+    instanceId: string,
+    phoneNumber: string,
+    recentMessages: Array<{ role: "user" | "assistant"; content: string }>
+  ): Promise<void> {
+    if (!this.persistentMemoryService) return;
+
+    const { config, managedAiProvider } = await this.getContext(tenantId, instanceId);
+    const memoriaModule = getMemoriaPersonalizadaModuleConfig(config.modules);
+    if (!memoriaModule?.isEnabled || memoriaModule.fields.length === 0) return;
+    if (!managedAiProvider.isConfigured || !managedAiProvider.apiKeyEncrypted) return;
+
+    const apiKey = decrypt(managedAiProvider.apiKeyEncrypted, this.config.API_ENCRYPTION_KEY);
+    await this.persistentMemoryService.extractAndSave(
+      tenantId,
+      instanceId,
+      phoneNumber,
+      recentMessages,
+      memoriaModule.fields,
+      { baseUrl: managedAiProvider.baseUrl, apiKey, model: managedAiProvider.model }
+    );
   }
 
   public async getConfig(tenantId: string, instanceId: string): Promise<ChatbotConfig> {
@@ -1762,7 +1790,8 @@ private async evaluateConfig(
         input,
         config.ai.systemPrompt,
         config.ai.maxContextMessages,
-        allowAdminEscalation
+        allowAdminEscalation,
+        config.modules
       );
 
       if (
@@ -1908,7 +1937,8 @@ private async evaluateConfig(
     input: ChatbotRuntimeInput,
     systemPrompt: string,
     maxContextMessages: number,
-    allowAdminEscalation: boolean
+    allowAdminEscalation: boolean,
+    modules?: ChatbotModules
   ): Promise<{
     system: string;
     messages: Array<{ role: "user" | "assistant"; content: string }>;
@@ -1964,6 +1994,15 @@ private async evaluateConfig(
       if (knowledgeBlock) {
         systemParts.push(knowledgeBlock);
         groundingSources.push(knowledgeBlock);
+      }
+    }
+
+    const memoriaModule = getMemoriaPersonalizadaModuleConfig(modules);
+    if (memoriaModule?.isEnabled && memoriaModule.fields.length > 0 && this.persistentMemoryService) {
+      const memData = await this.persistentMemoryService.getData(tenantId, instanceId, normalizedPhoneNumber);
+      const memBlock = this.persistentMemoryService.buildContextBlock(memData, memoriaModule.fields);
+      if (memBlock) {
+        systemParts.push(memBlock);
       }
     }
 

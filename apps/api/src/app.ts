@@ -26,6 +26,7 @@ import { EscalationService } from "./modules/chatbot/escalation.service.js";
 import { ChatbotService } from "./modules/chatbot/service.js";
 import { FiadoService } from "./modules/chatbot/fiado.service.js";
 import { KnowledgeService } from "./modules/chatbot/knowledge.service.js";
+import { PersistentMemoryService } from "./modules/chatbot/persistent-memory.service.js";
 import { InstanceOrchestrator } from "./modules/instances/service.js";
 import { MessageService } from "./modules/messages/service.js";
 import { PlanEnforcementService } from "./modules/platform/plan-enforcement.service.js";
@@ -67,11 +68,15 @@ export const buildApp = async () => {
   const knowledgeService = new KnowledgeService({
     tenantPrismaRegistry
   });
+  const persistentMemoryService = new PersistentMemoryService({
+    tenantPrismaRegistry
+  });
   const chatbotService = new ChatbotService({
     config,
     platformPrisma,
     tenantPrismaRegistry,
-    knowledgeService
+    knowledgeService,
+    persistentMemoryService
   });
   const clientMemoryService = new ClientMemoryService({
     tenantPrismaRegistry

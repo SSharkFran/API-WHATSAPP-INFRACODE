@@ -2956,6 +2956,17 @@ if (event.status === "CONNECTED") {
         this.appendConversationHistory(session, "assistant", clientText);
       }
 
+      if (chatbotConfig?.modules) {
+        void this.chatbotService.extractPersistentMemory(
+          tenantId,
+          instance.id,
+          resolvedContactNumber,
+          session.history
+        ).catch((err) => {
+          console.warn("[persistent-memory] erro no fire-and-forget:", err);
+        });
+      }
+
       const leadAutoExtractValue = chatbotConfig?.leadAutoExtract as unknown;
       const leadAutoExtractEnabled = leadAutoExtractValue === true || leadAutoExtractValue === "true";
       const responseText = clientText.replace(/\|\|\|/g, " ");

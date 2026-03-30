@@ -428,6 +428,23 @@ export class ChatbotService {
     });
 
     if (preparedModules.verificationChallenge) {
+      const currentInstance = await prisma.instance.findUnique({
+        where: {
+          id: instanceId
+        },
+        select: {
+          status: true
+        }
+      });
+
+      if (currentInstance?.status !== "CONNECTED") {
+        console.warn("[aprendizado-continuo] instancia desconectada; desafio de verificacao segue pendente no painel", {
+          instanceId,
+          status: currentInstance?.status ?? "UNKNOWN"
+        });
+        return this.mapConfig(record, managedAiProvider);
+      }
+
       const trackedVerification = await this.sendAprendizadoContinuoVerificationChallenge({
         tenantId,
         instanceId,
@@ -1050,9 +1067,9 @@ private async evaluateConfig(
       "*Confirmacao do admin*",
       "---------------",
       `Instancia: ${params.instanceId}`,
-      `Codigo do painel: ${params.code}`,
       "",
-      "Responda exatamente com este codigo para confirmar este chat como admin da instancia.",
+      "Abra o painel do tenant e use o codigo exibido la para confirmar este chat como admin da instancia.",
+      "Responda exatamente com o codigo que esta no painel.",
       "Se nao foi voce, ignore esta mensagem."
     ].join("\n");
 

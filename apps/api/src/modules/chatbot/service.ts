@@ -833,6 +833,16 @@ private async evaluateConfig(
       };
     }
 
+    const aprendizadoContinuoModule = getAprendizadoContinuoModuleConfig(config.modules);
+    if (normalizedInput && aprendizadoContinuoModule?.isEnabled !== true) {
+      return {
+        action: "FALLBACK",
+        matchedRuleId: null,
+        matchedRuleName: "Fallback:aprendizado_continuo_disabled",
+        responseText: defaultNoEscalationFallbackMessage
+      };
+    }
+
     return {
       action: "NO_MATCH",
       matchedRuleId: null,

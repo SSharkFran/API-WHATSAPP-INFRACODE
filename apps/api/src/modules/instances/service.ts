@@ -1359,10 +1359,6 @@ if (event.status === "CONNECTED") {
       return false;
     }
 
-    if (params.rawTextInput.trim() !== aprendizadoContinuoModule.pendingCode) {
-      return false;
-    }
-
     const quotedExternalMessageId = this.extractQuotedMessageExternalId(params.event.rawMessage);
     const matchesConfiguredPhone = this.phonesMatch(
       aprendizadoContinuoModule.configuredAdminPhone ?? params.configuredAdminPhone,
@@ -1387,6 +1383,31 @@ if (event.status === "CONNECTED") {
         senderJid: params.senderJid
       });
       return false;
+    }
+
+    const extractedVerificationCode =
+      params.rawTextInput.match(/\b(\d{6})\b/)?.[1] ??
+      (() => {
+        const digitsOnly = params.rawTextInput.replace(/\D/g, "");
+        return digitsOnly.length === 6 ? digitsOnly : null;
+      })();
+
+    if (extractedVerificationCode !== aprendizadoContinuoModule.pendingCode) {
+      if (params.rawTextInput.trim()) {
+        await this.sendAutomatedTextMessage(
+          params.tenantId,
+          params.instanceId,
+          params.resolvedContactNumber,
+          params.event.remoteJid,
+          "Para confirmar este chat como admin, responda somente com o codigo exibido no painel do tenant.",
+          {
+            action: "aprendizado_continuo_admin_pending_code",
+            kind: "chatbot"
+          }
+        );
+      }
+
+      return true;
     }
 
     const verifiedPhone =
@@ -1961,6 +1982,31 @@ if (event.status === "CONNECTED") {
       });
       activeConversation.humanTakeover = false;
       activeConversation.humanTakeoverAt = null;
+    }
+
+    if (
+      activeConversation.awaitingAdminResponse &&
+      aprendizadoContinuoModule?.isEnabled !== true
+    ) {
+      await prisma.conversation.update({
+        where: {
+          id: activeConversation.id
+        },
+        data: {
+          awaitingAdminResponse: false,
+          pendingClientQuestion: null,
+          pendingClientJid: null,
+          pendingClientConversationId: null
+        } as Prisma.ConversationUncheckedUpdateInput
+      });
+
+      activeConversation.awaitingAdminResponse = false;
+      activeConversation.pendingClientJid = null;
+
+      console.log("[aprendizado-continuo] conversa destravada porque o modulo esta desativado", {
+        conversationId: activeConversation.id,
+        instanceId: instance.id
+      });
     }
 
     if (

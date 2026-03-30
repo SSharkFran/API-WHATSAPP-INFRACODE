@@ -1065,10 +1065,6 @@ process.on("unhandledRejection", (reason) => {
   log("error", "Promise rejeitada sem tratamento no worker", {
     reason: message
   });
-
-  if (!stopping) {
-    scheduleReconnect(message).catch(() => undefined);
-  }
 });
 
 startSocket().catch((error) => {

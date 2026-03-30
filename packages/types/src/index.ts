@@ -684,6 +684,15 @@ export const CHATBOT_MODULE_CATALOG: ChatbotModuleCatalogItem[] = [
     requiresConfig: true
   },
   {
+    key: "memoriaPersonalizada",
+    label: "Memória Personalizada",
+    description: "Extrai e persiste dados importantes do cliente (nome, veículo, endereço etc.) e os injeta no contexto das próximas conversas.",
+    category: "atendimento",
+    supportLevel: "operational",
+    executionMode: "runtime",
+    requiresConfig: true
+  },
+  {
     key: "disparoMassa",
     label: "Disparo em Massa",
     description: "Placeholder visual; ainda não possui motor de campanha/envio em lote aqui.",

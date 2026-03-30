@@ -192,6 +192,10 @@ const defaultChatbotModuleConfigs: ChatbotModuleConfigByKey = {
     verifiedRemoteJids: [],
     verifiedSenderJids: []
   },
+  memoriaPersonalizada: {
+    isEnabled: false,
+    fields: []
+  },
   disparoMassa: {
     isEnabled: false,
     modeloMensagem: "",
@@ -670,6 +674,75 @@ export const ChatbotModuleConfigSheet = ({
                 </p>
               </div>
             </div>
+          </div>
+        );
+      }
+
+      case "memoriaPersonalizada": {
+        const moduleConfig = currentConfig as NonNullable<ChatbotModules["memoriaPersonalizada"]>;
+        return (
+          <div className="space-y-3">
+            {moduleConfig.fields.map((field, index) => (
+              <div key={index} className="space-y-2 rounded-[18px] border border-[var(--border-subtle)] bg-[var(--bg-tertiary)] p-4">
+                <input
+                  className={[fieldClass, "h-11"].join(" ")}
+                  placeholder="Chave (ex: veiculo)"
+                  value={field.key}
+                  onChange={(e) =>
+                    updateConfig({
+                      ...moduleConfig,
+                      fields: moduleConfig.fields.map((f, i) => i === index ? { ...f, key: e.target.value } : f)
+                    })
+                  }
+                />
+                <input
+                  className={[fieldClass, "h-11"].join(" ")}
+                  placeholder="Rótulo (ex: Veículo do cliente)"
+                  value={field.label}
+                  onChange={(e) =>
+                    updateConfig({
+                      ...moduleConfig,
+                      fields: moduleConfig.fields.map((f, i) => i === index ? { ...f, label: e.target.value } : f)
+                    })
+                  }
+                />
+                <input
+                  className={[fieldClass, "h-11"].join(" ")}
+                  placeholder="Descrição para a IA (ex: Modelo ou tipo do veículo mencionado)"
+                  value={field.description}
+                  onChange={(e) =>
+                    updateConfig({
+                      ...moduleConfig,
+                      fields: moduleConfig.fields.map((f, i) => i === index ? { ...f, description: e.target.value } : f)
+                    })
+                  }
+                />
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() =>
+                    updateConfig({
+                      ...moduleConfig,
+                      fields: moduleConfig.fields.filter((_, i) => i !== index)
+                    })
+                  }
+                >
+                  Remover campo
+                </Button>
+              </div>
+            ))}
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() =>
+                updateConfig({
+                  ...moduleConfig,
+                  fields: [...moduleConfig.fields, { key: "", label: "", description: "" }]
+                })
+              }
+            >
+              Adicionar campo
+            </Button>
           </div>
         );
       }

@@ -236,7 +236,13 @@ const scheduleDecryptFailureRecovery = (): void => {
       });
     }
 
-    await scheduleReconnect("Rajada de Bad MAC detectada");
+    try {
+      await scheduleReconnect("Rajada de Bad MAC detectada");
+    } catch (error) {
+      log("error", "Falha ao agendar reconexao apos rajada de decrypt", {
+        error: error instanceof Error ? error.message : "unknown"
+      });
+    }
   })().finally(() => {
     decryptFailureRecoveryPromise = null;
   });
@@ -837,7 +843,13 @@ const startSocket = async (): Promise<void> => {
       log("error", "Falha ao iniciar o socket da instancia", {
         error: message
       });
-      await scheduleReconnect(message);
+      try {
+        await scheduleReconnect(message);
+      } catch (reconnectError) {
+        log("error", "Falha ao agendar reconexao apos erro de inicializacao", {
+          error: reconnectError instanceof Error ? reconnectError.message : "unknown"
+        });
+      }
     }
   })();
 
@@ -1048,4 +1060,19 @@ parentPort?.on("message", async (command: IncomingCommand) => {
   process.exit(0);
 });
 
-void startSocket();
+process.on("unhandledRejection", (reason) => {
+  const message = reason instanceof Error ? reason.message : String(reason);
+  log("error", "Promise rejeitada sem tratamento no worker", {
+    reason: message
+  });
+
+  if (!stopping) {
+    scheduleReconnect(message).catch(() => undefined);
+  }
+});
+
+startSocket().catch((error) => {
+  log("error", "Falha nao tratada ao iniciar o socket", {
+    error: error instanceof Error ? error.message : String(error)
+  });
+});

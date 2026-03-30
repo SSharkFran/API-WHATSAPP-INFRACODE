@@ -1343,7 +1343,12 @@ private async evaluateConfig(
 
       try {
         alertSent = alertPhone
-          ? (await this.platformAlertService?.sendAlertToPhone(alertPhone, alertMessage)) ?? false
+          ? (await this.platformAlertService?.sendInstanceAlert(
+              tenantId,
+              conversation.instanceId,
+              alertPhone,
+              alertMessage
+            )) ?? false
           : false;
       } catch (error) {
         console.error(

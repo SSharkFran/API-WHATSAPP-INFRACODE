@@ -1392,6 +1392,17 @@ if (event.status === "CONNECTED") {
         return digitsOnly.length === 6 ? digitsOnly : null;
       })();
 
+    console.log("[aprendizado-continuo] mensagem recebida durante verificacao pendente", {
+      hasCodeCandidate: Boolean(extractedVerificationCode),
+      instanceId: params.instanceId,
+      matchesChallengeChat,
+      matchesChallengeMessage,
+      matchesConfiguredPhone,
+      remoteJid: params.event.remoteJid,
+      senderJid: params.senderJid,
+      textPreview: params.rawTextInput.slice(0, 120)
+    });
+
     if (extractedVerificationCode !== aprendizadoContinuoModule.pendingCode) {
       if (params.rawTextInput.trim()) {
         console.log("[aprendizado-continuo] mensagem do admin recebida durante verificacao pendente, aguardando codigo correto", {

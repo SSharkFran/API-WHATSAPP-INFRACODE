@@ -427,6 +427,23 @@ export class ChatbotService {
       } as Prisma.ChatbotConfigUncheckedUpdateInput
     });
 
+    const aprendizadoContinuoModule = getAprendizadoContinuoModuleConfig(preparedModules.modules);
+
+    if (aprendizadoContinuoModule?.isEnabled !== true) {
+      await prisma.conversation.updateMany({
+        where: {
+          instanceId,
+          awaitingAdminResponse: true
+        },
+        data: {
+          awaitingAdminResponse: false,
+          pendingClientQuestion: null,
+          pendingClientJid: null,
+          pendingClientConversationId: null
+        }
+      });
+    }
+
     if (preparedModules.verificationChallenge) {
       const currentInstance = await prisma.instance.findUnique({
         where: {

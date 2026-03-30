@@ -99,6 +99,7 @@ let decryptFailureRecoveryPromise: Promise<void> | null = null;
 const store = makeInMemoryStore({});
 const RESOLVED_JID_CACHE_TTL_MS = 5 * 60 * 1000;
 const resolvedJidCache = new Map<string, { jid: string; timeout: NodeJS.Timeout }>();
+const lidToPhoneJidCache = new Map<string, string>();
 const decryptFailureBurstDetector = createDecryptFailureBurstDetector();
 
 const clearResolvedJidCache = (): void => {
@@ -109,7 +110,42 @@ const clearResolvedJidCache = (): void => {
   resolvedJidCache.clear();
 };
 
+const clearLidToPhoneJidCache = (): void => {
+  lidToPhoneJidCache.clear();
+};
+
 const getCachedResolvedJid = (phoneNumber: string): string | null => resolvedJidCache.get(phoneNumber)?.jid ?? null;
+
+const normalizeJidCacheKey = (jid?: string | null): string | null => {
+  const trimmed = jid?.trim();
+
+  if (!trimmed) {
+    return null;
+  }
+
+  return trimmed.replace(/:\d+(?=@)/, "");
+};
+
+const rememberLidToPhoneJid = (lid?: string | null, jid?: string | null): void => {
+  const lidKey = normalizeJidCacheKey(lid);
+  const phoneJid = normalizeJidCacheKey(jid);
+
+  if (!lidKey || !phoneJid) {
+    return;
+  }
+
+  lidToPhoneJidCache.set(lidKey, phoneJid);
+};
+
+const resolveSenderJid = (jid?: string | null): string | null => {
+  const normalized = normalizeJidCacheKey(jid);
+
+  if (!normalized) {
+    return null;
+  }
+
+  return lidToPhoneJidCache.get(normalized) ?? normalized;
+};
 
 const setCachedResolvedJid = (phoneNumber: string, jid: string): void => {
   const existing = resolvedJidCache.get(phoneNumber);
@@ -395,6 +431,8 @@ const emitChatPhoneMapping = (chat: ChatMappingPayload | null | undefined): void
     return;
   }
 
+  rememberLidToPhoneJid(lid, jid);
+
   parentPort?.postMessage({
     type: "chat-phone-mapping",
     lid,
@@ -599,6 +637,7 @@ const disconnectSocket = async (): Promise<void> => {
 
   socket = null;
   clearResolvedJidCache();
+  clearLidToPhoneJidCache();
 };
 
 const handleConnectionClose = async (error?: Error): Promise<void> => {
@@ -754,11 +793,13 @@ const startSocket = async (): Promise<void> => {
               unwrapIncomingMessageContent(message.message as Record<string, unknown>) ??
               (message.message as Record<string, unknown>);
             const serializedPayload = serializeIncomingPayload(normalizedMessage);
-            const senderJid =
-              message.key.participant ??
+            const participantJid = normalizeJidCacheKey(message.key.participant);
+            const baseSenderJid =
+              participantJid ??
               (message.key.fromMe
-                ? socket?.user?.id ?? null
-                : message.key.remoteJid);
+                ? normalizeJidCacheKey(socket?.user?.id ?? null)
+                : normalizeJidCacheKey(message.key.remoteJid));
+            const senderJid = resolveSenderJid(baseSenderJid) ?? normalizeJidCacheKey(message.key.remoteJid);
 
             parentPort?.postMessage({
               type: "inbound-message",
@@ -789,6 +830,8 @@ const startSocket = async (): Promise<void> => {
         if (isStaleSocketEvent()) {
           return;
         }
+
+        rememberLidToPhoneJid(lid, jid);
 
         parentPort?.postMessage({
           type: "phone-number-share",

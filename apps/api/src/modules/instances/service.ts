@@ -1765,7 +1765,7 @@ if (event.status === "CONNECTED") {
       "Olá! Estou de volta para te ajudar. Como posso te atender? 🚗";
     const sanitizedChatbotModules = sanitizeChatbotModules(chatbotConfig?.modules);
     const aprendizadoContinuoModule = getAprendizadoContinuoModuleConfig(sanitizedChatbotModules);
-    const senderJid = event.senderJid ?? event.remoteJid;
+    const senderJid = event.senderJid?.trim() || event.remoteJid;
     const senderNumber =
       normalizeWhatsAppPhoneNumber(senderJid) ??
       normalizePhoneNumber(String(senderJid ?? "").split("@")[0]?.split(":")[0] ?? "");

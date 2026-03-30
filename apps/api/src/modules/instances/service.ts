@@ -1397,13 +1397,38 @@ if (event.status === "CONNECTED") {
       ]
     );
 
-    if (!matchesConfiguredPhone && !matchesChallengeMessage && !matchesChallengeChat && !matchesChallengeAlias) {
+    const challengeConversationId = this.escalationService.resolveConversationIdByAdminAlertChat(
+      aprendizadoContinuoModule.challengeRemoteJid
+    );
+    const eventConversationId =
+      this.escalationService.resolveConversationIdByAdminAlertChat(params.event.remoteJid) ??
+      this.escalationService.resolveConversationIdByAdminAlertChat(params.senderJid);
+    const matchesEscalationAlias = Boolean(
+      challengeConversationId &&
+      eventConversationId &&
+      challengeConversationId === eventConversationId
+    );
+
+    if (
+      !matchesConfiguredPhone &&
+      !matchesChallengeMessage &&
+      !matchesChallengeChat &&
+      !matchesChallengeAlias &&
+      !matchesEscalationAlias
+    ) {
       console.warn("[aprendizado-continuo] codigo de verificacao recebido, mas remetente nao corresponde ao admin esperado", {
         challengeRemoteJid: aprendizadoContinuoModule.challengeRemoteJid,
         configuredAdminPhone: aprendizadoContinuoModule.configuredAdminPhone,
         instanceId: params.instanceId,
         remoteJid: params.event.remoteJid,
-        senderJid: params.senderJid
+        senderJid: params.senderJid,
+        matchesConfiguredPhone,
+        matchesChallengeMessage,
+        matchesChallengeChat,
+        matchesChallengeAlias,
+        matchesEscalationAlias,
+        challengeConversationId,
+        eventConversationId
       });
       return false;
     }

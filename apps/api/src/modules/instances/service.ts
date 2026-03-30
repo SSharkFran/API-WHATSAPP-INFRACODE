@@ -1477,7 +1477,7 @@ if (event.status === "CONNECTED") {
         console.error("[escalation] falha ao consultar alerta admin persistido:", error);
       }
     }
-    const quotedLearningConversationId = quotedLearningConversationIdFromSignals ?? persistedAdminPromptConversationId;
+    let quotedLearningConversationId = quotedLearningConversationIdFromSignals ?? persistedAdminPromptConversationId;
     if (
       rawTextInput &&
       (
@@ -1498,7 +1498,7 @@ if (event.status === "CONNECTED") {
       });
     }
     const isAdminSender = Boolean(matchedAdminPhone);
-    const isAdminLearningReply = Boolean(quotedLearningConversationId);
+    let isAdminLearningReply = Boolean(quotedLearningConversationId);
     const isInstanceSender = Boolean(
       instanceOwnPhone &&
       this.phonesMatch(instanceOwnPhone, [
@@ -1513,7 +1513,7 @@ if (event.status === "CONNECTED") {
         lastRemoteNumber
       ])
     );
-    const isAdminOrInstanceSender = isAdminSender || isAdminLearningReply || isInstanceSender;
+    let isAdminOrInstanceSender = isAdminSender || isAdminLearningReply || isInstanceSender;
     const isAdminSelfChat = Boolean(
       isAdminSender &&
       remoteChatNumber &&
@@ -1535,6 +1535,7 @@ if (event.status === "CONNECTED") {
         leadSent: true,
         awaitingLeadExtraction: true,
         awaitingAdminResponse: true,
+        pendingClientJid: true,
         humanTakeover: true,
         humanTakeoverAt: true,
         aiDisabledPermanent: true,
@@ -1563,6 +1564,7 @@ if (event.status === "CONNECTED") {
           leadSent: true,
           awaitingLeadExtraction: true,
           awaitingAdminResponse: true,
+          pendingClientJid: true,
           humanTakeover: true,
           humanTakeoverAt: true,
           aiDisabledPermanent: true,
@@ -1590,6 +1592,7 @@ if (event.status === "CONNECTED") {
             leadSent: true,
             awaitingLeadExtraction: true,
             awaitingAdminResponse: true,
+            pendingClientJid: true,
             humanTakeover: true,
             humanTakeoverAt: true,
             aiDisabledPermanent: true,
@@ -1610,6 +1613,7 @@ if (event.status === "CONNECTED") {
             leadSent: true,
             awaitingLeadExtraction: true,
             awaitingAdminResponse: true,
+            pendingClientJid: true,
             humanTakeover: true,
             humanTakeoverAt: true,
             aiDisabledPermanent: true,
@@ -1617,6 +1621,30 @@ if (event.status === "CONNECTED") {
             phoneNumber: true
           }
         });
+
+    const pendingClientJid = activeConversation.pendingClientJid;
+    const isPendingClientChat =
+      this.sameWhatsAppJid(pendingClientJid, event.remoteJid) ||
+      this.sameWhatsAppJid(pendingClientJid, senderJid);
+
+    if (
+      activeConversation.awaitingAdminResponse &&
+      !isAdminOrInstanceSender &&
+      pendingClientJid &&
+      !isPendingClientChat
+    ) {
+      quotedLearningConversationId = activeConversation.id;
+      isAdminLearningReply = true;
+      isAdminOrInstanceSender = true;
+
+      console.log("[escalation] inferindo resposta do admin por conversa pausada em chat distinto", {
+        conversationId: activeConversation.id,
+        instanceId: instance.id,
+        pendingClientJid,
+        remoteJid: event.remoteJid,
+        senderJid
+      });
+    }
 
     if (
       activeConversation.humanTakeover &&
@@ -2497,6 +2525,27 @@ if (event.status === "CONNECTED") {
     }
 
     return [...variants].filter(Boolean);
+  }
+
+  private normalizeWhatsAppJid(jid?: string | null): string | null {
+    const trimmed = jid?.trim().toLowerCase();
+
+    if (!trimmed) {
+      return null;
+    }
+
+    return trimmed.replace(/:\d+(?=@)/, "");
+  }
+
+  private sameWhatsAppJid(left?: string | null, right?: string | null): boolean {
+    const normalizedLeft = this.normalizeWhatsAppJid(left);
+    const normalizedRight = this.normalizeWhatsAppJid(right);
+
+    if (!normalizedLeft || !normalizedRight) {
+      return false;
+    }
+
+    return normalizedLeft === normalizedRight;
   }
 
   private phonesMatch(expected?: string | null, candidates: Array<string | null | undefined> = []): boolean {

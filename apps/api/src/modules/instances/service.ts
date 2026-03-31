@@ -1669,8 +1669,26 @@ if (event.status === "CONNECTED") {
       : null;
     const remoteNumber = remotePhoneFromJid ?? normalizePhoneNumber(event.remoteJid.split("@")[0] ?? "");
     const sessionKey = this.buildConversationSessionKey(instance.id, event.remoteJid);
-    const msgText = typeof event.payload.text === "string" ? event.payload.text.trim().toLowerCase() : "";
-    const rawTextInput = typeof event.payload.text === "string" ? event.payload.text.trim() : "";
+    // Extrai texto do payload; fallback para extendedTextMessage.text direto no rawMessage
+    // (necessario para quoted replies onde payload.text pode chegar null do worker)
+    const payloadText = typeof event.payload.text === "string" ? event.payload.text.trim() : "";
+    const rawMessageExtText = (() => {
+      const raw = event.rawMessage;
+      if (!raw || typeof raw !== "object") return "";
+      const ext = (raw as Record<string, unknown>).extendedTextMessage;
+      if (ext && typeof ext === "object") {
+        const t = (ext as Record<string, unknown>).text;
+        return typeof t === "string" ? t.trim() : "";
+      }
+      return "";
+    })();
+    const rawTextInput = payloadText || rawMessageExtText;
+    if (!payloadText && rawMessageExtText) {
+      console.log("[text-fallback] texto extraido de rawMessage.extendedTextMessage ao inves de payload.text", {
+        instanceId: instance.id, remoteJid: event.remoteJid, textPreview: rawMessageExtText.slice(0, 80)
+      });
+    }
+    const msgText = rawTextInput.toLowerCase();
     const hasMeaningfulInboundContent = event.messageType !== "text" || rawTextInput.length > 0;
     const isTemporaryTakeoverCommand = msgText === "*";
     const isPermanentDisableCommand = msgText === "**";

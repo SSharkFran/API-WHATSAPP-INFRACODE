@@ -400,10 +400,21 @@ const serializeIncomingPayload = (rawMessage: Record<string, unknown>): Record<s
   }
 
   if ("extendedTextMessage" in rawMessage) {
-    const extended = rawMessage.extendedTextMessage as { text?: string };
+    const extended = rawMessage.extendedTextMessage as { text?: string; contextInfo?: unknown };
+    const text = typeof extended.text === "string" && extended.text.trim()
+      ? extended.text.trim()
+      : null;
     return {
-      text: extended.text ?? null
+      text,
+      _hasContextInfo: Boolean(extended.contextInfo)
     };
+  }
+
+  // Fallback: tenta extrair texto de campos alternativos usados por alguns clientes WhatsApp
+  for (const field of ["caption", "title", "description"] as const) {
+    if (field in rawMessage && typeof rawMessage[field] === "string" && (rawMessage[field] as string).trim()) {
+      return { text: (rawMessage[field] as string).trim() };
+    }
   }
 
   return rawMessage;

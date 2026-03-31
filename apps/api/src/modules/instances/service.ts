@@ -23,6 +23,7 @@ import { ConversationAgent } from "../chatbot/agents/conversation.agent.js";
 import { FiadoAgent } from "../chatbot/agents/fiado.agent.js";
 import { MemoryAgent } from "../chatbot/agents/memory.agent.js";
 import { AdminMemoryService } from "../chatbot/admin-memory.service.js";
+import type { AdminCommandService } from "../chatbot/admin-command.service.js";
 import type { ChatMessage, ConversationSession as BaseConversationSession, LeadData } from "../chatbot/agents/types.js";
 import type { EscalationService } from "../chatbot/escalation.service.js";
 import type { ClientMemoryService } from "../chatbot/memory.service.js";
@@ -44,6 +45,7 @@ interface InstanceOrchestratorDeps {
   chatbotService: ChatbotService;
   clientMemoryService: ClientMemoryService;
   adminMemoryService: AdminMemoryService;
+  adminCommandService: AdminCommandService;
   fiadoService: FiadoService;
   escalationService: EscalationService;
   platformAlertService?: PlatformAlertService;
@@ -210,6 +212,7 @@ export class InstanceOrchestrator {
   private readonly planEnforcementService: PlanEnforcementService;
   private readonly clientMemoryService: ClientMemoryService;
   private readonly adminMemoryService: AdminMemoryService;
+  private readonly adminCommandService: AdminCommandService;
   private readonly chatbotService: ChatbotService;
   private readonly memoryAgent: MemoryAgent;
   private readonly conversationAgent: ConversationAgent;
@@ -234,6 +237,7 @@ export class InstanceOrchestrator {
     this.planEnforcementService = deps.planEnforcementService;
     this.clientMemoryService = deps.clientMemoryService;
     this.adminMemoryService = deps.adminMemoryService;
+    this.adminCommandService = deps.adminCommandService;
     this.chatbotService = deps.chatbotService;
     this.memoryAgent = new MemoryAgent({
       clientMemoryService: deps.clientMemoryService
@@ -2702,6 +2706,41 @@ if (event.status === "CONNECTED") {
           }
         }
 
+      }
+
+      // Comando livre do admin verificado — não é reply de aprendizado nem correção
+      if (finalInputText && isVerifiedAprendizadoContinuoAdminSender && !isAdminOrInstanceSender) {
+        const handled = await this.adminCommandService.handleCommand({
+          tenantId,
+          instanceId: instance.id,
+          text: finalInputText,
+          sendResponse: async (text) => {
+            await this.sendAutomatedTextMessage(
+              tenantId,
+              instance.id,
+              remoteNumber,
+              event.remoteJid,
+              text,
+              { action: "admin_command_response", kind: "chatbot" }
+            );
+          },
+          sendMessageToClient: async (jid, normalizedPhone, text) => {
+            try {
+              await this.sendAutomatedTextMessage(
+                tenantId,
+                instance.id,
+                normalizedPhone,
+                jid,
+                text,
+                { action: "admin_command_send_client", kind: "chatbot" }
+              );
+              return true;
+            } catch {
+              return false;
+            }
+          }
+        });
+        if (handled) return;
       }
 
       if (finalInputText && activeConversation.awaitingAdminResponse && !canProcessAprendizadoContinuoReply) {

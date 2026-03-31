@@ -20,6 +20,7 @@ import { authPlugin } from "./plugins/auth.js";
 import { swaggerPlugin } from "./plugins/swagger.js";
 import { PlatformAdminService } from "./modules/admin/service.js";
 import { AdminMemoryService } from "./modules/chatbot/admin-memory.service.js";
+import { AdminCommandService } from "./modules/chatbot/admin-command.service.js";
 import { AuthService } from "./modules/auth/service.js";
 import { ClientMemoryService } from "./modules/chatbot/memory.service.js";
 import { EscalationService } from "./modules/chatbot/escalation.service.js";
@@ -82,6 +83,11 @@ export const buildApp = async () => {
     tenantPrismaRegistry
   });
   const adminMemoryService = new AdminMemoryService(config.DATA_DIR);
+  const adminCommandService = new AdminCommandService({
+    tenantPrismaRegistry,
+    platformPrisma,
+    config
+  });
   const fiadoService = new FiadoService({
     tenantPrismaRegistry
   });
@@ -122,6 +128,7 @@ export const buildApp = async () => {
     chatbotService,
     clientMemoryService,
     adminMemoryService,
+    adminCommandService,
     fiadoService,
     escalationService
   });

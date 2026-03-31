@@ -2603,12 +2603,12 @@ if (event.status === "CONNECTED") {
         return;
       }
 
-      if (finalInputText && canProcessAprendizadoContinuoReply) {
-        await this.escalationService.releaseTimedOutEscalations(tenantId, instance.id);
-
-        // Detecta correcao: admin respondendo a confirmacao "Aprendi e respondi" para corrigir resposta errada
+      // Detecta correcao: admin respondendo (reply/quote) a confirmacao "Aprendi e respondi"
+      // Este check e independente de pendingEscalations — pode ocorrer a qualquer momento
+      if (finalInputText && isVerifiedAprendizadoContinuoAdminSender) {
         const correctionQuestion = this.extractQuotedConfirmationQuestion(event.rawMessage);
-        if (correctionQuestion && isVerifiedAprendizadoContinuoAdminSender) {
+        if (correctionQuestion) {
+          console.log("[escalation] correcao detectada pelo admin", { question: correctionQuestion, instanceId: instance.id });
           await this.escalationService.processAdminCorrection(tenantId, instance.id, correctionQuestion, finalInputText);
           void this.chatbotService.triggerKnowledgeSynthesis(tenantId, instance.id)
             .catch((err) => console.warn("[knowledge-synthesis] erro na correcao:", err));
@@ -2617,11 +2617,15 @@ if (event.status === "CONNECTED") {
             instance.id,
             remoteNumber,
             event.remoteJid,
-            `✅ Corrição registrada!\n\nPergunta: "${correctionQuestion}"\nNova resposta: "${finalInputText}"`,
+            `✅ Correção registrada!\n\nPergunta: "${correctionQuestion}"\nNova resposta: "${finalInputText}"`,
             { action: "admin_learning_correction", kind: "chatbot" }
           );
           return;
         }
+      }
+
+      if (finalInputText && canProcessAprendizadoContinuoReply) {
+        await this.escalationService.releaseTimedOutEscalations(tenantId, instance.id);
 
         const hasPendingEscalations = hasPendingEscalationsForAdminBypass;
         if (hasPendingEscalations) {
@@ -3411,11 +3415,24 @@ if (event.status === "CONNECTED") {
   private extractQuotedConfirmationQuestion(rawMessage?: Record<string, unknown>): string | null {
     const quotedText = this.extractQuotedMessageText(rawMessage);
 
-    if (!quotedText || !/aprendi e respondi/i.test(quotedText)) {
+    if (!quotedText) return null;
+
+    if (!/aprendi e respondi/i.test(quotedText)) {
       return null;
     }
 
-    return quotedText.match(/Pergunta:\s*"([^"]+)"/i)?.[1]?.trim() ?? null;
+    // Tenta aspas retas e curvas
+    const match =
+      quotedText.match(/Pergunta:\s*"([^"]+)"/i)?.[1]?.trim() ??
+      quotedText.match(/Pergunta:\s*\u201c([^\u201d]+)\u201d/i)?.[1]?.trim() ??
+      quotedText.match(/Pergunta:\s*(.+?)(?:\n|Resposta)/i)?.[1]?.trim();
+
+    console.log("[escalation] confirmacao quotada detectada", {
+      hasMatch: Boolean(match),
+      quotedPreview: quotedText.slice(0, 200)
+    });
+
+    return match ?? null;
   }
 
   private async getConversationSession(

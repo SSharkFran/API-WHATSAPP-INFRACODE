@@ -36,10 +36,9 @@ const normalizeForComparison = (text: string): Set<string> => {
 
 /**
  * Calcula a similaridade semantica entre dois conjuntos de palavras.
- * Usa o maximo entre Jaccard e Containment para lidar bem com perguntas curtas:
- * - Jaccard: bom para perguntas de tamanho similar
- * - Containment: se as palavras de A estao contidas em B (ou vice-versa),
- *   considera similar mesmo que B tenha palavras extras (ex: "endereco" vs "endereco empresa")
+ * Usa Jaccard como base. Containment so e aplicado quando 2+ palavras coincidem,
+ * evitando falsos positivos onde uma palavra isolada resulta em 100% de similaridade
+ * por containment (ex: "horario" contido em "horario e preco" → seria 1.0 sem esse guard).
  */
 const semanticSimilarity = (a: Set<string>, b: Set<string>): number => {
   if (a.size === 0 && b.size === 0) return 1;
@@ -51,7 +50,8 @@ const semanticSimilarity = (a: Set<string>, b: Set<string>): number => {
   }
 
   const jaccard = intersection / (a.size + b.size - intersection);
-  const containment = intersection / Math.min(a.size, b.size);
+  // Containment so conta quando 2+ palavras coincidem para evitar falsos positivos
+  const containment = intersection >= 2 ? intersection / Math.min(a.size, b.size) : 0;
 
   return Math.max(jaccard, containment);
 };

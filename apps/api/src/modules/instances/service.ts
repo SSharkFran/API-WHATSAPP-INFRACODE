@@ -226,6 +226,9 @@ export class InstanceOrchestrator {
   private readonly workers = new Map<string, ManagedWorker>();
   private readonly workerStartLocks = new Map<string, Promise<InstanceSummary>>();
   private readonly automatedOutboundEchoIgnoreMap = new Map<string, NodeJS.Timeout>();
+  private readonly dailySummarySentDates = new Map<string, string>(); // key: tenantId:instanceId, value: YYYY-MM-DD
+  private escalationCleanupInterval: NodeJS.Timeout | null = null;
+  private dailySummaryInterval: NodeJS.Timeout | null = null;
 
   public constructor(deps: InstanceOrchestratorDeps) {
     this.config = deps.config;
@@ -254,6 +257,97 @@ export class InstanceOrchestrator {
 
   public setPlatformAlertService(service: PlatformAlertService): void {
     (this as unknown as { platformAlertService: PlatformAlertService }).platformAlertService = service;
+  }
+
+  /**
+   * Inicia schedulers periódicos:
+   * - A cada 15 min: libera escalações travadas em todas instâncias ativas
+   * - A cada hora: envia resumo diário às 8h para admins que tiverem aprendizado contínuo habilitado
+   */
+  public startSchedulers(): void {
+    // Limpa escalações travadas a cada 15 minutos
+    this.escalationCleanupInterval = setInterval(() => {
+      void this.runEscalationCleanup().catch((err) => {
+        console.warn("[scheduler] erro no cleanup de escalacoes:", err);
+      });
+    }, 15 * 60 * 1000);
+
+    // Verifica resumo diário a cada hora (dispara às 8h UTC)
+    this.dailySummaryInterval = setInterval(() => {
+      const hour = new Date().getUTCHours();
+      if (hour === 8) {
+        void this.runDailySummaryForAllInstances().catch((err) => {
+          console.warn("[scheduler] erro no resumo diario:", err);
+        });
+      }
+    }, 60 * 60 * 1000);
+  }
+
+  public stopSchedulers(): void {
+    if (this.escalationCleanupInterval) {
+      clearInterval(this.escalationCleanupInterval);
+      this.escalationCleanupInterval = null;
+    }
+    if (this.dailySummaryInterval) {
+      clearInterval(this.dailySummaryInterval);
+      this.dailySummaryInterval = null;
+    }
+  }
+
+  private async runEscalationCleanup(): Promise<void> {
+    for (const workerKey of this.workers.keys()) {
+      const [tenantId, instanceId] = workerKey.split(":");
+      if (!tenantId || !instanceId) continue;
+      try {
+        await this.escalationService.releaseTimedOutEscalations(tenantId, instanceId);
+      } catch {
+        // ignora erros por instância individualmente
+      }
+    }
+  }
+
+  private async runDailySummaryForAllInstances(): Promise<void> {
+    const today = new Date().toISOString().slice(0, 10);
+
+    for (const workerKey of this.workers.keys()) {
+      const [tenantId, instanceId] = workerKey.split(":");
+      if (!tenantId || !instanceId) continue;
+
+      const summaryKey = `${tenantId}:${instanceId}`;
+      if (this.dailySummarySentDates.get(summaryKey) === today) continue;
+
+      try {
+        const prisma = await this.tenantPrismaRegistry.getClient(tenantId);
+        const config = await prisma.chatbotConfig.findUnique({
+          where: { instanceId },
+          select: { modules: true }
+        });
+
+        const modules = config?.modules as Record<string, unknown> | null | undefined;
+        const aprendizado = modules?.["aprendizadoContinuo"] as Record<string, unknown> | undefined;
+        const adminPhone = (aprendizado?.["verifiedPhone"] as string | undefined) ??
+                           (aprendizado?.["configuredAdminPhone"] as string | undefined);
+
+        if (!adminPhone || aprendizado?.["isEnabled"] !== true) continue;
+
+        const instance = await prisma.instance.findUnique({
+          where: { id: instanceId },
+          select: { id: true }
+        });
+        if (!instance) continue;
+
+        const summary = await this.adminCommandService.generateDailySummary(tenantId, instanceId);
+        await this.sendAutomatedTextMessage(
+          tenantId, instanceId, adminPhone,
+          `${adminPhone}@s.whatsapp.net`, summary,
+          { action: "daily_summary", kind: "chatbot" }
+        );
+
+        this.dailySummarySentDates.set(summaryKey, today);
+      } catch (err) {
+        console.warn(`[scheduler] erro ao enviar resumo diario para ${workerKey}:`, err);
+      }
+    }
   }
 
   private buildAutomatedOutboundEchoKey(instanceId: string, externalMessageId: string): string {
@@ -788,6 +882,7 @@ export class InstanceOrchestrator {
    * Encerra todos os workers ativos da API.
    */
   public async close(): Promise<void> {
+    this.stopSchedulers();
     for (const workerKey of [...this.workers.keys()]) {
       const [tenantId, instanceId] = workerKey.split(":");
       await this.stopWorker(tenantId ?? "", instanceId ?? "", "shutdown");
@@ -1720,79 +1815,6 @@ if (event.status === "CONNECTED") {
       if (automationPayload?.kind === "chatbot") {
         return;
       }
-    }
-
-    if (false && msgText === "/reset") {
-      const resetContact = await prisma.contact.findFirst({
-        where: {
-          instanceId: instance.id,
-          OR: [
-            {
-              fields: {
-                path: ["lastRemoteJid"],
-                equals: event.remoteJid
-              }
-            },
-            {
-              phoneNumber: remoteNumber
-            }
-          ]
-        },
-        select: {
-          id: true
-        }
-      });
-      const resetConversation = resetContact
-        ? await prisma.conversation.findFirst({
-            where: {
-              instanceId: instance.id,
-              contactId: resetContact!.id,
-              status: {
-                in: ["OPEN", "PENDING", "TRANSFERRED"]
-              }
-            },
-            select: {
-              id: true
-            }
-          })
-        : null;
-
-      if (resetConversation) {
-        await prisma.conversation.update({
-          where: {
-              id: resetConversation!.id
-          },
-          data: {
-            awaitingLeadExtraction: false,
-            leadSent: false,
-            humanTakeover: false,
-            humanTakeoverAt: null
-          } as Prisma.ConversationUncheckedUpdateInput
-        });
-        console.log("[lead] awaitingLeadExtraction reset para conversa:", resetConversation!.id);
-      }
-
-      await prisma.message.deleteMany({
-        where: {
-          instanceId: instance.id,
-          remoteJid: event.remoteJid
-        }
-      });
-      this.clearConversationSession(sessionKey);
-
-      await this.sendAutomatedTextMessage(
-        tenantId,
-        instance.id,
-        remoteNumber,
-        event.remoteJid,
-        "🔄 Conversa resetada!",
-        {
-          action: "reset",
-          kind: "chatbot"
-        }
-      );
-
-      return;
     }
 
     const existingContactByRemoteJid = await prisma.contact.findFirst({
@@ -2732,6 +2754,7 @@ if (event.status === "CONNECTED") {
           tenantId,
           instanceId: instance.id,
           text: finalInputText,
+          adminPhone: remoteNumber,
           sendResponse: async (text) => {
             await this.sendAutomatedTextMessage(
               tenantId,

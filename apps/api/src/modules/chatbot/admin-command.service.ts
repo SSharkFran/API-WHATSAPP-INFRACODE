@@ -22,6 +22,7 @@ export interface AdminCommandContext {
   tenantId: string;
   instanceId: string;
   text: string;
+  adminPhone?: string;
   sendResponse: (text: string) => Promise<void>;
   sendMessageToClient: (jid: string, normalizedPhone: string, text: string) => Promise<boolean>;
 }
@@ -186,6 +187,76 @@ const TOOLS = [
         properties: {}
       }
     }
+  },
+  {
+    type: "function",
+    function: {
+      name: "status_instancia",
+      description: "Retorna status geral da instância: conversas abertas agora, atendimentos hoje, leads novos hoje, agendamentos pendentes. Use para responder 'como estamos?', 'status', 'resumo do dia'.",
+      parameters: {
+        type: "object",
+        properties: {}
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "bloquear_contato",
+      description: "Adiciona um contato à blacklist — o bot para de responder para esse número.",
+      parameters: {
+        type: "object",
+        required: ["telefone"],
+        properties: {
+          telefone: {
+            type: "string",
+            description: "Número de telefone do contato a bloquear"
+          },
+          motivo: {
+            type: "string",
+            description: "Motivo do bloqueio (opcional)"
+          }
+        }
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "desbloquear_contato",
+      description: "Remove um contato da blacklist — o bot volta a responder para esse número.",
+      parameters: {
+        type: "object",
+        required: ["telefone"],
+        properties: {
+          telefone: {
+            type: "string",
+            description: "Número de telefone do contato a desbloquear"
+          }
+        }
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "buscar_mensagens_cliente",
+      description: "Busca o histórico de mensagens de um cliente específico. Use quando o admin perguntar o que um cliente disse, qual foi a última conversa, etc.",
+      parameters: {
+        type: "object",
+        required: ["telefone"],
+        properties: {
+          telefone: {
+            type: "string",
+            description: "Número de telefone do cliente"
+          },
+          limite: {
+            type: "number",
+            description: "Máximo de mensagens a retornar (padrão: 20, máx: 50)"
+          }
+        }
+      }
+    }
   }
 ] as const;
 
@@ -198,7 +269,11 @@ type ToolName =
   | "enviar_mensagem_cliente"
   | "assumir_atendimento"
   | "devolver_para_bot"
-  | "pegar_ultimo_cliente_atendido";
+  | "pegar_ultimo_cliente_atendido"
+  | "status_instancia"
+  | "bloquear_contato"
+  | "desbloquear_contato"
+  | "buscar_mensagens_cliente";
 
 interface AiCompletionResponse {
   choices?: Array<{
@@ -271,6 +346,7 @@ export class AdminCommandService {
 
     // Loop de tool calling (máximo 5 iterações para segurança)
     let toolsExecuted = false;
+    let lastToolResults: Array<{ name: string; result: string }> = [];
 
     for (let iteration = 0; iteration < 5; iteration++) {
       const data = await this.callAi(baseUrl, model, messages, usesPlatformKeys, tenantApiKey);
@@ -295,7 +371,7 @@ export class AdminCommandService {
       }
 
       // Executa cada tool call
-      const toolResults: string[] = [];
+      const toolResults: Array<{ name: string; result: string }> = [];
       for (const toolCall of assistantMessage.tool_calls) {
         let toolResult: string;
 
@@ -316,17 +392,69 @@ export class AdminCommandService {
           tool_call_id: toolCall.id,
           content: toolResult
         });
-        toolResults.push(toolResult);
+        toolResults.push({ name: toolCall.function.name, result: toolResult });
       }
       toolsExecuted = true;
+      lastToolResults = toolResults;
     }
 
     // Loop encerrou sem resposta final do modelo
     if (toolsExecuted) {
-      await ctx.sendResponse("✅ Pronto.");
+      await ctx.sendResponse(this.buildFallbackResponse(lastToolResults));
     }
 
     return true;
+  }
+
+  /**
+   * Constrói resposta de fallback legível quando o modelo não gera texto final.
+   * Tenta extrair info relevante dos resultados das tools para dar contexto ao admin.
+   */
+  private buildFallbackResponse(toolResults: Array<{ name: string; result: string }>): string {
+    if (toolResults.length === 0) return "✅ Pronto.";
+
+    // Verifica se algum envio de mensagem foi feito
+    const sendResult = toolResults.find((t) => t.name === "enviar_mensagem_cliente");
+    if (sendResult) {
+      try {
+        const parsed = JSON.parse(sendResult.result) as Record<string, unknown>;
+        if (parsed["sucesso"] === true) {
+          const phone = parsed["telefone"] as string | undefined;
+          const msg = parsed["mensagem_enviada"] as string | undefined;
+          const preview = msg ? `\n\n_"${msg.slice(0, 120)}${msg.length > 120 ? "..." : ""}"_` : "";
+          return `✅ Mensagem enviada${phone ? ` para *${phone}*` : ""}.${preview}`;
+        }
+        return `⚠️ Falha ao enviar mensagem: ${String(parsed["erro"] ?? "erro desconhecido")}`;
+      } catch { /* segue */ }
+    }
+
+    // Assumir/devolver atendimento
+    const takeoverResult = toolResults.find((t) => t.name === "assumir_atendimento" || t.name === "devolver_para_bot");
+    if (takeoverResult) {
+      try {
+        const parsed = JSON.parse(takeoverResult.result) as Record<string, unknown>;
+        if (parsed["sucesso"] === true) {
+          return takeoverResult.name === "assumir_atendimento"
+            ? `✅ Atendimento assumido para *${parsed["telefone"] ?? ""}*.`
+            : `✅ Atendimento devolvido ao bot para *${parsed["telefone"] ?? ""}*.`;
+        }
+      } catch { /* segue */ }
+    }
+
+    // Blacklist
+    const blockResult = toolResults.find((t) => t.name === "bloquear_contato" || t.name === "desbloquear_contato");
+    if (blockResult) {
+      try {
+        const parsed = JSON.parse(blockResult.result) as Record<string, unknown>;
+        if (parsed["sucesso"] === true) {
+          return blockResult.name === "bloquear_contato"
+            ? `✅ Contato *${parsed["telefone"] ?? ""}* bloqueado.`
+            : `✅ Contato *${parsed["telefone"] ?? ""}* desbloqueado.`;
+        }
+      } catch { /* segue */ }
+    }
+
+    return "✅ Pronto.";
   }
 
   /**
@@ -664,12 +792,14 @@ export class AdminCommandService {
       }
 
       case "pegar_ultimo_cliente_atendido": {
+        // Exclui o próprio admin da busca filtrando pelo telefone dele
+        const adminPhoneSuffix = ctx.adminPhone?.replace(/\D/g, "").slice(-8);
         const lastConv = await prisma.conversation.findFirst({
           where: {
             instanceId: ctx.instanceId,
-            contact: {
-              phoneNumber: { not: { contains: "admin" } }
-            }
+            ...(adminPhoneSuffix ? {
+              contact: { NOT: { phoneNumber: { contains: adminPhoneSuffix } } }
+            } : {})
           },
           orderBy: { lastMessageAt: "desc" },
           select: {
@@ -711,9 +841,180 @@ export class AdminCommandService {
         });
       }
 
+      case "status_instancia": {
+        const hoje = new Date();
+        hoje.setHours(0, 0, 0, 0);
+
+        const [abertas, hoje_total, leads_hoje, agendamentos] = await Promise.all([
+          prisma.conversation.count({
+            where: { instanceId: ctx.instanceId, status: "OPEN" }
+          }),
+          prisma.conversation.count({
+            where: { instanceId: ctx.instanceId, lastMessageAt: { gte: hoje } }
+          }),
+          prisma.clientMemory.count({
+            where: { lastContactAt: { gte: hoje } }
+          }),
+          prisma.clientMemory.count({
+            where: {
+              scheduledAt: { gte: new Date() }
+            }
+          })
+        ]);
+
+        return JSON.stringify({
+          conversas_abertas_agora: abertas,
+          atendimentos_hoje: hoje_total,
+          leads_novos_hoje: leads_hoje,
+          agendamentos_futuros: agendamentos,
+          data: new Date().toLocaleString("pt-BR")
+        });
+      }
+
+      case "bloquear_contato": {
+        const rawPhone = String(args["telefone"] ?? "").replace(/\D/g, "");
+        const motivo = String(args["motivo"] ?? "").trim() || null;
+        if (!rawPhone) return JSON.stringify({ sucesso: false, erro: "Telefone inválido." });
+
+        const updated = await prisma.contact.updateMany({
+          where: { instanceId: ctx.instanceId, phoneNumber: { contains: rawPhone.slice(-8) } },
+          data: { isBlacklisted: true, ...(motivo ? { notes: motivo } : {}) }
+        });
+
+        if (updated.count === 0) {
+          return JSON.stringify({ sucesso: false, erro: `Contato ${rawPhone} não encontrado.` });
+        }
+
+        return JSON.stringify({ sucesso: true, telefone: rawPhone, contatos_atualizados: updated.count });
+      }
+
+      case "desbloquear_contato": {
+        const rawPhone = String(args["telefone"] ?? "").replace(/\D/g, "");
+        if (!rawPhone) return JSON.stringify({ sucesso: false, erro: "Telefone inválido." });
+
+        const updated = await prisma.contact.updateMany({
+          where: { instanceId: ctx.instanceId, phoneNumber: { contains: rawPhone.slice(-8) } },
+          data: { isBlacklisted: false }
+        });
+
+        if (updated.count === 0) {
+          return JSON.stringify({ sucesso: false, erro: `Contato ${rawPhone} não encontrado.` });
+        }
+
+        return JSON.stringify({ sucesso: true, telefone: rawPhone, contatos_atualizados: updated.count });
+      }
+
+      case "buscar_mensagens_cliente": {
+        const rawPhone = String(args["telefone"] ?? "").replace(/\D/g, "");
+        const limit = typeof args["limite"] === "number" ? Math.min(args["limite"], 50) : 20;
+        if (!rawPhone) return JSON.stringify({ erro: "Telefone inválido." });
+
+        const contact = await prisma.contact.findFirst({
+          where: { instanceId: ctx.instanceId, phoneNumber: { contains: rawPhone.slice(-8) } },
+          select: { id: true, displayName: true, phoneNumber: true }
+        });
+
+        if (!contact) {
+          return JSON.stringify({ erro: `Cliente ${rawPhone} não encontrado.` });
+        }
+
+        const messages = await prisma.message.findMany({
+          where: { instanceId: ctx.instanceId, remoteJid: { contains: contact.phoneNumber.slice(-8) } },
+          orderBy: { createdAt: "desc" },
+          take: limit,
+          select: {
+            content: true,
+            role: true,
+            createdAt: true,
+            messageType: true
+          }
+        });
+
+        const result = messages.reverse().map((m) => ({
+          de: m.role === "assistant" ? "bot" : "cliente",
+          texto: m.content?.slice(0, 300),
+          tipo: m.messageType,
+          horario: m.createdAt.toISOString().slice(0, 16).replace("T", " ")
+        }));
+
+        return JSON.stringify({
+          cliente: contact.displayName ?? contact.phoneNumber,
+          telefone: contact.phoneNumber,
+          total_mensagens: result.length,
+          mensagens: result
+        });
+      }
+
       default:
         return JSON.stringify({ erro: `Ferramenta desconhecida: ${name}` });
     }
+  }
+
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Gera o texto do resumo diário para uma instância.
+   * Chamado pelo scheduler do InstanceOrchestrator às 8h.
+   */
+  public async generateDailySummary(tenantId: string, instanceId: string): Promise<string> {
+    const prisma = await this.tenantPrismaRegistry.getClient(tenantId);
+    const hoje = new Date();
+    hoje.setHours(0, 0, 0, 0);
+    const semana = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+
+    const [abertasHoje, fechadasHoje, totalSemana, semAgendamento, agendamentosFuturos, humanAtivos] = await Promise.all([
+      prisma.conversation.count({
+        where: { instanceId, status: "OPEN", lastMessageAt: { gte: hoje } }
+      }),
+      prisma.conversation.count({
+        where: { instanceId, status: "CLOSED", lastMessageAt: { gte: hoje } }
+      }),
+      prisma.conversation.count({
+        where: { instanceId, lastMessageAt: { gte: semana } }
+      }),
+      prisma.clientMemory.count({
+        where: {
+          serviceInterest: { not: null },
+          scheduledAt: null,
+          lastContactAt: { gte: semana },
+          status: { notIn: ["closed", "client"] }
+        }
+      }),
+      prisma.clientMemory.findMany({
+        where: { scheduledAt: { gte: new Date() } },
+        orderBy: { scheduledAt: "asc" },
+        take: 5,
+        select: { name: true, phoneNumber: true, scheduledAt: true, serviceInterest: true }
+      }),
+      prisma.conversation.count({
+        where: { instanceId, humanTakeover: true, status: "OPEN" }
+      })
+    ]);
+
+    const dataHoje = new Date().toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "2-digit" });
+
+    const linhas = [
+      `📊 *Resumo Diário — ${dataHoje}*`,
+      "",
+      "*Hoje:*",
+      `• Conversas abertas: ${abertasHoje}`,
+      `• Conversas finalizadas: ${fechadasHoje}`,
+      `• Em atendimento humano: ${humanAtivos}`,
+      "",
+      `*Últimos 7 dias:* ${totalSemana} atendimentos`,
+      `*Leads sem agendamento:* ${semAgendamento}`,
+    ];
+
+    if (agendamentosFuturos.length > 0) {
+      linhas.push("", "*Próximos agendamentos:*");
+      for (const ag of agendamentosFuturos) {
+        const data = ag.scheduledAt?.toLocaleDateString("pt-BR") ?? "?";
+        const nome = ag.name ?? ag.phoneNumber;
+        linhas.push(`• ${nome} — ${data}${ag.serviceInterest ? ` (${ag.serviceInterest})` : ""}`);
+      }
+    }
+
+    return linhas.join("\n");
   }
 
   // ---------------------------------------------------------------------------

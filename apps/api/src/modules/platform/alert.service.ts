@@ -114,7 +114,7 @@ export class PlatformAlertService {
     instanceName: string
   ): Promise<void> {
     const config = await this.getConfig();
-    if (!config?.adminAlertPhone || !config.alertInstanceDown) return;
+    if (!config?.adminAlertPhone) return;
 
     const phone = config.adminAlertPhone;
     const msg = `✅ *InfraCode*\n\nInstância reconectada!\n\nTenant: ${tenantId}\nInstância: ${instanceName}\nHorário: ${new Date().toLocaleString("pt-BR")}`;

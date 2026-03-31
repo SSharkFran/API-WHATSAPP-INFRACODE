@@ -5,6 +5,52 @@ interface KnowledgeServiceDeps {
   tenantPrismaRegistry: TenantPrismaRegistry;
 }
 
+const SEMANTIC_SIMILARITY_THRESHOLD = 0.55;
+
+const stopWords = new Set([
+  "o", "a", "os", "as", "um", "uma", "uns", "umas",
+  "de", "do", "da", "dos", "das", "em", "no", "na", "nos", "nas",
+  "por", "para", "com", "sem", "sob", "sobre", "entre",
+  "e", "ou", "mas", "que", "se", "é", "sao", "foi", "ser",
+  "me", "te", "se", "nos", "vos", "lhe", "lhes",
+  "qual", "quais", "como", "onde", "quando", "porque", "qual",
+  "voces", "vcs", "vc", "eu", "tu", "ele", "ela",
+  "otimo", "obrigado", "ola", "oi", "bom", "dia", "tarde", "noite"
+]);
+
+/**
+ * Normaliza texto para comparacao semantica:
+ * lowercase, remove acentos, pontuacao, e stop words.
+ */
+const normalizeForComparison = (text: string): Set<string> => {
+  const normalized = text
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .trim();
+
+  const words = normalized.split(/\s+/).filter((w) => w.length > 2 && !stopWords.has(w));
+  return new Set(words);
+};
+
+/**
+ * Calcula similaridade de Jaccard entre dois conjuntos de palavras.
+ * Retorna valor entre 0 (nenhuma palavra em comum) e 1 (identicas).
+ */
+const jaccardSimilarity = (a: Set<string>, b: Set<string>): number => {
+  if (a.size === 0 && b.size === 0) return 1;
+  if (a.size === 0 || b.size === 0) return 0;
+
+  let intersection = 0;
+  for (const word of a) {
+    if (b.has(word)) intersection++;
+  }
+
+  const union = a.size + b.size - intersection;
+  return intersection / union;
+};
+
 export interface LearnedKnowledge {
   id: string;
   instanceId: string;
@@ -23,7 +69,9 @@ export class KnowledgeService {
   }
 
   /**
-   * Salva conhecimento aprendido do admin no Supabase.
+   * Salva conhecimento aprendido do admin.
+   * Se ja existir uma pergunta semanticamente equivalente (similaridade >= 0.55),
+   * atualiza a resposta em vez de criar um registro duplicado.
    */
   public async save(
     tenantId: string,
@@ -34,6 +82,39 @@ export class KnowledgeService {
     taughtBy: string
   ): Promise<LearnedKnowledge> {
     const prisma = await this.tenantPrismaRegistry.getClient(tenantId);
+
+    const newQuestionWords = normalizeForComparison(question);
+
+    const existing = await prisma.tenantKnowledge.findMany({
+      where: { instanceId },
+      select: { id: true, question: true }
+    });
+
+    let duplicateId: string | null = null;
+    let bestSimilarity = 0;
+
+    for (const record of existing) {
+      const existingWords = normalizeForComparison(record.question);
+      const similarity = jaccardSimilarity(newQuestionWords, existingWords);
+      if (similarity >= SEMANTIC_SIMILARITY_THRESHOLD && similarity > bestSimilarity) {
+        bestSimilarity = similarity;
+        duplicateId = record.id;
+      }
+    }
+
+    if (duplicateId) {
+      console.log(`[knowledge] pergunta similar encontrada (${(bestSimilarity * 100).toFixed(0)}% match), atualizando id=${duplicateId}`);
+      const updated = await prisma.tenantKnowledge.update({
+        where: { id: duplicateId },
+        data: {
+          answer: answer.trim(),
+          rawAnswer: rawAnswer.trim(),
+          taughtBy
+        }
+      });
+      return this.mapRecord(updated);
+    }
+
     const record = await prisma.tenantKnowledge.create({
       data: {
         id: randomUUID(),
@@ -86,6 +167,7 @@ export class KnowledgeService {
     rawAnswer: string | null;
     taughtBy: string | null;
     createdAt: Date;
+    updatedAt?: Date;
   }): LearnedKnowledge {
     return {
       id: record.id,

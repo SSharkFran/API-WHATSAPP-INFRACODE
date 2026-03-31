@@ -238,6 +238,7 @@ export const buildTenantSchemaSql = (schemaName: string): string[] => {
       "createdAt" TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );`,
     `CREATE INDEX IF NOT EXISTS "idx_${schemaName}_knowledge_instance" ON ${schema}."TenantKnowledge" ("instanceId");`,
+    `ALTER TABLE ${schema}."TenantKnowledge" ADD COLUMN IF NOT EXISTS "updatedAt" TIMESTAMPTZ NOT NULL DEFAULT NOW();`,
     `CREATE TABLE IF NOT EXISTS ${schema}."FiadoTab" (
       "id" TEXT PRIMARY KEY,
       "instanceId" TEXT NOT NULL REFERENCES ${schema}."Instance"("id") ON DELETE CASCADE,

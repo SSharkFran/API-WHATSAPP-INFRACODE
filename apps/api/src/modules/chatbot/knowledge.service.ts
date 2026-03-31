@@ -35,10 +35,13 @@ const normalizeForComparison = (text: string): Set<string> => {
 };
 
 /**
- * Calcula similaridade de Jaccard entre dois conjuntos de palavras.
- * Retorna valor entre 0 (nenhuma palavra em comum) e 1 (identicas).
+ * Calcula a similaridade semantica entre dois conjuntos de palavras.
+ * Usa o maximo entre Jaccard e Containment para lidar bem com perguntas curtas:
+ * - Jaccard: bom para perguntas de tamanho similar
+ * - Containment: se as palavras de A estao contidas em B (ou vice-versa),
+ *   considera similar mesmo que B tenha palavras extras (ex: "endereco" vs "endereco empresa")
  */
-const jaccardSimilarity = (a: Set<string>, b: Set<string>): number => {
+const semanticSimilarity = (a: Set<string>, b: Set<string>): number => {
   if (a.size === 0 && b.size === 0) return 1;
   if (a.size === 0 || b.size === 0) return 0;
 
@@ -47,8 +50,10 @@ const jaccardSimilarity = (a: Set<string>, b: Set<string>): number => {
     if (b.has(word)) intersection++;
   }
 
-  const union = a.size + b.size - intersection;
-  return intersection / union;
+  const jaccard = intersection / (a.size + b.size - intersection);
+  const containment = intersection / Math.min(a.size, b.size);
+
+  return Math.max(jaccard, containment);
 };
 
 export interface LearnedKnowledge {
@@ -95,7 +100,7 @@ export class KnowledgeService {
 
     for (const record of existing) {
       const existingWords = normalizeForComparison(record.question);
-      const similarity = jaccardSimilarity(newQuestionWords, existingWords);
+      const similarity = semanticSimilarity(newQuestionWords, existingWords);
       if (similarity >= SEMANTIC_SIMILARITY_THRESHOLD && similarity > bestSimilarity) {
         bestSimilarity = similarity;
         duplicateId = record.id;

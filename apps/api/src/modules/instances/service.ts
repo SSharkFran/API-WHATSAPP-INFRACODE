@@ -3433,7 +3433,20 @@ if (event.status === "CONNECTED") {
   private extractQuotedConfirmationQuestion(rawMessage?: Record<string, unknown>): string | null {
     const quotedText = this.extractQuotedMessageText(rawMessage);
 
-    if (!quotedText) return null;
+    // debug temporario: loga estrutura do rawMessage para diagnostico
+    if (!quotedText) {
+      const ext = rawMessage?.extendedTextMessage;
+      const ctxInfo = ext && typeof ext === "object" ? (ext as Record<string, unknown>).contextInfo : undefined;
+      console.log("[debug-correction] quotedText nulo", {
+        hasRawMessage: Boolean(rawMessage),
+        hasExtended: Boolean(ext),
+        hasContextInfo: Boolean(ctxInfo),
+        contextInfoKeys: ctxInfo && typeof ctxInfo === "object" ? Object.keys(ctxInfo as object) : null
+      });
+      return null;
+    }
+
+    console.log("[debug-correction] quotedText encontrado:", quotedText.slice(0, 120));
 
     if (!/aprendi e respondi/i.test(quotedText)) {
       return null;

@@ -270,6 +270,8 @@ export class AdminCommandService {
     ];
 
     // Loop de tool calling (máximo 5 iterações para segurança)
+    let toolsExecuted = false;
+
     for (let iteration = 0; iteration < 5; iteration++) {
       const data = await this.callAi(baseUrl, model, messages, usesPlatformKeys, tenantApiKey);
 
@@ -287,13 +289,13 @@ export class AdminCommandService {
       // Sem tool calls → resposta final
       if (!assistantMessage.tool_calls?.length) {
         const finalText = assistantMessage.content?.trim();
-        if (finalText) {
-          await ctx.sendResponse(finalText);
-        }
+        // Alguns modelos retornam content: null após tool calls — envia fallback
+        await ctx.sendResponse(finalText || (toolsExecuted ? "✅ Pronto." : ""));
         return true;
       }
 
       // Executa cada tool call
+      const toolResults: string[] = [];
       for (const toolCall of assistantMessage.tool_calls) {
         let toolResult: string;
 
@@ -314,7 +316,14 @@ export class AdminCommandService {
           tool_call_id: toolCall.id,
           content: toolResult
         });
+        toolResults.push(toolResult);
       }
+      toolsExecuted = true;
+    }
+
+    // Loop encerrou sem resposta final do modelo
+    if (toolsExecuted) {
+      await ctx.sendResponse("✅ Pronto.");
     }
 
     return true;

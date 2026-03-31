@@ -250,6 +250,16 @@ export const buildTenantSchemaSql = (schemaName: string): string[] => {
       "updatedAt" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       CONSTRAINT "uniq_${schemaName}_fiado_instance_phone" UNIQUE ("instanceId", "phoneNumber")
     );`,
-    `CREATE INDEX IF NOT EXISTS "idx_${schemaName}_audit_created" ON ${schema}."AuditLog" ("createdAt");`
+    `CREATE INDEX IF NOT EXISTS "idx_${schemaName}_audit_created" ON ${schema}."AuditLog" ("createdAt");`,
+    `CREATE TABLE IF NOT EXISTS ${schema}."ContactPersistentMemory" (
+      "id" TEXT PRIMARY KEY,
+      "instanceId" TEXT NOT NULL REFERENCES ${schema}."Instance"("id") ON DELETE CASCADE,
+      "phoneNumber" TEXT NOT NULL,
+      "data" JSONB NOT NULL DEFAULT '{}'::JSONB,
+      "createdAt" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      "updatedAt" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      CONSTRAINT "uniq_${schemaName}_persistent_memory_instance_phone" UNIQUE ("instanceId", "phoneNumber")
+    );`,
+    `CREATE INDEX IF NOT EXISTS "idx_${schemaName}_persistent_memory_instance" ON ${schema}."ContactPersistentMemory" ("instanceId");`
   ];
 };

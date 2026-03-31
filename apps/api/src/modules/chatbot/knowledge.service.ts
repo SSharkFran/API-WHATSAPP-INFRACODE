@@ -135,14 +135,30 @@ export class KnowledgeService {
   }
 
   /**
-   * Retorna todos os conhecimentos da instancia como bloco de contexto
-   * para injetar no system prompt do LLM.
+   * Retorna o conhecimento da instancia como bloco de contexto para o system prompt.
+   * Prioriza o documento de sintese (gerado por IA, organizado e deduplicado).
+   * Fallback para lista crua de Q&As se sintese ainda nao existir.
    */
   public async buildContextBlock(
     tenantId: string,
     instanceId: string
   ): Promise<string | null> {
     const prisma = await this.tenantPrismaRegistry.getClient(tenantId);
+
+    const config = await prisma.chatbotConfig.findUnique({
+      where: { instanceId },
+      select: { knowledgeSynthesis: true }
+    });
+
+    if (config?.knowledgeSynthesis?.trim()) {
+      return [
+        "### BASE DE CONHECIMENTO DA EMPRESA ###",
+        "As informacoes abaixo foram organizadas e validadas pelo administrador. Use como fonte de verdade:",
+        config.knowledgeSynthesis.trim()
+      ].join("\n");
+    }
+
+    // fallback: lista crua enquanto sintese ainda nao foi gerada
     const records = await prisma.tenantKnowledge.findMany({
       where: { instanceId },
       orderBy: { createdAt: "asc" },

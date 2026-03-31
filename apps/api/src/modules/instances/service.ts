@@ -2665,6 +2665,10 @@ if (event.status === "CONNECTED") {
               }
             }
 
+            // fire-and-forget: sintetiza conhecimento apos novo aprendizado
+            void this.chatbotService.triggerKnowledgeSynthesis(tenantId, instance.id)
+              .catch((err) => console.warn("[knowledge-synthesis] erro no fire-and-forget:", err));
+
             return;
           }
 

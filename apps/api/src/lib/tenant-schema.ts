@@ -201,6 +201,8 @@ export const buildTenantSchemaSql = (schemaName: string): string[] => {
     `ALTER TABLE ${schema}."ChatbotConfig" ADD COLUMN IF NOT EXISTS "leadPriceTable" JSONB NOT NULL DEFAULT '{}'::JSONB;`,
     `ALTER TABLE ${schema}."ChatbotConfig" ADD COLUMN IF NOT EXISTS "leadSurchargeTable" JSONB NOT NULL DEFAULT '{}'::JSONB;`,
     `ALTER TABLE ${schema}."ChatbotConfig" ADD COLUMN IF NOT EXISTS "modules" JSONB NOT NULL DEFAULT '{}'::JSONB;`,
+    `ALTER TABLE ${schema}."ChatbotConfig" ADD COLUMN IF NOT EXISTS "knowledgeSynthesis" TEXT;`,
+    `ALTER TABLE ${schema}."ChatbotConfig" ADD COLUMN IF NOT EXISTS "knowledgeSynthesisUpdatedAt" TIMESTAMPTZ;`,
     `CREATE TABLE IF NOT EXISTS ${schema}."AuditLog" (
       "id" TEXT PRIMARY KEY,
       "actorType" TEXT NOT NULL,

@@ -185,6 +185,8 @@ model ChatbotConfig {
   leadPriceTable   Json     @default("{}")
   leadSurchargeTable Json   @default("{}")
   modules          Json     @default("{}")
+  knowledgeSynthesis String?
+  knowledgeSynthesisUpdatedAt DateTime?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
   instance        Instance @relation(fields: [instanceId], references: [id], onDelete: Cascade)

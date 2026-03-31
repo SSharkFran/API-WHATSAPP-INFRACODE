@@ -335,6 +335,98 @@ export class ChatbotService {
     );
   }
 
+  /**
+   * Sintetiza todo o conhecimento aprendido em um documento markdown organizado.
+   * Chamado em fire-and-forget apos cada novo aprendizado do admin.
+   */
+  public async triggerKnowledgeSynthesis(
+    tenantId: string,
+    instanceId: string
+  ): Promise<void> {
+    const { managedAiProvider } = await this.getContext(tenantId, instanceId);
+    if (!managedAiProvider.isConfigured || !managedAiProvider.apiKeyEncrypted) return;
+
+    const prisma = await this.tenantPrismaRegistry.getClient(tenantId);
+
+    const [records, config] = await Promise.all([
+      prisma.tenantKnowledge.findMany({
+        where: { instanceId },
+        orderBy: { createdAt: "asc" },
+        select: { question: true, answer: true, createdAt: true }
+      }),
+      prisma.chatbotConfig.findUnique({
+        where: { instanceId },
+        select: { knowledgeSynthesis: true }
+      })
+    ]);
+
+    if (records.length === 0) return;
+
+    const apiKey = decrypt(managedAiProvider.apiKeyEncrypted, this.config.API_ENCRYPTION_KEY);
+
+    const factsList = records.map((r, i) =>
+      `${i + 1}. P: "${r.question}" → R: "${r.answer}"`
+    ).join("\n");
+
+    const currentDoc = config?.knowledgeSynthesis?.trim()
+      ? `\n\nDOCUMENTO ATUAL (atualize e melhore, nao descarte informacoes validas):\n${config.knowledgeSynthesis.trim()}`
+      : "";
+
+    const prompt = [
+      "Voce e um organizador de base de conhecimento corporativo.",
+      "Abaixo estao fatos aprendidos sobre uma empresa atraves de conversas com o administrador.",
+      "Produza um documento markdown limpo, organizado por secoes logicas (ex: ## Empresa, ## Servicos, ## Precos, ## Contato, ## Politicas).",
+      "Regras:",
+      "- Elimine duplicatas e informacoes contraditórias (prefira a mais recente)",
+      "- Seja conciso e factual — nao invente nada",
+      "- Preserve TODAS as informacoes validas",
+      "- Use linguagem profissional em portugues do Brasil",
+      "- Retorne APENAS o markdown, sem explicacoes antes ou depois",
+      "",
+      `FATOS APRENDIDOS:\n${factsList}`,
+      currentDoc
+    ].join("\n");
+
+    const response = await fetch(`${managedAiProvider.baseUrl}/chat/completions`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${apiKey}`
+      },
+      body: JSON.stringify({
+        model: managedAiProvider.model,
+        temperature: 0.2,
+        messages: [
+          { role: "system", content: "Voce e um organizador de conhecimento corporativo. Responda apenas com o documento markdown solicitado." },
+          { role: "user", content: prompt }
+        ]
+      })
+    });
+
+    if (!response.ok) {
+      console.warn(`[knowledge-synthesis] erro na IA: ${response.status}`);
+      return;
+    }
+
+    const data = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
+    const synthesis = data.choices?.[0]?.message?.content?.trim();
+
+    if (!synthesis) {
+      console.warn("[knowledge-synthesis] resposta vazia da IA");
+      return;
+    }
+
+    await prisma.chatbotConfig.update({
+      where: { instanceId },
+      data: {
+        knowledgeSynthesis: synthesis,
+        knowledgeSynthesisUpdatedAt: new Date()
+      }
+    });
+
+    console.log(`[knowledge-synthesis] documento atualizado para instancia ${instanceId} (${records.length} fatos)`);
+  }
+
   public async getConfig(tenantId: string, instanceId: string): Promise<ChatbotConfig> {
     const { config } = await this.getContext(tenantId, instanceId);
     return config;

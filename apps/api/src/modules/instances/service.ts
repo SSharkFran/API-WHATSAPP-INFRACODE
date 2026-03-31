@@ -2464,7 +2464,8 @@ if (event.status === "CONNECTED") {
     );
 
     try {
-      const inputText = typeof event.payload.text === "string" ? event.payload.text.trim() : "";
+      // rawTextInput ja inclui fallback de extendedTextMessage para quoted replies
+      const inputText = rawTextInput;
 
       let finalInputText = inputText;
 

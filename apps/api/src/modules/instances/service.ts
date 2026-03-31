@@ -1683,11 +1683,6 @@ if (event.status === "CONNECTED") {
       return "";
     })();
     const rawTextInput = payloadText || rawMessageExtText;
-    if (!payloadText && rawMessageExtText) {
-      console.log("[text-fallback] texto extraido de rawMessage.extendedTextMessage ao inves de payload.text", {
-        instanceId: instance.id, remoteJid: event.remoteJid, textPreview: rawMessageExtText.slice(0, 80)
-      });
-    }
     const msgText = rawTextInput.toLowerCase();
     const hasMeaningfulInboundContent = event.messageType !== "text" || rawTextInput.length > 0;
     const isTemporaryTakeoverCommand = msgText === "*";
@@ -3434,20 +3429,9 @@ if (event.status === "CONNECTED") {
   private extractQuotedConfirmationQuestion(rawMessage?: Record<string, unknown>): string | null {
     const quotedText = this.extractQuotedMessageText(rawMessage);
 
-    // debug temporario: loga estrutura do rawMessage para diagnostico
     if (!quotedText) {
-      const ext = rawMessage?.extendedTextMessage;
-      const ctxInfo = ext && typeof ext === "object" ? (ext as Record<string, unknown>).contextInfo : undefined;
-      console.log("[debug-correction] quotedText nulo", {
-        hasRawMessage: Boolean(rawMessage),
-        hasExtended: Boolean(ext),
-        hasContextInfo: Boolean(ctxInfo),
-        contextInfoKeys: ctxInfo && typeof ctxInfo === "object" ? Object.keys(ctxInfo as object) : null
-      });
       return null;
     }
-
-    console.log("[debug-correction] quotedText encontrado:", quotedText.slice(0, 120));
 
     if (!/aprendi e respondi/i.test(quotedText)) {
       return null;
@@ -3458,11 +3442,6 @@ if (event.status === "CONNECTED") {
       quotedText.match(/Pergunta:\s*"([^"]+)"/i)?.[1]?.trim() ??
       quotedText.match(/Pergunta:\s*\u201c([^\u201d]+)\u201d/i)?.[1]?.trim() ??
       quotedText.match(/Pergunta:\s*(.+?)(?:\n|Resposta)/i)?.[1]?.trim();
-
-    console.log("[escalation] confirmacao quotada detectada", {
-      hasMatch: Boolean(match),
-      quotedPreview: quotedText.slice(0, 200)
-    });
 
     return match ?? null;
   }

@@ -2732,7 +2732,7 @@ if (event.status === "CONNECTED") {
       }
 
       // Comando livre do admin verificado — não é reply de aprendizado nem correção
-      if (finalInputText && isVerifiedAprendizadoContinuoAdminSender && !isAdminOrInstanceSender) {
+      if (finalInputText && isVerifiedAprendizadoContinuoAdminSender) {
         const handled = await this.adminCommandService.handleCommand({
           tenantId,
           instanceId: instance.id,

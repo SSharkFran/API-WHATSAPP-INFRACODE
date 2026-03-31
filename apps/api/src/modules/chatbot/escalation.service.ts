@@ -300,6 +300,29 @@ export class EscalationService {
   }
 
   /**
+   * Processa uma correcao de aprendizado enviada pelo admin.
+   * Chamado quando o admin responde a uma mensagem de confirmacao "Aprendi e respondi"
+   * para corrigir uma resposta aprendida incorretamente.
+   */
+  public async processAdminCorrection(
+    tenantId: string,
+    instanceId: string,
+    originalQuestion: string,
+    correctedAnswer: string
+  ): Promise<void> {
+    await this.knowledgeService.save(
+      tenantId,
+      instanceId,
+      originalQuestion,
+      correctedAnswer,
+      correctedAnswer,
+      "admin_correction"
+    );
+
+    console.log(`[escalation] correcao de conhecimento registrada para: "${originalQuestion}"`);
+  }
+
+  /**
    * Verifica se uma instancia tem conversas aguardando resposta do admin.
    */
   public async hasPendingEscalations(

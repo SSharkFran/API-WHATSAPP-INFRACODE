@@ -2602,6 +2602,23 @@ if (event.status === "CONNECTED") {
       if (finalInputText && canProcessAprendizadoContinuoReply) {
         await this.escalationService.releaseTimedOutEscalations(tenantId, instance.id);
 
+        // Detecta correcao: admin respondendo a confirmacao "Aprendi e respondi" para corrigir resposta errada
+        const correctionQuestion = this.extractQuotedConfirmationQuestion(event.rawMessage);
+        if (correctionQuestion && isVerifiedAprendizadoContinuoAdminSender) {
+          await this.escalationService.processAdminCorrection(tenantId, instance.id, correctionQuestion, finalInputText);
+          void this.chatbotService.triggerKnowledgeSynthesis(tenantId, instance.id)
+            .catch((err) => console.warn("[knowledge-synthesis] erro na correcao:", err));
+          await this.sendAutomatedTextMessage(
+            tenantId,
+            instance.id,
+            remoteNumber,
+            event.remoteJid,
+            `✅ Corrição registrada!\n\nPergunta: "${correctionQuestion}"\nNova resposta: "${finalInputText}"`,
+            { action: "admin_learning_correction", kind: "chatbot" }
+          );
+          return;
+        }
+
         const hasPendingEscalations = hasPendingEscalationsForAdminBypass;
         if (hasPendingEscalations) {
           const learningResult = await this.escalationService.processAdminReply(
@@ -3346,6 +3363,20 @@ if (event.status === "CONNECTED") {
     }
 
     return quotedText.match(/\bID:\s*([a-z0-9]+)\b/i)?.[1] ?? null;
+  }
+
+  /**
+   * Detecta se o admin esta respondendo a uma mensagem de confirmacao "Aprendi e respondi".
+   * Retorna a pergunta original extraida do texto quotado, ou null.
+   */
+  private extractQuotedConfirmationQuestion(rawMessage?: Record<string, unknown>): string | null {
+    const quotedText = this.extractQuotedMessageText(rawMessage);
+
+    if (!quotedText || !/aprendi e respondi/i.test(quotedText)) {
+      return null;
+    }
+
+    return quotedText.match(/Pergunta:\s*"([^"]+)"/i)?.[1]?.trim() ?? null;
   }
 
   private async getConversationSession(

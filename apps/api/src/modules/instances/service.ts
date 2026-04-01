@@ -354,7 +354,7 @@ export class InstanceOrchestrator {
     return `${instanceId}:${externalMessageId}`;
   }
 
-  private rememberAutomatedOutboundEcho(instanceId: string, externalMessageId?: string | null): void {
+  public rememberAutomatedOutboundEcho(instanceId: string, externalMessageId?: string | null): void {
     const normalizedExternalMessageId = externalMessageId?.trim();
     if (!normalizedExternalMessageId) {
       return;
@@ -1978,14 +1978,17 @@ if (event.status === "CONNECTED") {
     ];
     const matchedAdminPhone = this.findMatchingExpectedPhone(adminCandidatePhones, adminSenderCandidates);
     const matchedVerifiedAdminPhone = this.findMatchingExpectedPhone(verifiedAdminPhones, adminSenderCandidates);
-    const isVerifiedAprendizadoContinuoAdminSender =
+    // Para mensagens fromMe (echoes), remoteJid e o destinatario — nao o remetente.
+    // Usar remoteJid para detectar admin sender causaria falso positivo quando o bot envia para o admin.
+    const isVerifiedAprendizadoContinuoAdminSender = !event.messageKey?.fromMe && (
       Boolean(matchedVerifiedAdminPhone) ||
       this.matchesAnyExpectedJids(verifiedAdminJids, [
         event.remoteJid,
         senderJid,
         typeof contactFields?.sharedPhoneJid === "string" ? contactFields.sharedPhoneJid : null,
         typeof contactFields?.lastRemoteJid === "string" ? contactFields.lastRemoteJid : null
-      ]);
+      ])
+    );
     const quotedLearningConversationIdFromSignals =
       this.extractQuotedLearningConversationId(event.rawMessage) ??
       this.extractLearningConversationIdFromText(rawTextInput) ??

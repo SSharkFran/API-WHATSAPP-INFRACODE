@@ -177,10 +177,13 @@ export class PlatformAlertService {
         targetJid: `${phone}@s.whatsapp.net`,
         text: message
       });
+      const externalMessageId = (result.externalMessageId as string | undefined) ?? null;
+      // Registra o echo para que ele seja ignorado quando o WhatsApp refletir a mensagem de volta
+      this.instanceOrchestrator.rememberAutomatedOutboundEcho(instanceId, externalMessageId);
 
       return {
         delivered: true,
-        externalMessageId: (result.externalMessageId as string | undefined) ?? null,
+        externalMessageId,
         remoteJid: (result.remoteJid as string | undefined) ?? null
       };
     } catch (err) {

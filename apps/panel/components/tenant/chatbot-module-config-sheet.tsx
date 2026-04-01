@@ -216,6 +216,14 @@ const defaultChatbotModuleConfigs: ChatbotModuleConfigByKey = {
     isEnabled: false,
     cupons: [],
     palavrasGatilho: []
+  },
+  resumoDiario: {
+    isEnabled: false,
+    horaEnvioUtc: 8
+  },
+  sessaoInatividade: {
+    isEnabled: false,
+    horasInatividade: 8
   }
 };
 

@@ -3780,9 +3780,12 @@ if (event.status === "CONNECTED") {
       return;
     }
 
+    // isNewSession = sessão sem histórico anterior (cliente retornando após inatividade ou primeiro contato)
+    const isNewSession = params.session.history.length === 0 && !params.isFirstContact;
     const { contextString } = await this.memoryAgent.getContext({
       tenantId: params.tenantId,
-      phoneNumber: params.resolvedContactNumber
+      phoneNumber: params.resolvedContactNumber,
+      isNewSession
     });
 
     if (this.isSessionExecutionStale(params.session, params.sessionGeneration)) {

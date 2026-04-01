@@ -17,6 +17,7 @@ export class MemoryAgent {
     tenantId: string;
     phoneNumber: string;
     name?: string | null;
+    isNewSession?: boolean;
   }): Promise<MemoryContextResult> {
     const memory = await this.clientMemoryService.findByPhone(params.tenantId, params.phoneNumber);
 
@@ -27,7 +28,7 @@ export class MemoryAgent {
 
     return {
       memory,
-      contextString: this.buildContextString(memory)
+      contextString: this.buildContextString(memory, params.isNewSession ?? false)
     };
   }
 
@@ -65,21 +66,52 @@ export class MemoryAgent {
     await this.clientMemoryService.upsert(params.tenantId, params.phoneNumber, updates);
   }
 
-  private buildContextString(memory: ClientMemory | null): string {
+  private buildContextString(memory: ClientMemory | null, isNewSession: boolean): string {
     if (!memory) {
       return "";
     }
 
-    return [
-      "CONTEXTO DO CLIENTE (use para personalizar o atendimento, mas nao mencione que tem esses dados):",
-      `- Nome registrado: ${memory.name ?? "nao informado"}`,
-      `- E cliente existente: ${memory.isExistingClient ? "SIM" : "NAO ou desconhecido"}`,
-      `- Projeto anterior: ${memory.projectDescription ?? "nenhum registrado"}`,
-      `- Interesse anterior: ${memory.serviceInterest ?? "nenhum registrado"}`,
+    const isReturningClient = memory.isExistingClient || (
+      memory.lastContactAt != null &&
+      Date.now() - new Date(memory.lastContactAt).getTime() > 4 * 60 * 60 * 1000 // > 4h
+    );
+
+    const lastContactFormatted = memory.lastContactAt
+      ? this.formatLastContact(new Date(memory.lastContactAt))
+      : null;
+
+    const greetingInstruction = isNewSession && isReturningClient && memory.name
+      ? `INSTRUCAO DE BOAS-VINDAS: Este e um cliente que ja foi atendido antes. Ao responder, cumprimente-o pelo nome ("${memory.name}") de forma natural e breve. Se houver projeto ou interesse registrado, pode fazer uma referencia curta para mostrar continuidade no atendimento.`
+      : null;
+
+    const lines = [
+      "CONTEXTO DO CLIENTE (use para personalizar o atendimento):",
+      `- Nome: ${memory.name ?? "nao informado"}`,
+      `- Cliente existente: ${memory.isExistingClient ? "SIM" : "NAO ou desconhecido"}`,
+      `- Projeto registrado: ${memory.projectDescription ?? "nenhum"}`,
+      `- Interesse registrado: ${memory.serviceInterest ?? "nenhum"}`,
       `- Status: ${memory.status}`,
-      `- Tags: ${memory.tags.join(", ") || "nenhuma"}`,
+      lastContactFormatted ? `- Ultimo contato: ${lastContactFormatted}` : null,
       `- Observacoes: ${memory.notes ?? "nenhuma"}`
-    ].join("\n");
+    ].filter((l): l is string => l !== null);
+
+    const parts = [lines.join("\n")];
+    if (greetingInstruction) {
+      parts.push(greetingInstruction);
+    }
+
+    return parts.join("\n\n");
+  }
+
+  private formatLastContact(date: Date): string {
+    const diffMs = Date.now() - date.getTime();
+    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+
+    if (diffDays === 0) return "hoje";
+    if (diffDays === 1) return "ontem";
+    if (diffDays < 7) return `${diffDays} dias atras`;
+    if (diffDays < 30) return `${Math.floor(diffDays / 7)} semana(s) atras`;
+    return `${Math.floor(diffDays / 30)} mes(es) atras`;
   }
 
   private mergeNotes(existingNotes: string | null | undefined, leadData: LeadData): string | undefined {

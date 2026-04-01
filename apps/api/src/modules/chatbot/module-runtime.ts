@@ -79,15 +79,33 @@ const palavraPausaModuleSchema = z.object({
   mensagemPausa: z.string().min(1).default("Tudo bem. Vou pausar o atendimento automático por aqui.")
 });
 
+const labelToFieldKey = (label: string): string =>
+  label
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .toLowerCase()
+    .replace(/\s+/g, "_")
+    .replace(/[^a-z0-9_]/g, "")
+    .replace(/_+/g, "_")
+    .replace(/^_|_$/g, "")
+    .slice(0, 64) || "campo";
+
+const memoriaPersonalizadaFieldSchema = z.union([
+  z.object({
+    key: z.string().min(1).max(64),
+    label: z.string().min(1).max(128),
+    description: z.string().min(1).max(512)
+  }),
+  z.string().min(1).max(128).transform((label) => ({
+    key: labelToFieldKey(label),
+    label,
+    description: label
+  }))
+]);
+
 const memoriaPersonalizadaModuleSchema = z.object({
   isEnabled: z.boolean().default(false),
-  fields: z.array(
-    z.object({
-      key: z.string().min(1).max(64),
-      label: z.string().min(1).max(128),
-      description: z.string().min(1).max(512)
-    })
-  ).default([])
+  fields: z.array(memoriaPersonalizadaFieldSchema).default([])
 });
 
 const aprendizadoContinuoModuleSchema = z.object({

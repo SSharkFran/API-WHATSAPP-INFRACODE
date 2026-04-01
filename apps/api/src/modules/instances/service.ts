@@ -2967,12 +2967,38 @@ if (event.status === "CONNECTED") {
         const leadsPhone = chatbotConfig?.leadsPhoneNumber;
         const leadsEnabled = chatbotConfig?.leadsEnabled ?? true;
 
-        const camposObrigatorios = [
-          /Nome:\s*(?!não informado|nao informado|\(nome\))/i,
-          /Serviço de interesse:\s*(?!não informado|nao informado)/i,
-          /Horário agendado:\s*(?!não informado|nao informado|a confirmar)/i
+        const camposVerificacao = [
+          {
+            regex: /Nome:\s*(?!n[ãa]o informado|\(nome\))/i,
+            pergunta: "Antes de confirmar, pode me dizer seu nome? 😊"
+          },
+          {
+            regex: /Servi[çc]o de interesse:\s*(?!n[ãa]o informado)/i,
+            pergunta: "Me conta o que você precisa — seria um app, sistema web ou automação? 🤔"
+          },
+          {
+            regex: /Hor[áa]rio agendado:\s*(?!n[ãa]o informado|a confirmar)/i,
+            pergunta: "Qual dia e horário ficaria melhor pra você para a reunião? 📅"
+          }
         ];
-        const camposOk = camposObrigatorios.every((r) => r.test(resumoLead));
+
+        const campoFaltando = camposVerificacao.find((c) => !c.regex.test(resumoLead));
+        const camposOk = !campoFaltando;
+
+        if (!camposOk && campoFaltando) {
+          console.log("[leads] RESUMO_LEAD incompleto, reforçando coleta:", campoFaltando.pergunta);
+          const delayReforco = Math.floor(Math.random() * 500) + 1000;
+          await new Promise((resolve) => setTimeout(resolve, delayReforco));
+          await this.sendAutomatedTextMessage(
+            tenantId,
+            instance.id,
+            remoteNumber,
+            event.remoteJid,
+            campoFaltando.pergunta,
+            { action: "lead_field_reinforcement", kind: "chatbot" }
+          );
+          this.appendConversationHistory(session, "assistant", campoFaltando.pergunta);
+        }
 
         if (camposOk) {
           const nomeMatch = resumoLead.match(/Nome:\s*(.+)/i);
@@ -4033,12 +4059,38 @@ if (event.status === "CONNECTED") {
       const leadsPhone = params.chatbotConfig?.leadsPhoneNumber;
       const leadsEnabled = params.chatbotConfig?.leadsEnabled ?? true;
 
-      const camposObrigatorios = [
-        /Nome:\s*(?!n[ãa]o informado|\(nome\))/i,
-        /Servi[çc]o de interesse:\s*(?!n[ãa]o informado)/i,
-        /Hor[áa]rio agendado:\s*(?!n[ãa]o informado|a confirmar)/i
+      const camposVerificacao = [
+        {
+          regex: /Nome:\s*(?!n[ãa]o informado|\(nome\))/i,
+          pergunta: "Antes de confirmar, pode me dizer seu nome? 😊"
+        },
+        {
+          regex: /Servi[çc]o de interesse:\s*(?!n[ãa]o informado)/i,
+          pergunta: "Me conta o que você precisa — seria um app, sistema web ou automação? 🤔"
+        },
+        {
+          regex: /Hor[áa]rio agendado:\s*(?!n[ãa]o informado|a confirmar)/i,
+          pergunta: "Qual dia e horário ficaria melhor pra você para a reunião? 📅"
+        }
       ];
-      const camposOk = camposObrigatorios.every((r) => r.test(resumoLead));
+
+      const campoFaltando = camposVerificacao.find((c) => !c.regex.test(resumoLead));
+      const camposOk = !campoFaltando;
+
+      if (!camposOk && campoFaltando) {
+        console.log("[leads] RESUMO_LEAD incompleto, reforçando coleta:", campoFaltando.pergunta);
+        const delayReforco = Math.floor(Math.random() * 500) + 1000;
+        await new Promise((resolve) => setTimeout(resolve, delayReforco));
+        await this.sendAutomatedTextMessage(
+          params.tenantId,
+          params.instance.id,
+          params.remoteNumber,
+          params.targetJid,
+          campoFaltando.pergunta,
+          { action: "lead_field_reinforcement", kind: "chatbot" }
+        );
+        this.appendConversationHistory(params.session, "assistant", campoFaltando.pergunta);
+      }
 
       if (camposOk) {
         const nomeMatch = resumoLead.match(/Nome:\s*(.+)/i);

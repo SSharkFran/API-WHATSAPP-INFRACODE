@@ -189,6 +189,21 @@ interface ConversationSession extends BaseConversationSession {
 }
 
 const buildWorkerKey = (tenantId: string, instanceId: string): string => `${tenantId}:${instanceId}`;
+
+/**
+ * Divide o texto da resposta do bot em partes para envio separado.
+ * Prioridade: separador explícito "|||" → parágrafos duplos (\n\n) se texto longo.
+ */
+const splitBotResponse = (text: string): string[] => {
+  if (text.includes("|||")) {
+    return text.split("|||").map((p) => p.trim()).filter(Boolean);
+  }
+  const paragraphs = text.split(/\n{2,}/).map((p) => p.trim()).filter(Boolean);
+  if (paragraphs.length > 1) {
+    return paragraphs;
+  }
+  return [text];
+};
 const leadExtractionAwaitingTimeoutMs = 120_000;
 const defaultChatbotResponseDelayMs = 3_000;
 const adminEscalationTimeoutMs = 30 * 60 * 1000;
@@ -3050,31 +3065,22 @@ if (event.status === "CONNECTED") {
 
       await new Promise((resolve) => setTimeout(resolve, initialAiResponseDelayMs));
 
-      if (clientText.includes("|||")) {
-        const partes = clientText.split("|||").map((p) => p.trim()).filter(Boolean);
-        for (const parte of partes) {
-          await this.sendAutomatedTextMessage(
-            tenantId,
-            instance.id,
-            remoteNumber,
-            event.remoteJid,
-            parte,
-            { action: "conversation_agent", kind: "chatbot" }
-          );
-          this.appendConversationHistory(session, "assistant", parte);
-          const delayDigitacao = Math.floor(Math.random() * 1000) + 1500;
-          await new Promise((resolve) => setTimeout(resolve, delayDigitacao));
-        }
-      } else {
+      const partes = splitBotResponse(clientText);
+      for (let i = 0; i < partes.length; i++) {
+        const parte = partes[i]!;
         await this.sendAutomatedTextMessage(
           tenantId,
           instance.id,
           remoteNumber,
           event.remoteJid,
-          clientText,
+          parte,
           { action: "conversation_agent", kind: "chatbot" }
         );
-        this.appendConversationHistory(session, "assistant", clientText);
+        this.appendConversationHistory(session, "assistant", parte);
+        if (i < partes.length - 1) {
+          const delayDigitacao = Math.floor(Math.random() * 1000) + 1500;
+          await new Promise((resolve) => setTimeout(resolve, delayDigitacao));
+        }
       }
 
       const memoriaModule = getMemoriaPersonalizadaModuleConfig(sanitizeChatbotModules(chatbotConfig?.modules));
@@ -4130,43 +4136,30 @@ if (event.status === "CONNECTED") {
       return;
     }
 
-    if (clientText.includes("|||")) {
-      const partes = clientText.split("|||").map((p) => p.trim()).filter(Boolean);
-      for (const parte of partes) {
-        if (await this.isConversationAiBlocked(prisma, params.conversationId)) {
-          return;
-        }
-
-        if (this.isSessionExecutionStale(params.session, params.sessionGeneration)) {
-          return;
-        }
-
-        await this.sendAutomatedTextMessage(
-          params.tenantId,
-          params.instance.id,
-          params.remoteNumber,
-          params.targetJid,
-          parte,
-          { action: "conversation_agent", kind: "chatbot" }
-        );
-        this.appendConversationHistory(params.session, "assistant", parte);
-        const delayDigitacao = Math.floor(Math.random() * 1000) + 1500;
-        await new Promise((resolve) => setTimeout(resolve, delayDigitacao));
+    const partes = splitBotResponse(clientText);
+    for (let i = 0; i < partes.length; i++) {
+      if (await this.isConversationAiBlocked(prisma, params.conversationId)) {
+        return;
       }
-    } else {
+
       if (this.isSessionExecutionStale(params.session, params.sessionGeneration)) {
         return;
       }
 
+      const parte = partes[i]!;
       await this.sendAutomatedTextMessage(
         params.tenantId,
         params.instance.id,
         params.remoteNumber,
         params.targetJid,
-        clientText,
+        parte,
         { action: "conversation_agent", kind: "chatbot" }
       );
-      this.appendConversationHistory(params.session, "assistant", clientText);
+      this.appendConversationHistory(params.session, "assistant", parte);
+      if (i < partes.length - 1) {
+        const delayDigitacao = Math.floor(Math.random() * 1000) + 1500;
+        await new Promise((resolve) => setTimeout(resolve, delayDigitacao));
+      }
     }
 
     const leadAutoExtractValue = params.chatbotConfig?.leadAutoExtract as unknown;

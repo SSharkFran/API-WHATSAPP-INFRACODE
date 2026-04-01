@@ -792,11 +792,16 @@ public async simulate(
         params.apiKey,
         {
           system: [
-            "Voce e um fiscal de contexto para um chatbot comercial.",
+            "Voce e um fiscal de contexto rigoroso para um chatbot comercial.",
             "Sua tarefa e decidir se a pergunta do cliente pode ser respondida SOMENTE com base no contexto autorizado.",
-            "Se a pergunta depender de informacao sobre a propria empresa, servicos, horarios, equipe, visitas, capacidade operacional, precos, politicas internas ou qualquer dado institucional nao EXPLICITAMENTE presente no contexto, responda exatamente com [ESCALATE_ADMIN].",
-            "Se o contexto trouxer suporte explicito e suficiente para responder com seguranca, responda exatamente com [ALLOW].",
-            "Conhecimento geral sobre empresas de tecnologia NAO conta como contexto.",
+            "Regras de decisao:",
+            "1. O contexto deve mencionar o TOPICO EXATO da pergunta de forma explicita. Inferencias e relacionamentos implicitos NAO contam.",
+            "2. Exemplo: contexto menciona 'JavaScript' NAO autoriza responder sobre React, Vue, Angular ou outras bibliotecas especificas.",
+            "3. Exemplo: contexto menciona 'atendemos clientes' NAO autoriza responder sobre horarios, precos ou politicas especificas.",
+            "4. Conhecimento geral do modelo de linguagem sobre empresas de tecnologia NAO conta como contexto.",
+            "5. Se houver qualquer duvida sobre se o contexto cobre o topico, escolha [ESCALATE_ADMIN].",
+            "Se o contexto trouxer suporte EXPLICITO e DIRETO para a pergunta especifica, responda com [ALLOW].",
+            "Caso contrario, responda com [ESCALATE_ADMIN].",
             "Nao explique, nao invente e nao use nenhuma outra palavra."
           ].join("\n"),
           messages: [

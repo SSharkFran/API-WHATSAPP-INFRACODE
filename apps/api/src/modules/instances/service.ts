@@ -2968,6 +2968,7 @@ if (event.status === "CONNECTED") {
         const leadsEnabled = chatbotConfig?.leadsEnabled ?? true;
 
         const camposObrigatorios = [
+          /Nome:\s*(?!não informado|nao informado|\(nome\))/i,
           /Serviço de interesse:\s*(?!não informado|nao informado)/i,
           /Horário agendado:\s*(?!não informado|nao informado|a confirmar)/i
         ];
@@ -4033,6 +4034,7 @@ if (event.status === "CONNECTED") {
       const leadsEnabled = params.chatbotConfig?.leadsEnabled ?? true;
 
       const camposObrigatorios = [
+        /Nome:\s*(?!n[ãa]o informado|\(nome\))/i,
         /Servi[çc]o de interesse:\s*(?!n[ãa]o informado)/i,
         /Hor[áa]rio agendado:\s*(?!n[ãa]o informado|a confirmar)/i
       ];

@@ -27,7 +27,7 @@ import type { AdminCommandService } from "../chatbot/admin-command.service.js";
 import type { ChatMessage, ConversationSession as BaseConversationSession, LeadData } from "../chatbot/agents/types.js";
 import type { EscalationService } from "../chatbot/escalation.service.js";
 import type { ClientMemoryService } from "../chatbot/memory.service.js";
-import { getAprendizadoContinuoModuleConfig, getResumoDiarioModuleConfig, getSessaoInatividadeModuleConfig, sanitizeChatbotModules } from "../chatbot/module-runtime.js";
+import { getAprendizadoContinuoModuleConfig, getMemoriaPersonalizadaModuleConfig, getResumoDiarioModuleConfig, getSessaoInatividadeModuleConfig, sanitizeChatbotModules } from "../chatbot/module-runtime.js";
 import { renderReplyTemplate, type ChatbotService } from "../chatbot/service.js";
 import type { PlanEnforcementService } from "../platform/plan-enforcement.service.js";
 import type { WebhookService } from "../webhooks/service.js";
@@ -3077,7 +3077,8 @@ if (event.status === "CONNECTED") {
         this.appendConversationHistory(session, "assistant", clientText);
       }
 
-      if (chatbotConfig?.modules) {
+      const memoriaModule = getMemoriaPersonalizadaModuleConfig(sanitizeChatbotModules(chatbotConfig?.modules));
+      if (memoriaModule?.isEnabled === true && memoriaModule.fields.length > 0) {
         void this.chatbotService.extractPersistentMemory(
           tenantId,
           instance.id,

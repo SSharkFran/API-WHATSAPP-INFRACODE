@@ -923,19 +923,23 @@ export class AdminCommandService {
           orderBy: { createdAt: "desc" },
           take: limit,
           select: {
-            content: true,
-            role: true,
-            createdAt: true,
-            messageType: true
+            direction: true,
+            type: true,
+            payload: true,
+            createdAt: true
           }
         });
 
-        const result = messages.reverse().map((m) => ({
-          de: m.role === "assistant" ? "bot" : "cliente",
-          texto: m.content?.slice(0, 300),
-          tipo: m.messageType,
-          horario: m.createdAt.toISOString().slice(0, 16).replace("T", " ")
-        }));
+        const result = messages.reverse().map((m) => {
+          const payload = m.payload as Record<string, unknown> | null;
+          const texto = (payload?.["text"] ?? payload?.["caption"] ?? "") as string;
+          return {
+            de: m.direction === "outbound" ? "bot" : "cliente",
+            texto: texto.slice(0, 300),
+            tipo: m.type,
+            horario: m.createdAt.toISOString().slice(0, 16).replace("T", " ")
+          };
+        });
 
         return JSON.stringify({
           cliente: contact.displayName ?? contact.phoneNumber,

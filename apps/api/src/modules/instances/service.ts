@@ -2968,8 +2968,8 @@ if (event.status === "CONNECTED") {
         const leadsEnabled = chatbotConfig?.leadsEnabled ?? true;
 
         const camposObrigatorios = [
-          /Nome:\s*(?!não informado|nao informado|\(nome\))/i,
-          /Serviço de interesse:\s*(?!não informado|nao informado)/i
+          /Serviço de interesse:\s*(?!não informado|nao informado)/i,
+          /Horário agendado:\s*(?!não informado|nao informado|a confirmar)/i
         ];
         const camposOk = camposObrigatorios.every((r) => r.test(resumoLead));
 
@@ -4033,8 +4033,8 @@ if (event.status === "CONNECTED") {
       const leadsEnabled = params.chatbotConfig?.leadsEnabled ?? true;
 
       const camposObrigatorios = [
-        /Nome:\s*(?!nÃ£o informado|nao informado|\(nome\))/i,
-        /ServiÃ§o de interesse:\s*(?!nÃ£o informado|nao informado)/i
+        /Servi[çc]o de interesse:\s*(?!n[ãa]o informado)/i,
+        /Hor[áa]rio agendado:\s*(?!n[ãa]o informado|a confirmar)/i
       ];
       const camposOk = camposObrigatorios.every((r) => r.test(resumoLead));
 

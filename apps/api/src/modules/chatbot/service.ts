@@ -2063,7 +2063,8 @@ private async evaluateConfig(
       allowAdminEscalation
         ? "11. Se a pergunta institucional nao estiver explicitamente documentada no prompt da instancia, no memory.md ou no conhecimento aprendido, responda com [ESCALATE_ADMIN]."
         : "11. Se faltar contexto institucional, diga de forma breve e honesta que nao tem essa informacao agora, sem inventar e sem usar [ESCALATE_ADMIN].",
-      "12. Nunca use suposicoes sobre o que empresas de tecnologia normalmente fazem."
+      "12. Nunca use suposicoes sobre o que empresas de tecnologia normalmente fazem.",
+      "13. AGENDAMENTOS: Antes de confirmar qualquer reuniao, visita ou horario, voce DEVE ter coletado obrigatoriamente: (a) o nome do cliente e (b) o interesse/objetivo do contato. Se ainda nao tiver essas informacoes, pergunte primeiro — nunca confirme um agendamento sem elas."
     ];
     const groundingSources = [
       ...(globalSystemPrompt ? [globalSystemPrompt] : []),

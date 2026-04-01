@@ -27,7 +27,7 @@ import type { AdminCommandService } from "../chatbot/admin-command.service.js";
 import type { ChatMessage, ConversationSession as BaseConversationSession, LeadData } from "../chatbot/agents/types.js";
 import type { EscalationService } from "../chatbot/escalation.service.js";
 import type { ClientMemoryService } from "../chatbot/memory.service.js";
-import { getAprendizadoContinuoModuleConfig, sanitizeChatbotModules } from "../chatbot/module-runtime.js";
+import { getAprendizadoContinuoModuleConfig, getResumoDiarioModuleConfig, getSessaoInatividadeModuleConfig, sanitizeChatbotModules } from "../chatbot/module-runtime.js";
 import { renderReplyTemplate, type ChatbotService } from "../chatbot/service.js";
 import type { PlanEnforcementService } from "../platform/plan-enforcement.service.js";
 import type { WebhookService } from "../webhooks/service.js";
@@ -185,6 +185,7 @@ interface ConversationSession extends BaseConversationSession {
   isProcessing: boolean;
   flushAfterProcessing: boolean;
   resetGeneration: number;
+  lastActivityAt: Date;
 }
 
 const buildWorkerKey = (tenantId: string, instanceId: string): string => `${tenantId}:${instanceId}`;
@@ -323,12 +324,21 @@ export class InstanceOrchestrator {
           select: { modules: true }
         });
 
-        const modules = config?.modules as Record<string, unknown> | null | undefined;
-        const aprendizado = modules?.["aprendizadoContinuo"] as Record<string, unknown> | undefined;
-        const adminPhone = (aprendizado?.["verifiedPhone"] as string | undefined) ??
-                           (aprendizado?.["configuredAdminPhone"] as string | undefined);
+        const sanitizedModules = sanitizeChatbotModules(config?.modules);
+        const resumoDiarioModule = getResumoDiarioModuleConfig(sanitizedModules);
+        const aprendizadoModule = getAprendizadoContinuoModuleConfig(sanitizedModules);
 
-        if (!adminPhone || aprendizado?.["isEnabled"] !== true) continue;
+        // resumoDiario precisa estar ativo; se não configurado, usa comportamento legado (aprendizadoContinuo ativo)
+        const summaryEnabled = resumoDiarioModule?.isEnabled === true ||
+          (resumoDiarioModule == null && aprendizadoModule?.isEnabled === true);
+        if (!summaryEnabled) continue;
+
+        // Verifica se já passou da hora configurada (default: 8h UTC)
+        const sendHour = resumoDiarioModule?.horaEnvioUtc ?? 8;
+        if (new Date().getUTCHours() < sendHour) continue;
+
+        const adminPhone = aprendizadoModule?.verifiedPhone ?? aprendizadoModule?.configuredAdminPhone ?? null;
+        if (!adminPhone) continue;
 
         const instance = await prisma.instance.findUnique({
           where: { id: instanceId },
@@ -2475,13 +2485,19 @@ if (event.status === "CONNECTED") {
       return;
     }
 
+    const sessaoInatividadeModule = getSessaoInatividadeModuleConfig(sanitizedChatbotModules);
+    const inactivityMs = sessaoInatividadeModule?.isEnabled === true
+      ? sessaoInatividadeModule.horasInatividade * 60 * 60 * 1000
+      : null;
+
     const session = await this.getConversationSession(
       prisma,
       sessionKey,
       instance.id,
       event.remoteJid,
       activeConversation.leadSent,
-      !isFirstContact
+      !isFirstContact,
+      inactivityMs
     );
 
     try {
@@ -3479,12 +3495,21 @@ if (event.status === "CONNECTED") {
     instanceId: string,
     remoteJid: string,
     leadAlreadySent: boolean,
-    loadStoredHistory = true
+    loadStoredHistory = true,
+    inactivityMs: number | null = null
   ): Promise<ConversationSession> {
     const existingSession = this.conversationSessions.get(sessionKey);
 
     if (existingSession) {
       existingSession.leadAlreadySent = existingSession.leadAlreadySent || leadAlreadySent;
+
+      // Reset histórico se sessão está inativa há mais tempo do que o configurado
+      if (inactivityMs != null && Date.now() - existingSession.lastActivityAt.getTime() > inactivityMs) {
+        console.log(`[sessao-inatividade] sessao reiniciada por inatividade (${Math.round((Date.now() - existingSession.lastActivityAt.getTime()) / 3600000)}h)`, { instanceId, remoteJid });
+        existingSession.history = [];
+        existingSession.lastActivityAt = new Date();
+      }
+
       return existingSession;
     }
 
@@ -3497,7 +3522,8 @@ if (event.status === "CONNECTED") {
         debounceTimer: null,
         isProcessing: false,
         flushAfterProcessing: false,
-        resetGeneration: 0
+        resetGeneration: 0,
+        lastActivityAt: new Date()
       };
 
       this.conversationSessions.set(sessionKey, session);
@@ -3515,24 +3541,35 @@ if (event.status === "CONNECTED") {
       take: 20,
       select: {
         direction: true,
-        payload: true
+        payload: true,
+        createdAt: true
       }
     });
 
+    // Verifica se a última mensagem é antiga demais — se sim, não carrega histórico
+    const mostRecentRecord = records[0];
+    const isInactive = inactivityMs != null &&
+      mostRecentRecord != null &&
+      Date.now() - mostRecentRecord.createdAt.getTime() > inactivityMs;
+
     const history: ChatMessage[] = [];
 
-    for (const record of [...records].reverse()) {
-      const payload = record.payload as Record<string, unknown> | null;
-      const text = typeof payload?.text === "string" ? payload.text.trim() : "";
+    if (!isInactive) {
+      for (const record of [...records].reverse()) {
+        const payload = record.payload as Record<string, unknown> | null;
+        const text = typeof payload?.text === "string" ? payload.text.trim() : "";
 
-      if (!text) {
-        continue;
+        if (!text) {
+          continue;
+        }
+
+        history.push({
+          role: record.direction === "INBOUND" ? "user" : "assistant",
+          content: text
+        });
       }
-
-      history.push({
-        role: record.direction === "INBOUND" ? "user" : "assistant",
-        content: text
-      });
+    } else {
+      console.log(`[sessao-inatividade] histórico ignorado por inatividade (${Math.round((Date.now() - mostRecentRecord.createdAt.getTime()) / 3600000)}h)`, { instanceId, remoteJid });
     }
 
     const session: ConversationSession = {
@@ -3543,7 +3580,8 @@ if (event.status === "CONNECTED") {
       debounceTimer: null,
       isProcessing: false,
       flushAfterProcessing: false,
-      resetGeneration: 0
+      resetGeneration: 0,
+      lastActivityAt: new Date()
     };
 
     this.conversationSessions.set(sessionKey, session);
@@ -3590,6 +3628,8 @@ if (event.status === "CONNECTED") {
       role,
       content: trimmedContent
     });
+
+    session.lastActivityAt = new Date();
 
     if (session.history.length > 20) {
       session.history.splice(0, session.history.length - 20);

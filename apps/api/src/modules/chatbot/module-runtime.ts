@@ -11,7 +11,9 @@ import type {
   ListaBrancaModuleConfig,
   MemoriaPersonalizadaModuleConfig,
   MultiIdiomaModuleConfig,
-  PalavraPausaModuleConfig
+  PalavraPausaModuleConfig,
+  ResumoDiarioModuleConfig,
+  SessaoInatividadeModuleConfig
 } from "@infracode/types";
 import { CHATBOT_MODULE_CATALOG } from "@infracode/types";
 import { z } from "zod";
@@ -106,6 +108,16 @@ const aprendizadoContinuoModuleSchema = z.object({
   verifiedSenderJids: z.array(z.string().min(1)).default([])
 });
 
+const resumoDiarioModuleSchema = z.object({
+  isEnabled: z.boolean().default(false),
+  horaEnvioUtc: z.number().int().min(0).max(23).default(8)
+});
+
+const sessaoInatividadeModuleSchema = z.object({
+  isEnabled: z.boolean().default(false),
+  horasInatividade: z.number().int().min(1).max(720).default(8)
+});
+
 const moduleSchemas = {
   faq: faqModuleSchema,
   horarioAtendimento: horarioAtendimentoModuleSchema,
@@ -118,7 +130,9 @@ const moduleSchemas = {
   limiteMensagens: limiteMensagensModuleSchema,
   palavraPausa: palavraPausaModuleSchema,
   aprendizadoContinuo: aprendizadoContinuoModuleSchema,
-  memoriaPersonalizada: memoriaPersonalizadaModuleSchema
+  memoriaPersonalizada: memoriaPersonalizadaModuleSchema,
+  resumoDiario: resumoDiarioModuleSchema,
+  sessaoInatividade: sessaoInatividadeModuleSchema
 } satisfies Record<string, z.ZodTypeAny>;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -228,6 +242,16 @@ export const getMemoriaPersonalizadaModuleConfig = (
   modules: ChatbotModules | undefined
 ): MemoriaPersonalizadaModuleConfig | null =>
   getParsedModuleConfig(memoriaPersonalizadaModuleSchema, modules?.memoriaPersonalizada);
+
+export const getResumoDiarioModuleConfig = (
+  modules: ChatbotModules | undefined
+): ResumoDiarioModuleConfig | null =>
+  getParsedModuleConfig(resumoDiarioModuleSchema, modules?.resumoDiario);
+
+export const getSessaoInatividadeModuleConfig = (
+  modules: ChatbotModules | undefined
+): SessaoInatividadeModuleConfig | null =>
+  getParsedModuleConfig(sessaoInatividadeModuleSchema, modules?.sessaoInatividade);
 
 export const buildOperationalModuleInstructions = (modules: ChatbotModules | undefined): string[] => {
   const instructions: string[] = [];

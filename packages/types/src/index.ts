@@ -401,6 +401,8 @@ export interface ChatbotModules {
   palavraPausa?: PalavraPausaModuleConfig;
   aprendizadoContinuo?: AprendizadoContinuoModuleConfig;
   memoriaPersonalizada?: MemoriaPersonalizadaModuleConfig;
+  resumoDiario?: ResumoDiarioModuleConfig;
+  sessaoInatividade?: SessaoInatividadeModuleConfig;
   disparoMassa?: DisparoMassaModuleConfig;
   campanhaSegmento?: CampanhaSegmentoModuleConfig;
   reativacao?: ReativacaoModuleConfig;
@@ -693,6 +695,24 @@ export const CHATBOT_MODULE_CATALOG: ChatbotModuleCatalogItem[] = [
     requiresConfig: true
   },
   {
+    key: "resumoDiario",
+    label: "Resumo Diário",
+    description: "Envia um resumo diário de atendimentos para o admin verificado no horário configurado.",
+    category: "controle",
+    supportLevel: "operational",
+    executionMode: "runtime",
+    requiresConfig: false
+  },
+  {
+    key: "sessaoInatividade",
+    label: "Reset por Inatividade",
+    description: "Reinicia o histórico de conversa quando o cliente fica inativo por um período configurado, evitando que o bot retome contextos antigos.",
+    category: "atendimento",
+    supportLevel: "operational",
+    executionMode: "runtime",
+    requiresConfig: false
+  },
+  {
     key: "disparoMassa",
     label: "Disparo em Massa",
     description: "Placeholder visual; ainda não possui motor de campanha/envio em lote aqui.",
@@ -922,4 +942,14 @@ export interface MemoriaPersonalizadaField {
 
 export interface MemoriaPersonalizadaModuleConfig extends BaseModuleConfig {
   fields: MemoriaPersonalizadaField[];
+}
+
+export interface ResumoDiarioModuleConfig extends BaseModuleConfig {
+  /** Hora UTC para envio do resumo (0-23). Padrão: 8 */
+  horaEnvioUtc: number;
+}
+
+export interface SessaoInatividadeModuleConfig extends BaseModuleConfig {
+  /** Horas de inatividade antes de resetar o histórico da sessão. Padrão: 8 */
+  horasInatividade: number;
 }

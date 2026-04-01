@@ -335,12 +335,16 @@ export class PlatformAlertService {
         return false;
       }
 
-      await this.instanceOrchestrator.sendMessage(sender.tenantId, sender.instanceId, {
+      const result = await this.instanceOrchestrator.sendMessage(sender.tenantId, sender.instanceId, {
         type: "text",
         to: phone,
         targetJid: `${phone}@s.whatsapp.net`,
         text: message
       });
+
+      const externalMessageId = (result?.externalMessageId as string | undefined) ?? null;
+      this.instanceOrchestrator.rememberAutomatedOutboundEcho(sender.instanceId, externalMessageId);
+
       return true;
     } catch (err) {
       console.error("[alert] erro ao enviar alerta admin:", err);

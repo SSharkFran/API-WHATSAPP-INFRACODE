@@ -701,7 +701,7 @@ export const CHATBOT_MODULE_CATALOG: ChatbotModuleCatalogItem[] = [
     category: "controle",
     supportLevel: "operational",
     executionMode: "runtime",
-    requiresConfig: false
+    requiresConfig: true
   },
   {
     key: "sessaoInatividade",
@@ -710,7 +710,7 @@ export const CHATBOT_MODULE_CATALOG: ChatbotModuleCatalogItem[] = [
     category: "atendimento",
     supportLevel: "operational",
     executionMode: "runtime",
-    requiresConfig: false
+    requiresConfig: true
   },
   {
     key: "disparoMassa",

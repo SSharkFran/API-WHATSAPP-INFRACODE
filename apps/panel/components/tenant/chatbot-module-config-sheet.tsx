@@ -690,38 +690,19 @@ export const ChatbotModuleConfigSheet = ({
         const moduleConfig = currentConfig as NonNullable<ChatbotModules["memoriaPersonalizada"]>;
         return (
           <div className="space-y-3">
+            <p className="text-xs text-[var(--text-secondary)]">
+              Digite o nome de cada informação que a IA deve memorizar sobre o cliente (ex: "nome do pet", "raça", "serviço preferido"). A IA extrai automaticamente esses dados durante as conversas.
+            </p>
             {moduleConfig.fields.map((field, index) => (
-              <div key={index} className="space-y-2 rounded-[18px] border border-[var(--border-subtle)] bg-[var(--bg-tertiary)] p-4">
+              <div key={index} className="flex items-center gap-2">
                 <input
-                  className={[fieldClass, "h-11"].join(" ")}
-                  placeholder="Chave (ex: veiculo)"
-                  value={field.key}
-                  onChange={(e) =>
-                    updateConfig({
-                      ...moduleConfig,
-                      fields: moduleConfig.fields.map((f, i) => i === index ? { ...f, key: e.target.value } : f)
-                    })
-                  }
-                />
-                <input
-                  className={[fieldClass, "h-11"].join(" ")}
-                  placeholder="Rótulo (ex: Veículo do cliente)"
+                  className={[fieldClass, "h-11 flex-1"].join(" ")}
+                  placeholder='Ex: "nome do pet", "raça", "serviço preferido"'
                   value={field.label}
                   onChange={(e) =>
                     updateConfig({
                       ...moduleConfig,
                       fields: moduleConfig.fields.map((f, i) => i === index ? { ...f, label: e.target.value } : f)
-                    })
-                  }
-                />
-                <input
-                  className={[fieldClass, "h-11"].join(" ")}
-                  placeholder="Descrição para a IA (ex: Modelo ou tipo do veículo mencionado)"
-                  value={field.description}
-                  onChange={(e) =>
-                    updateConfig({
-                      ...moduleConfig,
-                      fields: moduleConfig.fields.map((f, i) => i === index ? { ...f, description: e.target.value } : f)
                     })
                   }
                 />
@@ -735,7 +716,7 @@ export const ChatbotModuleConfigSheet = ({
                     })
                   }
                 >
-                  Remover campo
+                  Remover
                 </Button>
               </div>
             ))}
@@ -751,6 +732,46 @@ export const ChatbotModuleConfigSheet = ({
             >
               Adicionar campo
             </Button>
+          </div>
+        );
+      }
+
+      case "resumoDiario": {
+        const moduleConfig = currentConfig as NonNullable<ChatbotModules["resumoDiario"]>;
+        return (
+          <div className="space-y-4">
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-[var(--text-secondary)]">Horário de envio (UTC)</label>
+              <input
+                type="number"
+                min={0}
+                max={23}
+                className={[fieldClass, "h-11"].join(" ")}
+                value={moduleConfig.horaEnvioUtc}
+                onChange={(e) => updateConfig({ ...moduleConfig, horaEnvioUtc: Math.min(23, Math.max(0, Number(e.target.value || 0))) })}
+              />
+              <p className="text-xs text-[var(--text-tertiary)]">Hora em UTC (0–23). Para horário de Brasília (UTC-3), some 3h. Ex: enviar às 9h de Brasília = 12.</p>
+            </div>
+          </div>
+        );
+      }
+
+      case "sessaoInatividade": {
+        const moduleConfig = currentConfig as NonNullable<ChatbotModules["sessaoInatividade"]>;
+        return (
+          <div className="space-y-4">
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-[var(--text-secondary)]">Horas de inatividade</label>
+              <input
+                type="number"
+                min={1}
+                max={720}
+                className={[fieldClass, "h-11"].join(" ")}
+                value={moduleConfig.horasInatividade}
+                onChange={(e) => updateConfig({ ...moduleConfig, horasInatividade: Math.min(720, Math.max(1, Number(e.target.value || 1))) })}
+              />
+              <p className="text-xs text-[var(--text-tertiary)]">Se o cliente ficar inativo por esse período, o histórico da conversa é reiniciado na próxima mensagem. Mínimo: 1h, máximo: 720h (30 dias).</p>
+            </div>
           </div>
         );
       }

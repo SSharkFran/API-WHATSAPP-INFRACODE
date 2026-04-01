@@ -257,6 +257,48 @@ const TOOLS = [
         }
       }
     }
+  },
+  {
+    type: "function",
+    function: {
+      name: "listar_conhecimento",
+      description: "Lista as entradas salvas no knowledge base da instância. Use quando o admin quiser ver o que o bot aprendeu ou verificar entradas incorretas.",
+      parameters: {
+        type: "object",
+        required: [],
+        properties: {
+          filtro: {
+            type: "string",
+            description: "Filtro opcional de texto para buscar entradas específicas por pergunta ou resposta"
+          },
+          limite: {
+            type: "number",
+            description: "Máximo de entradas a retornar (padrão: 20, máx: 50)"
+          }
+        }
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "deletar_conhecimento",
+      description: "Deleta uma ou mais entradas incorretas do knowledge base. Use quando o admin quiser remover respostas erradas que o bot aprendeu. Pode deletar por ID ou por trecho da pergunta.",
+      parameters: {
+        type: "object",
+        required: [],
+        properties: {
+          id: {
+            type: "string",
+            description: "ID exato da entrada a deletar"
+          },
+          pergunta: {
+            type: "string",
+            description: "Trecho da pergunta — deleta todas as entradas cuja pergunta contenha esse texto (case-insensitive)"
+          }
+        }
+      }
+    }
   }
 ] as const;
 
@@ -273,7 +315,9 @@ type ToolName =
   | "status_instancia"
   | "bloquear_contato"
   | "desbloquear_contato"
-  | "buscar_mensagens_cliente";
+  | "buscar_mensagens_cliente"
+  | "listar_conhecimento"
+  | "deletar_conhecimento";
 
 interface AiCompletionResponse {
   choices?: Array<{
@@ -946,6 +990,81 @@ export class AdminCommandService {
           telefone: contact.phoneNumber,
           total_mensagens: result.length,
           mensagens: result
+        });
+      }
+
+      case "listar_conhecimento": {
+        const filtro = typeof args["filtro"] === "string" ? args["filtro"].toLowerCase() : null;
+        const limit = typeof args["limite"] === "number" ? Math.min(args["limite"], 50) : 20;
+
+        const entries = await prisma.tenantKnowledge.findMany({
+          where: { instanceId: ctx.instanceId },
+          orderBy: { createdAt: "desc" },
+          take: filtro ? 200 : limit,
+          select: { id: true, question: true, answer: true, taughtBy: true, createdAt: true }
+        });
+
+        const filtered = filtro
+          ? entries.filter(
+              (e) => e.question.toLowerCase().includes(filtro) || e.answer.toLowerCase().includes(filtro)
+            ).slice(0, limit)
+          : entries;
+
+        if (filtered.length === 0) {
+          return JSON.stringify({ total: 0, entradas: [], aviso: "Nenhuma entrada no knowledge base." });
+        }
+
+        return JSON.stringify({
+          total: filtered.length,
+          entradas: filtered.map((e) => ({
+            id: e.id,
+            pergunta: e.question.slice(0, 120),
+            resposta: e.answer.slice(0, 200),
+            ensinado_por: e.taughtBy ?? "desconhecido",
+            data: e.createdAt.toISOString().slice(0, 10)
+          }))
+        });
+      }
+
+      case "deletar_conhecimento": {
+        const idArg = typeof args["id"] === "string" ? args["id"].trim() : null;
+        const perguntaArg = typeof args["pergunta"] === "string" ? args["pergunta"].trim() : null;
+
+        if (!idArg && !perguntaArg) {
+          return JSON.stringify({ erro: "Informe 'id' ou 'pergunta' para deletar." });
+        }
+
+        if (idArg) {
+          const entry = await prisma.tenantKnowledge.findFirst({
+            where: { id: idArg, instanceId: ctx.instanceId },
+            select: { id: true, question: true }
+          });
+          if (!entry) return JSON.stringify({ erro: `Entrada ${idArg} não encontrada.` });
+
+          await prisma.tenantKnowledge.delete({ where: { id: idArg } });
+          return JSON.stringify({ deletado: 1, pergunta: entry.question });
+        }
+
+        // Deletar por trecho de pergunta
+        const entries = await prisma.tenantKnowledge.findMany({
+          where: { instanceId: ctx.instanceId },
+          select: { id: true, question: true }
+        });
+        const matches = entries.filter((e) =>
+          e.question.toLowerCase().includes(perguntaArg!.toLowerCase())
+        );
+
+        if (matches.length === 0) {
+          return JSON.stringify({ erro: `Nenhuma entrada encontrada com pergunta contendo "${perguntaArg}".` });
+        }
+
+        await prisma.tenantKnowledge.deleteMany({
+          where: { id: { in: matches.map((e) => e.id) } }
+        });
+
+        return JSON.stringify({
+          deletado: matches.length,
+          perguntas_removidas: matches.map((e) => e.question)
         });
       }
 

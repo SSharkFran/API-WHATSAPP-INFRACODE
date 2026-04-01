@@ -738,19 +738,27 @@ export const ChatbotModuleConfigSheet = ({
 
       case "resumoDiario": {
         const moduleConfig = currentConfig as NonNullable<ChatbotModules["resumoDiario"]>;
+        // horaEnvioUtc armazenado em UTC; exibir em horario de Brasilia (UTC-3)
+        const horasBrasilia = Array.from({ length: 24 }, (_, i) => i);
+        const utcParaBrasilia = (utc: number) => ((utc - 3 + 24) % 24);
+        const brasiliaParaUtc = (br: number) => ((br + 3) % 24);
+        const horaBrasilia = utcParaBrasilia(moduleConfig.horaEnvioUtc);
         return (
           <div className="space-y-4">
             <div className="space-y-1.5">
-              <label className="text-xs font-medium text-[var(--text-secondary)]">Horário de envio (UTC)</label>
-              <input
-                type="number"
-                min={0}
-                max={23}
+              <label className="text-xs font-medium text-[var(--text-secondary)]">Horário de envio (Brasília)</label>
+              <select
                 className={[fieldClass, "h-11"].join(" ")}
-                value={moduleConfig.horaEnvioUtc}
-                onChange={(e) => updateConfig({ ...moduleConfig, horaEnvioUtc: Math.min(23, Math.max(0, Number(e.target.value || 0))) })}
-              />
-              <p className="text-xs text-[var(--text-tertiary)]">Hora em UTC (0–23). Para horário de Brasília (UTC-3), some 3h. Ex: enviar às 9h de Brasília = 12.</p>
+                value={horaBrasilia}
+                onChange={(e) => updateConfig({ ...moduleConfig, horaEnvioUtc: brasiliaParaUtc(Number(e.target.value)) })}
+              >
+                {horasBrasilia.map((h) => (
+                  <option key={h} value={h}>
+                    {String(h).padStart(2, "0")}:00
+                  </option>
+                ))}
+              </select>
+              <p className="text-xs text-[var(--text-tertiary)]">O resumo será enviado para o admin verificado nesse horário, todos os dias.</p>
             </div>
           </div>
         );

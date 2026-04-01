@@ -2049,10 +2049,11 @@ if (event.status === "CONNECTED") {
       isVerifiedAprendizadoContinuoAdminSender ||
       isAdminLearningReply ||
       isInstanceSender;
+    // IMPORTANTE: isInstanceSender NAO deve entrar aqui — echoes fromMe do proprio bot
+    // podem ter awaitingAdminResponse=true ativo e disparariam aprendizado incorreto.
     const canProcessAprendizadoContinuoReply =
       isVerifiedAprendizadoContinuoAdminSender ||
-      isAdminLearningReply ||
-      isInstanceSender;
+      isAdminLearningReply;
     const isAdminSelfChat = Boolean(
       isAdminSender &&
       remoteChatNumber &&

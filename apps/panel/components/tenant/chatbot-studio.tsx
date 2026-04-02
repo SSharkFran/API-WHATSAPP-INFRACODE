@@ -67,9 +67,10 @@ interface SimulationFormState {
   isFirstContact: boolean;
   contactName: string;
   phoneNumber: string;
+  trace: boolean;
 }
 
-type StudioTab = "geral" | "prompt" | "leads" | "fiado" | "modulos" | "ia-reserva" | "estado";
+type StudioTab = "geral" | "prompt" | "leads" | "fiado" | "modulos" | "ia-reserva" | "estado" | "conhecimento";
 
 const triggerTypeLabels: Record<ChatbotTriggerType, string> = {
   EXACT: "Exato",
@@ -133,7 +134,8 @@ const buildSimulationFormState = (): SimulationFormState => ({
   text: "",
   isFirstContact: false,
   contactName: "Cliente InfraCode",
-  phoneNumber: "5511999999999"
+  phoneNumber: "5511999999999",
+  trace: false
 });
 
 const formatJsonTextarea = (value?: Record<string, unknown>): string => {
@@ -231,6 +233,7 @@ const tabs: { id: StudioTab; label: string }[] = [
   { id: "fiado", label: "Fiado" },
   { id: "modulos", label: "Módulos" },
   { id: "ia-reserva", label: "IA Reserva" },
+  { id: "conhecimento", label: "Conhecimento" },
   { id: "estado", label: "Estado" }
 ];
 
@@ -278,6 +281,11 @@ export const ChatbotStudio = ({ initialInstances }: ChatbotStudioProps) => {
   const [fiadoTabs, setFiadoTabs] = useState<FiadoTab[]>([]);
   const [activeTab, setActiveTab] = useState<StudioTab>("geral");
   const [selectedModuleConfigKey, setSelectedModuleConfigKey] = useState<ChatbotModuleKey | null>(null);
+  // Conhecimento aprendido
+  const [knowledgeList, setKnowledgeList] = useState<Array<{ id: string; question: string; answer: string; taughtBy: string | null; createdAt: string }>>([]);
+  const [knowledgeLoading, setKnowledgeLoading] = useState(false);
+  const [editingKnowledgeId, setEditingKnowledgeId] = useState<string | null>(null);
+  const [editingAnswer, setEditingAnswer] = useState("");
 
   const selectedInstance = useMemo(
     () => instances.find((instance) => instance.id === selectedInstanceId) ?? null,
@@ -341,6 +349,17 @@ export const ChatbotStudio = ({ initialInstances }: ChatbotStudioProps) => {
 
     return () => { active = false; };
   }, [selectedInstanceId, formState.fiadoEnabled]);
+
+  useEffect(() => {
+    if (activeTab !== "conhecimento" || !selectedInstanceId) return;
+    let active = true;
+    setKnowledgeLoading(true);
+    requestClientApi<typeof knowledgeList>(`/instances/${selectedInstanceId}/knowledge`)
+      .then((list) => { if (active) setKnowledgeList(list); })
+      .catch(() => { if (active) setError("Falha ao carregar conhecimentos."); })
+      .finally(() => { if (active) setKnowledgeLoading(false); });
+    return () => { active = false; };
+  }, [activeTab, selectedInstanceId]);
 
   const updateRule = (ruleId: string, patch: Partial<ChatbotRule>) => {
     setFormState((current) => ({
@@ -470,13 +489,52 @@ export const ChatbotStudio = ({ initialInstances }: ChatbotStudioProps) => {
     }));
   };
 
+  const loadKnowledge = async () => {
+    if (!selectedInstance) return;
+    setKnowledgeLoading(true);
+    try {
+      const result = await requestClientApi<typeof knowledgeList>(`/instances/${selectedInstance.id}/knowledge`);
+      setKnowledgeList(result);
+    } catch {
+      setError("Falha ao carregar conhecimentos.");
+    } finally {
+      setKnowledgeLoading(false);
+    }
+  };
+
+  const deleteKnowledge = async (knowledgeId: string) => {
+    if (!selectedInstance) return;
+    try {
+      await requestClientApi(`/instances/${selectedInstance.id}/knowledge/${knowledgeId}`, { method: "DELETE" });
+      setKnowledgeList((prev) => prev.filter((k) => k.id !== knowledgeId));
+      setSuccess("Conhecimento removido.");
+    } catch {
+      setError("Falha ao remover conhecimento.");
+    }
+  };
+
+  const saveKnowledgeEdit = async (knowledgeId: string) => {
+    if (!selectedInstance || !editingAnswer.trim()) return;
+    try {
+      const updated = await requestClientApi<{ id: string; question: string; answer: string; taughtBy: string | null; createdAt: string }>(
+        `/instances/${selectedInstance.id}/knowledge/${knowledgeId}`,
+        { method: "PATCH", body: { answer: editingAnswer.trim() } }
+      );
+      setKnowledgeList((prev) => prev.map((k) => k.id === knowledgeId ? { ...k, answer: updated.answer } : k));
+      setEditingKnowledgeId(null);
+      setSuccess("Resposta atualizada.");
+    } catch {
+      setError("Falha ao atualizar conhecimento.");
+    }
+  };
+
   const runSimulation = async () => {
     if (!selectedInstance) return;
     setPendingAction("simulate"); setError(null); setSuccess(null);
     try {
       const result = await requestClientApi<ChatbotSimulationResult>(`/instances/${selectedInstance.id}/chatbot/simulate`, {
         method: "POST",
-        body: { text: simulationForm.text, isFirstContact: simulationForm.isFirstContact, contactName: simulationForm.contactName || undefined, phoneNumber: simulationForm.phoneNumber }
+        body: { text: simulationForm.text, isFirstContact: simulationForm.isFirstContact, contactName: simulationForm.contactName || undefined, phoneNumber: simulationForm.phoneNumber, trace: simulationForm.trace }
       });
       setSimulationResult(result); setSuccess("Simulação executada.");
     } catch (caught) {
@@ -800,11 +858,18 @@ export const ChatbotStudio = ({ initialInstances }: ChatbotStudioProps) => {
                       onChange={(e) => setSimulationForm((c) => ({ ...c, phoneNumber: e.target.value }))} />
                   </div>
                 </div>
-                <label className="flex items-center gap-2.5 text-xs text-[var(--text-secondary)] cursor-pointer">
-                  <input type="checkbox" className="accent-[var(--accent-blue)]" checked={simulationForm.isFirstContact}
-                    onChange={(e) => setSimulationForm((c) => ({ ...c, isFirstContact: e.target.checked }))} />
-                  Simular como primeiro contato
-                </label>
+                <div className="flex flex-wrap gap-4">
+                  <label className="flex items-center gap-2.5 text-xs text-[var(--text-secondary)] cursor-pointer">
+                    <input type="checkbox" className="accent-[var(--accent-blue)]" checked={simulationForm.isFirstContact}
+                      onChange={(e) => setSimulationForm((c) => ({ ...c, isFirstContact: e.target.checked }))} />
+                    Simular como primeiro contato
+                  </label>
+                  <label className="flex items-center gap-2.5 text-xs text-[var(--text-secondary)] cursor-pointer">
+                    <input type="checkbox" className="accent-[var(--accent-blue)]" checked={simulationForm.trace}
+                      onChange={(e) => setSimulationForm((c) => ({ ...c, trace: e.target.checked }))} />
+                    Modo trace (ver passos internos)
+                  </label>
+                </div>
                 <Button variant="secondary" size="md" loading={pendingAction === "simulate"}
                   disabled={pendingAction !== null || !selectedInstance} onClick={() => void runSimulation()}>
                   <Play aria-hidden="true" className="h-3.5 w-3.5" /> Executar simulação
@@ -820,12 +885,37 @@ export const ChatbotStudio = ({ initialInstances }: ChatbotStudioProps) => {
                 <div className="rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--bg-tertiary)] px-4 py-3">
                   <p className="text-[10px] uppercase tracking-widest text-[var(--text-tertiary)] font-mono mb-2">Resultado</p>
                   {simulationResult ? (
-                    <div className="space-y-2 text-xs">
-                      <p className="text-[var(--text-secondary)]">Ação: <span className="text-[var(--text-primary)]">{simulationResult.action}</span></p>
-                      <p className="text-[var(--text-secondary)]">Regra: <span className="text-[var(--text-primary)]">{simulationResult.matchedRuleName ?? "Nenhuma"}</span></p>
-                      <pre className="mt-2 whitespace-pre-wrap rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[#0d1117] p-3 text-xs text-[var(--text-primary)] font-mono leading-relaxed overflow-auto">
+                    <div className="space-y-3 text-xs">
+                      <div className="flex flex-wrap gap-4">
+                        <p className="text-[var(--text-secondary)]">Ação: <span className="font-semibold text-[var(--text-primary)]">{simulationResult.action}</span></p>
+                        <p className="text-[var(--text-secondary)]">Regra: <span className="text-[var(--text-primary)]">{simulationResult.matchedRuleName ?? "Nenhuma"}</span></p>
+                      </div>
+                      <pre className="whitespace-pre-wrap rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[#0d1117] p-3 text-xs text-[var(--text-primary)] font-mono leading-relaxed overflow-auto">
                         {simulationResult.responseText ?? "Sem resposta"}
                       </pre>
+                      {simulationResult.trace && simulationResult.trace.length > 0 && (
+                        <div className="space-y-1.5">
+                          <p className="text-[10px] uppercase tracking-widest text-[var(--text-tertiary)] font-mono">Trace de decisão</p>
+                          <div className="rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[#0d1117] p-3 space-y-1.5 overflow-auto max-h-64">
+                            {simulationResult.trace.map((step, i) => (
+                              <div key={i} className="flex items-start gap-2 font-mono text-xs">
+                                <span className={[
+                                  "shrink-0 rounded px-1.5 py-0.5 text-[10px] font-bold uppercase",
+                                  step.result === "match" ? "bg-green-900/60 text-green-300" :
+                                  step.result === "skip" ? "bg-zinc-800 text-zinc-400" :
+                                  step.result === "no_match" ? "bg-red-900/40 text-red-400" :
+                                  step.result === "pass" ? "bg-blue-900/40 text-blue-300" :
+                                  "bg-orange-900/40 text-orange-300"
+                                ].join(" ")}>
+                                  {step.result}
+                                </span>
+                                <span className="text-zinc-300">{step.step}</span>
+                                {step.detail && <span className="text-zinc-500 truncate">{step.detail}</span>}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   ) : (
                     <p className="text-xs text-[var(--text-tertiary)]">Execute a simulação para ver o resultado.</p>
@@ -1257,6 +1347,84 @@ export const ChatbotStudio = ({ initialInstances }: ChatbotStudioProps) => {
         )}
 
         {/* ── ESTADO ────────────────────────────────────────────────────── */}
+        {/* ── CONHECIMENTO ──────────────────────────────────────────────── */}
+        {activeTab === "conhecimento" && (
+          <div className="rounded-[var(--radius-lg)] border border-[var(--border-subtle)] bg-[var(--bg-secondary)] overflow-hidden max-w-3xl">
+            <div className="px-5 py-4 border-b border-[var(--border-subtle)] flex items-center justify-between">
+              <div>
+                <p className="text-[10px] font-mono uppercase tracking-widest text-[var(--text-tertiary)] mb-1">Aprendizado contínuo</p>
+                <h2 className="text-base font-semibold text-[var(--text-primary)]">Base de conhecimento</h2>
+              </div>
+              <Button variant="secondary" size="sm" loading={knowledgeLoading} onClick={() => void loadKnowledge()}>
+                Recarregar
+              </Button>
+            </div>
+            <div className="p-5 space-y-3">
+              {knowledgeLoading ? (
+                <p className="text-xs text-[var(--text-tertiary)] text-center py-8">Carregando...</p>
+              ) : knowledgeList.length === 0 ? (
+                <div className="text-center py-10 space-y-2">
+                  <p className="text-sm text-[var(--text-secondary)]">Nenhum conhecimento aprendido ainda.</p>
+                  <p className="text-xs text-[var(--text-tertiary)]">Quando o admin responder perguntas de clientes, elas aparecerão aqui.</p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <p className="text-xs text-[var(--text-tertiary)]">{knowledgeList.length} item{knowledgeList.length !== 1 ? "s" : ""} aprendido{knowledgeList.length !== 1 ? "s" : ""}</p>
+                  {knowledgeList.map((k) => (
+                    <div key={k.id} className="rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--bg-tertiary)] p-3.5 space-y-2">
+                      <div className="flex items-start justify-between gap-2">
+                        <p className="text-xs font-medium text-[var(--text-primary)] flex-1">
+                          <span className="text-[var(--text-tertiary)] font-mono mr-1">P:</span>
+                          {k.question}
+                        </p>
+                        <div className="flex gap-1.5 shrink-0">
+                          {editingKnowledgeId !== k.id && (
+                            <button
+                              className="text-[10px] px-2 py-1 rounded bg-[var(--bg-active)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
+                              onClick={() => { setEditingKnowledgeId(k.id); setEditingAnswer(k.answer); }}
+                            >
+                              Editar
+                            </button>
+                          )}
+                          <button
+                            className="text-[10px] px-2 py-1 rounded bg-red-900/30 text-red-400 hover:bg-red-900/50 transition-colors"
+                            onClick={() => void deleteKnowledge(k.id)}
+                          >
+                            Remover
+                          </button>
+                        </div>
+                      </div>
+                      {editingKnowledgeId === k.id ? (
+                        <div className="space-y-2">
+                          <textarea
+                            className="w-full rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-3 py-2 text-xs text-[var(--text-primary)] resize-none focus:outline-none focus:border-[var(--accent-blue)] min-h-[80px]"
+                            value={editingAnswer}
+                            onChange={(e) => setEditingAnswer(e.target.value)}
+                            placeholder="Resposta corrigida..."
+                          />
+                          <div className="flex gap-2">
+                            <Button variant="primary" size="sm" onClick={() => void saveKnowledgeEdit(k.id)}>Salvar</Button>
+                            <Button variant="secondary" size="sm" onClick={() => setEditingKnowledgeId(null)}>Cancelar</Button>
+                          </div>
+                        </div>
+                      ) : (
+                        <p className="text-xs text-[var(--text-secondary)]">
+                          <span className="text-[var(--text-tertiary)] font-mono mr-1">R:</span>
+                          {k.answer}
+                        </p>
+                      )}
+                      <div className="flex gap-3 text-[10px] text-[var(--text-tertiary)] font-mono">
+                        <span>por: {k.taughtBy ?? "sistema"}</span>
+                        <span>{new Date(k.createdAt).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
         {activeTab === "estado" && (
           <div className="rounded-[var(--radius-lg)] border border-[var(--border-subtle)] bg-[var(--bg-secondary)] overflow-hidden max-w-xl">
             <div className="px-5 py-4 border-b border-[var(--border-subtle)]">

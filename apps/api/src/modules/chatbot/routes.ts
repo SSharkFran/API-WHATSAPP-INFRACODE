@@ -339,4 +339,84 @@ export const registerChatbotRoutes = async (app: FastifyInstance): Promise<void>
       return config;
     }
   );
+
+  // ── KNOWLEDGE CRUD ────────────────────────────────────────────────────────
+
+  const knowledgeItemSchema = z.object({
+    id: z.string(),
+    instanceId: z.string(),
+    question: z.string(),
+    answer: z.string(),
+    rawAnswer: z.string().nullable(),
+    taughtBy: z.string().nullable(),
+    createdAt: z.string()
+  });
+
+  const knowledgeParamsSchema = instanceParamsSchema.extend({
+    knowledgeId: z.string().min(1)
+  });
+
+  app.get(
+    "/instances/:id/knowledge",
+    {
+      config: { auth: "tenant", allowApiKey: true, requiredScopes: ["read"] },
+      schema: {
+        tags: ["Chatbot"],
+        summary: "Lista todo o conhecimento aprendido pela instancia",
+        params: instanceParamsSchema,
+        response: { 200: z.array(knowledgeItemSchema) }
+      }
+    },
+    async (request) => {
+      const tenantId = requireTenantId(request);
+      const params = instanceParamsSchema.parse(request.params);
+      return app.knowledgeService.list(tenantId, params.id);
+    }
+  );
+
+  app.patch(
+    "/instances/:id/knowledge/:knowledgeId",
+    {
+      config: { auth: "tenant", allowApiKey: true, requiredScopes: ["write"] },
+      schema: {
+        tags: ["Chatbot"],
+        summary: "Atualiza a resposta de um conhecimento aprendido",
+        params: knowledgeParamsSchema,
+        body: z.object({ answer: z.string().min(1).max(4000) }),
+        response: { 200: knowledgeItemSchema }
+      }
+    },
+    async (request) => {
+      const tenantId = requireTenantId(request);
+      const params = knowledgeParamsSchema.parse(request.params);
+      const body = z.object({ answer: z.string().min(1).max(4000) }).parse(request.body);
+      const result = await app.knowledgeService.update(tenantId, params.id, params.knowledgeId, body.answer);
+      if (!result) {
+        throw new Error("Conhecimento nao encontrado nesta instancia");
+      }
+      return result;
+    }
+  );
+
+  app.delete(
+    "/instances/:id/knowledge/:knowledgeId",
+    {
+      config: { auth: "tenant", allowApiKey: true, requiredScopes: ["write"] },
+      schema: {
+        tags: ["Chatbot"],
+        summary: "Remove um conhecimento aprendido",
+        params: knowledgeParamsSchema,
+        response: { 204: z.null() }
+      }
+    },
+    async (request, reply) => {
+      const tenantId = requireTenantId(request);
+      const params = knowledgeParamsSchema.parse(request.params);
+      const deleted = await app.knowledgeService.delete(tenantId, params.id, params.knowledgeId);
+      if (!deleted) {
+        throw new Error("Conhecimento nao encontrado nesta instancia");
+      }
+      return reply.status(204).send();
+    }
+  );
 };

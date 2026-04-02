@@ -15,6 +15,7 @@ import type { AuthService } from "../modules/auth/service.js";
 import type { PlatformAdminService } from "../modules/admin/service.js";
 import type { ClientMemoryService } from "../modules/chatbot/memory.service.js";
 import type { ChatbotService } from "../modules/chatbot/service.js";
+import type { KnowledgeService } from "../modules/chatbot/knowledge.service.js";
 import type { TenantManagementService } from "../modules/tenant/service.js";
 import type { FiadoService } from "../modules/chatbot/fiado.service.js";
 import type { PlanEnforcementService } from "../modules/platform/plan-enforcement.service.js";
@@ -48,6 +49,7 @@ declare module "fastify" {
     authService: AuthService;
     platformAdminService: PlatformAdminService;
     chatbotService: ChatbotService;
+    knowledgeService: KnowledgeService;
     clientMemoryService: ClientMemoryService;
     fiadoService: FiadoService;
     tenantManagementService: TenantManagementService;

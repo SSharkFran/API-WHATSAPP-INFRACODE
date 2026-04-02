@@ -169,6 +169,7 @@ export const buildApp = async () => {
   app.decorate("authService", authService);
   app.decorate("platformAdminService", platformAdminService);
   app.decorate("chatbotService", chatbotService);
+  app.decorate("knowledgeService", knowledgeService);
   app.decorate("clientMemoryService", clientMemoryService);
   app.decorate("fiadoService", fiadoService);
   app.decorate("tenantManagementService", tenantManagementService);

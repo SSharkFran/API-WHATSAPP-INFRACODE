@@ -135,6 +135,63 @@ export class KnowledgeService {
   }
 
   /**
+   * Lista todo o conhecimento aprendido de uma instancia, ordenado por mais recente.
+   */
+  public async list(
+    tenantId: string,
+    instanceId: string
+  ): Promise<LearnedKnowledge[]> {
+    const prisma = await this.tenantPrismaRegistry.getClient(tenantId);
+    const records = await prisma.tenantKnowledge.findMany({
+      where: { instanceId },
+      orderBy: { createdAt: "desc" }
+    });
+    return records.map((r) => this.mapRecord(r));
+  }
+
+  /**
+   * Remove um conhecimento pelo ID.
+   * Retorna false se o registro nao pertencer a instancia.
+   */
+  public async delete(
+    tenantId: string,
+    instanceId: string,
+    knowledgeId: string
+  ): Promise<boolean> {
+    const prisma = await this.tenantPrismaRegistry.getClient(tenantId);
+    const existing = await prisma.tenantKnowledge.findFirst({
+      where: { id: knowledgeId, instanceId },
+      select: { id: true }
+    });
+    if (!existing) return false;
+    await prisma.tenantKnowledge.delete({ where: { id: knowledgeId } });
+    return true;
+  }
+
+  /**
+   * Atualiza a resposta de um conhecimento existente.
+   * Retorna null se o registro nao pertencer a instancia.
+   */
+  public async update(
+    tenantId: string,
+    instanceId: string,
+    knowledgeId: string,
+    answer: string
+  ): Promise<LearnedKnowledge | null> {
+    const prisma = await this.tenantPrismaRegistry.getClient(tenantId);
+    const existing = await prisma.tenantKnowledge.findFirst({
+      where: { id: knowledgeId, instanceId },
+      select: { id: true }
+    });
+    if (!existing) return null;
+    const updated = await prisma.tenantKnowledge.update({
+      where: { id: knowledgeId },
+      data: { answer: answer.trim(), rawAnswer: answer.trim(), taughtBy: "admin_panel" }
+    });
+    return this.mapRecord(updated);
+  }
+
+  /**
    * Retorna o conhecimento da instancia como bloco de contexto para o system prompt.
    * Prioriza o documento de sintese (gerado por IA, organizado e deduplicado).
    * Fallback para lista crua de Q&As se sintese ainda nao existir.

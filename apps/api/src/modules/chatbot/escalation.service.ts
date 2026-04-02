@@ -2,6 +2,7 @@ import type { Redis as IORedis } from "ioredis";
 import type { TenantPrismaRegistry } from "../../lib/database.js";
 import type { PlatformAlertService } from "../platform/alert.service.js";
 import type { KnowledgeService } from "./knowledge.service.js";
+import type { ChatbotService } from "./service.js";
 import type { WebhookService } from "../webhooks/service.js";
 import type { Prisma } from "../../../../../prisma/generated/tenant-client/index.js";
 
@@ -28,6 +29,7 @@ export class EscalationService {
   private readonly platformAlertService?: PlatformAlertService;
   private readonly redis?: IORedis;
   private readonly webhookService?: WebhookService;
+  private chatbotService?: ChatbotService;
   private readonly adminAlertMessageMap = new Map<
     string,
     {
@@ -72,6 +74,10 @@ export class EscalationService {
 
   public setPlatformAlertService(service: PlatformAlertService): void {
     (this as unknown as { platformAlertService: PlatformAlertService }).platformAlertService = service;
+  }
+
+  public setChatbotService(service: ChatbotService): void {
+    this.chatbotService = service;
   }
 
   public resolveConversationIdByAdminAlertMessage(messageId?: string | null): string | null {
@@ -309,12 +315,20 @@ export class EscalationService {
     const clientQuestion = pausedConversation.pendingClientQuestion;
     const clientJid = pausedConversation.pendingClientJid;
 
+    // Sintetiza pergunta-nucleo e resposta reformulada via IA antes de persistir
+    const synthesized = this.chatbotService
+      ? await this.chatbotService.synthesizeKnowledgeEntry(tenantId, instanceId, clientQuestion, adminRawAnswer).catch(() => ({
+          question: clientQuestion,
+          answer: adminRawAnswer
+        }))
+      : { question: clientQuestion, answer: adminRawAnswer };
+
     const savedKnowledge = await this.knowledgeService.save(
       tenantId,
       instanceId,
-      clientQuestion,
-      adminRawAnswer,
-      adminRawAnswer,
+      synthesized.question,
+      synthesized.answer,
+      adminRawAnswer, // rawAnswer preserva o texto original do admin
       "admin"
     );
 
@@ -349,7 +363,7 @@ export class EscalationService {
     return {
       clientJid,
       clientQuestion,
-      formulatedAnswer: adminRawAnswer,
+      formulatedAnswer: synthesized.answer, // resposta reformulada e enviada ao cliente
       conversationId: pausedConversation.pendingClientConversationId ?? pausedConversation.id,
       savedKnowledgeId: savedKnowledge.id
     };
@@ -366,12 +380,20 @@ export class EscalationService {
     originalQuestion: string,
     correctedAnswer: string
   ): Promise<void> {
+    // Sintetiza a resposta de correcao do admin em linguagem profissional
+    const synthesized = this.chatbotService
+      ? await this.chatbotService.synthesizeKnowledgeEntry(tenantId, instanceId, originalQuestion, correctedAnswer).catch(() => ({
+          question: originalQuestion,
+          answer: correctedAnswer
+        }))
+      : { question: originalQuestion, answer: correctedAnswer };
+
     const savedKnowledge = await this.knowledgeService.save(
       tenantId,
       instanceId,
-      originalQuestion,
-      correctedAnswer,
-      correctedAnswer,
+      synthesized.question,
+      synthesized.answer,
+      correctedAnswer, // rawAnswer preserva o texto original do admin
       "admin_correction"
     );
 

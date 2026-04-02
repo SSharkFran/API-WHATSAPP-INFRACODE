@@ -138,6 +138,7 @@ export const buildApp = async () => {
   const platformAlertService = new PlatformAlertService(platformPrisma, instanceOrchestrator);
   chatbotService.setPlatformAlertService(platformAlertService);
   escalationService.setPlatformAlertService(platformAlertService);
+  escalationService.setChatbotService(chatbotService);
   instanceOrchestrator.setPlatformAlertService(platformAlertService);
   instanceOrchestrator.startSchedulers();
   const platformAdminService = new PlatformAdminService({

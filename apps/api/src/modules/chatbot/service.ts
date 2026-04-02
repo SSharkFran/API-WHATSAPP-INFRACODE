@@ -454,6 +454,83 @@ export class ChatbotService {
     console.log(`[knowledge-synthesis] documento atualizado para instancia ${instanceId} (${records.length} fatos)`);
   }
 
+  /**
+   * Sintetiza uma entrada de conhecimento antes de salva-la:
+   * - Extrai a pergunta-nucleo da mensagem bruta do cliente (ex: transcricao de audio longa)
+   * - Reformula a resposta crua do admin em linguagem clara e profissional
+   * Retorna fallback para os valores brutos em caso de erro ou IA nao configurada.
+   */
+  public async synthesizeKnowledgeEntry(
+    tenantId: string,
+    instanceId: string,
+    rawQuestion: string,
+    rawAnswer: string
+  ): Promise<{ question: string; answer: string }> {
+    const fallback = { question: rawQuestion.trim(), answer: rawAnswer.trim() };
+
+    try {
+      const { managedAiProvider } = await this.getContext(tenantId, instanceId);
+      if (!managedAiProvider.isConfigured || !managedAiProvider.apiKeyEncrypted) return fallback;
+
+      const apiKey = decrypt(managedAiProvider.apiKeyEncrypted, this.config.API_ENCRYPTION_KEY);
+
+      const prompt = [
+        "Voce recebe a mensagem bruta de um cliente (pode ser transcricao de audio, texto longo, informal) e a resposta crua do atendente/admin.",
+        "Sua tarefa:",
+        "1. Extraia a PERGUNTA PRINCIPAL do cliente em uma frase curta e direta (max 120 caracteres). Ignore saudacoes, contexto extra, partes irrelevantes.",
+        "2. Reformule a RESPOSTA do admin em linguagem profissional, clara e completa — preservando TODAS as informacoes, mas eliminando erros de digitacao, gírias e informalidades excessivas.",
+        "",
+        `MENSAGEM DO CLIENTE:\n${rawQuestion.trim()}`,
+        "",
+        `RESPOSTA DO ADMIN:\n${rawAnswer.trim()}`,
+        "",
+        'Retorne EXCLUSIVAMENTE um JSON valido no formato: {"question":"...","answer":"..."}'
+      ].join("\n");
+
+      const response = await fetch(`${managedAiProvider.baseUrl}/chat/completions`, {
+        method: "POST",
+        signal: AbortSignal.timeout(15_000),
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${apiKey}`
+        },
+        body: JSON.stringify({
+          model: managedAiProvider.model,
+          temperature: 0.1,
+          response_format: { type: "json_object" },
+          messages: [
+            {
+              role: "system",
+              content: "Voce e um assistente que extrai e reformula pares pergunta-resposta para uma base de conhecimento corporativa. Responda APENAS com JSON valido."
+            },
+            { role: "user", content: prompt }
+          ]
+        })
+      });
+
+      if (!response.ok) {
+        console.warn(`[knowledge-entry-synthesis] IA retornou ${response.status}, usando valores brutos`);
+        return fallback;
+      }
+
+      const data = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
+      const content = data.choices?.[0]?.message?.content?.trim();
+      if (!content) return fallback;
+
+      const parsed = JSON.parse(content) as { question?: string; answer?: string };
+      const question = parsed.question?.trim();
+      const answer = parsed.answer?.trim();
+
+      if (!question || !answer) return fallback;
+
+      console.log(`[knowledge-entry-synthesis] pergunta sintetizada: "${question.slice(0, 80)}..."`);
+      return { question, answer };
+    } catch (err) {
+      console.warn(`[knowledge-entry-synthesis] erro ao sintetizar, usando valores brutos:`, err);
+      return fallback;
+    }
+  }
+
   public async getConfig(tenantId: string, instanceId: string): Promise<ChatbotConfig> {
     const { config } = await this.getContext(tenantId, instanceId);
     return config;

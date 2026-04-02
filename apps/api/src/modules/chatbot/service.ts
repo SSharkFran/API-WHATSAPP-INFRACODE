@@ -1,4 +1,4 @@
-import type { ChatbotAiProvider, ChatbotConfig, ChatbotModules, ChatbotRule, ChatbotSimulationResult } from "@infracode/types";
+import type { ChatbotAiProvider, ChatbotConfig, ChatbotModules, ChatbotRule, ChatbotSimulationResult, ChatbotTraceStep } from "@infracode/types";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -40,6 +40,7 @@ interface ChatbotRuntimeInput {
   phoneNumber: string;
   remoteJid?: string | null;
   clientContext?: string | null;
+  trace?: boolean;
 }
 
 interface ManagedAiProviderRuntime {
@@ -974,36 +975,53 @@ private async evaluateConfig(
     input: ChatbotRuntimeInput
   ): Promise<ChatbotSimulationResult> {
     const normalizedInput = normalizeText(input.text ?? "");
+    const traceEnabled = input.trace === true;
+    const traceSteps: ChatbotTraceStep[] = [];
+
+    const withTrace = (result: ChatbotSimulationResult): ChatbotSimulationResult =>
+      traceEnabled ? { ...result, trace: traceSteps } : result;
 
     if (input.isFirstContact && config.welcomeMessage?.trim()) {
-      return {
+      traceSteps.push({ step: "welcome_message", result: "match", detail: "isFirstContact=true e welcomeMessage configurado" });
+      return withTrace({
         action: "WELCOME",
         matchedRuleId: null,
         matchedRuleName: "Mensagem de boas-vindas",
         responseText: renderReplyTemplate(config.welcomeMessage, input)
-      };
+      });
     }
 
+    traceSteps.push({ step: "welcome_message", result: "skip", detail: `isFirstContact=${input.isFirstContact}` });
+
     if (config.ai.mode !== "AI_ONLY") {
+      traceSteps.push({ step: "rules_evaluation", result: "pass", detail: `modo=${config.ai.mode}, avaliando ${config.rules.length} regras` });
       for (const rule of config.rules) {
         if (!matchesRule(rule, normalizedInput, input.isFirstContact)) {
+          traceSteps.push({ step: `rule:${rule.name}`, result: "no_match", detail: `tipo=${rule.triggerType} valor="${rule.matchValue}"` });
           continue;
         }
 
-        return {
+        traceSteps.push({ step: `rule:${rule.name}`, result: "match", detail: `tipo=${rule.triggerType} valor="${rule.matchValue}"` });
+        return withTrace({
           action: "MATCHED",
           matchedRuleId: rule.id,
           matchedRuleName: rule.name,
           responseText: renderReplyTemplate(rule.responseText, input)
-        };
+        });
       }
+    } else {
+      traceSteps.push({ step: "rules_evaluation", result: "skip", detail: "modo=AI_ONLY" });
     }
 
+    traceSteps.push({ step: "ai_evaluation", result: "pass", detail: `provider=${managedAiProvider.provider ?? "none"} modelo=${managedAiProvider.model}` });
     const aiResult = await this.evaluateWithAi(tenantId, prisma, config, managedAiProvider, input);
 
     if (aiResult) {
-      return aiResult;
+      traceSteps.push({ step: "ai_response", result: "match", detail: `action=${aiResult.action}` });
+      return withTrace(aiResult);
     }
+
+    traceSteps.push({ step: "ai_response", result: "no_match" });
 
     const aprendizadoContinuoModule = getAprendizadoContinuoModuleConfig(config.modules);
 
@@ -1013,47 +1031,54 @@ private async evaluateConfig(
       aprendizadoContinuoModule.verificationStatus === "VERIFIED" &&
       this.isInstitutionalQuestion(input.text ?? "")
     ) {
-      return {
+      traceSteps.push({ step: "escalate_admin", result: "match", detail: "pergunta institucional sem resposta da IA" });
+      return withTrace({
         action: "ESCALATE_ADMIN",
         matchedRuleId: null,
         matchedRuleName: "Fallback:institutional_question_without_ai_result",
         responseText: ""
-      };
+      });
     }
 
+    traceSteps.push({ step: "escalate_admin", result: "skip" });
+
     if (normalizedInput && config.fallbackMessage?.trim()) {
-      return {
+      traceSteps.push({ step: "fallback", result: "match", detail: "fallbackMessage configurado" });
+      return withTrace({
         action: "FALLBACK",
         matchedRuleId: null,
         matchedRuleName: "Fallback",
         responseText: renderReplyTemplate(config.fallbackMessage, input)
-      };
+      });
     }
 
     if (normalizedInput && aprendizadoContinuoModule?.isEnabled !== true) {
-      return {
+      traceSteps.push({ step: "fallback", result: "match", detail: "aprendizadoContinuo desativado" });
+      return withTrace({
         action: "FALLBACK",
         matchedRuleId: null,
         matchedRuleName: "Fallback:aprendizado_continuo_disabled",
         responseText: defaultNoEscalationFallbackMessage
-      };
+      });
     }
 
     if (normalizedInput) {
-      return {
+      traceSteps.push({ step: "fallback", result: "match", detail: "sem resposta correspondente" });
+      return withTrace({
         action: "FALLBACK",
         matchedRuleId: null,
         matchedRuleName: "Fallback:no_match_without_response",
         responseText: defaultNoEscalationFallbackMessage
-      };
+      });
     }
 
-    return {
+    traceSteps.push({ step: "no_match", result: "match", detail: "input vazio apos normalizacao" });
+    return withTrace({
       action: "NO_MATCH",
       matchedRuleId: null,
       matchedRuleName: null,
       responseText: null
-    };
+    });
   }
 
   private mapConfig(

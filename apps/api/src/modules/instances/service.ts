@@ -27,12 +27,25 @@ import type { AdminCommandService } from "../chatbot/admin-command.service.js";
 import type { ChatMessage, ConversationSession as BaseConversationSession, LeadData } from "../chatbot/agents/types.js";
 import type { EscalationService } from "../chatbot/escalation.service.js";
 import type { ClientMemoryService } from "../chatbot/memory.service.js";
-import { getAprendizadoContinuoModuleConfig, getMemoriaPersonalizadaModuleConfig, getResumoDiarioModuleConfig, getSessaoInatividadeModuleConfig, sanitizeChatbotModules } from "../chatbot/module-runtime.js";
+import {
+  getAprendizadoContinuoModuleConfig,
+  getAntiSpamModuleConfig,
+  getHorarioAtendimentoModuleConfig,
+  getMemoriaPersonalizadaModuleConfig,
+  getResumoDiarioModuleConfig,
+  getSessaoInatividadeModuleConfig,
+  isPhoneAllowedByListaBranca,
+  isPhoneBlockedByBlacklist,
+  isWithinHorarioAtendimento,
+  matchesPauseWord,
+  sanitizeChatbotModules
+} from "../chatbot/module-runtime.js";
 import { renderReplyTemplate, type ChatbotService } from "../chatbot/service.js";
 import type { PlanEnforcementService } from "../platform/plan-enforcement.service.js";
 import type { WebhookService } from "../webhooks/service.js";
 import type { FiadoService } from "../chatbot/fiado.service.js";
 import type { PlatformAlertService } from "../platform/alert.service.js";
+import type { Queue } from "bullmq";
 
 interface InstanceOrchestratorDeps {
   config: AppConfig;
@@ -49,6 +62,7 @@ interface InstanceOrchestratorDeps {
   fiadoService: FiadoService;
   escalationService: EscalationService;
   platformAlertService?: PlatformAlertService;
+  sendMessageQueue?: Queue;
 }
 
 interface StatusWorkerEvent {
@@ -235,6 +249,7 @@ export class InstanceOrchestrator {
   private readonly fiadoAgent: FiadoAgent;
   private readonly escalationService: EscalationService;
   private readonly platformAlertService?: PlatformAlertService;
+  private readonly sendMessageQueue?: Queue;
   private readonly logEmitter = new EventEmitter();
   private readonly qrEmitter = new EventEmitter();
   private readonly latestQrCodes = new Map<string, QrCodeEvent>();
@@ -245,6 +260,10 @@ export class InstanceOrchestrator {
   private readonly dailySummarySentDates = new Map<string, string>(); // key: tenantId:instanceId, value: YYYY-MM-DD
   private escalationCleanupInterval: NodeJS.Timeout | null = null;
   private dailySummaryInterval: NodeJS.Timeout | null = null;
+  private sessionGcInterval: NodeJS.Timeout | null = null;
+  // RISCO-07: instancias cujo admin ja recebeu aviso de ambiguidade de escalacao;
+  // na proxima resposta sem citar, processa normalmente (confirmacao implicita)
+  private readonly escalationAmbiguityAcknowledged = new Map<string, NodeJS.Timeout>();
 
   public constructor(deps: InstanceOrchestratorDeps) {
     this.config = deps.config;
@@ -269,6 +288,7 @@ export class InstanceOrchestrator {
     });
     this.escalationService = deps.escalationService;
     this.platformAlertService = deps.platformAlertService;
+    this.sendMessageQueue = deps.sendMessageQueue;
   }
 
   public setPlatformAlertService(service: PlatformAlertService): void {
@@ -303,6 +323,21 @@ export class InstanceOrchestrator {
       }, msUntilNextHour);
     };
     scheduleDailySummaryTick();
+
+    // MELHORIA: GC de sessoes de conversa inativas a cada 30 min
+    this.sessionGcInterval = setInterval(() => {
+      const cutoff = new Date(Date.now() - 4 * 60 * 60 * 1000); // 4 horas de inatividade
+      let evicted = 0;
+      for (const [key, session] of this.conversationSessions.entries()) {
+        if (session.lastActivityAt < cutoff && !session.isProcessing && !session.debounceTimer) {
+          this.conversationSessions.delete(key);
+          evicted++;
+        }
+      }
+      if (evicted > 0) {
+        console.log(`[session-gc] ${evicted} sessao(es) inativa(s) removida(s) da memoria`);
+      }
+    }, 30 * 60 * 1000);
   }
 
   public stopSchedulers(): void {
@@ -313,6 +348,10 @@ export class InstanceOrchestrator {
     if (this.dailySummaryInterval) {
       clearTimeout(this.dailySummaryInterval);
       this.dailySummaryInterval = null;
+    }
+    if (this.sessionGcInterval) {
+      clearInterval(this.sessionGcInterval);
+      this.sessionGcInterval = null;
     }
   }
 
@@ -405,9 +444,12 @@ export class InstanceOrchestrator {
     }, 2 * 60 * 1000);
     timeout.unref?.();
     this.automatedOutboundEchoIgnoreMap.set(key, timeout);
+
+    // RISCO-01: persiste no Redis para sobreviver a reinicializacoes (TTL 120s)
+    void this.redis.set(`echo:ignore:${key}`, "1", "EX", 120).catch(() => null);
   }
 
-  private consumeAutomatedOutboundEcho(instanceId: string, externalMessageId?: string | null): boolean {
+  private async consumeAutomatedOutboundEcho(instanceId: string, externalMessageId?: string | null): Promise<boolean> {
     const normalizedExternalMessageId = externalMessageId?.trim();
     if (!normalizedExternalMessageId) {
       return false;
@@ -415,13 +457,16 @@ export class InstanceOrchestrator {
 
     const key = this.buildAutomatedOutboundEchoKey(instanceId, normalizedExternalMessageId);
     const timeout = this.automatedOutboundEchoIgnoreMap.get(key);
-    if (!timeout) {
-      return false;
+    if (timeout) {
+      clearTimeout(timeout);
+      this.automatedOutboundEchoIgnoreMap.delete(key);
+      void this.redis.del(`echo:ignore:${key}`).catch(() => null);
+      return true;
     }
 
-    clearTimeout(timeout);
-    this.automatedOutboundEchoIgnoreMap.delete(key);
-    return true;
+    // RISCO-01: fallback para Redis — cobre echos apos reinicializacao
+    const redisHit = await this.redis.getdel(`echo:ignore:${key}`).catch(() => null);
+    return redisHit !== null;
   }
 
   /**
@@ -811,19 +856,24 @@ export class InstanceOrchestrator {
     formData.append("model", "whisper-large-v3");
     formData.append("language", "pt");
 
+    // MELHORIA: usa o rotador de chaves GROQ compartilhado com o ChatbotService
+    const apiKey = this.chatbotService.getNextGroqApiKey() ?? this.config.GROQ_API_KEY;
+
     const response = await fetch("https://api.groq.com/openai/v1/audio/transcriptions", {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${this.config.GROQ_API_KEY}`
+        Authorization: `Bearer ${apiKey}`
       },
       body: formData
     });
 
     if (!response.ok) {
+      this.chatbotService.reportGroqKeyResult(apiKey, response.status);
       console.error("[audio] Groq Whisper error:", await response.text());
       return null;
     }
 
+    this.chatbotService.reportGroqKeyResult(apiKey, "success");
     const data = (await response.json()) as { text: string };
     return data.text?.trim() ?? null;
   }
@@ -1840,7 +1890,7 @@ if (event.status === "CONNECTED") {
     }
 
     if (event.messageKey?.fromMe && event.externalMessageId) {
-      if (this.consumeAutomatedOutboundEcho(instance.id, event.externalMessageId)) {
+      if (await this.consumeAutomatedOutboundEcho(instance.id, event.externalMessageId)) {
         return;
       }
 
@@ -2043,7 +2093,7 @@ if (event.status === "CONNECTED") {
     const quotedLearningConversationIdFromSignals =
       this.extractQuotedLearningConversationId(event.rawMessage) ??
       this.extractLearningConversationIdFromText(rawTextInput) ??
-      this.escalationService.resolveConversationIdByAdminAlertMessage(
+      await this.escalationService.resolveConversationIdByAdminAlertMessageAsync(
         this.extractQuotedMessageExternalId(event.rawMessage)
       ) ??
       this.escalationService.resolveConversationIdByAdminAlertChat(event.remoteJid) ??
@@ -2516,6 +2566,52 @@ if (event.status === "CONNECTED") {
       return;
     }
 
+    // INCOMPLETA-03: aplicar modulos de filtragem apenas para mensagens de clientes
+    if (!isAdminOrInstanceSender && !isControlCommand) {
+      // blacklist por modulo (complementa contact.isBlacklisted que e por DB)
+      if (isPhoneBlockedByBlacklist(sanitizedChatbotModules, resolvedContactNumber)) {
+        console.log("[blacklist] numero bloqueado pelo modulo:", resolvedContactNumber);
+        return;
+      }
+
+      // lista branca: so responde numeros da lista quando modo = "permitir_lista"
+      if (!isPhoneAllowedByListaBranca(sanitizedChatbotModules, resolvedContactNumber)) {
+        console.log("[lista-branca] numero nao permitido:", resolvedContactNumber);
+        return;
+      }
+
+      // horario de atendimento
+      const horarioModule = getHorarioAtendimentoModuleConfig(sanitizedChatbotModules);
+      if (horarioModule?.isEnabled) {
+        if (!isWithinHorarioAtendimento(horarioModule)) {
+          await this.sendAutomatedTextMessage(
+            tenantId,
+            instance.id,
+            resolvedContactNumber,
+            event.remoteJid,
+            horarioModule.mensagemForaHorario,
+            { action: "fora_horario_atendimento", kind: "chatbot" }
+          );
+          return;
+        }
+      }
+
+      // anti-spam: limita mensagens por contato usando Redis
+      const antiSpamModule = getAntiSpamModuleConfig(sanitizedChatbotModules);
+      if (antiSpamModule?.isEnabled && resolvedContactNumber) {
+        const spamKey = `antispam:${instance.id}:${resolvedContactNumber}`;
+        const spamCount = await this.redis.incr(spamKey).catch(() => null);
+        if (spamCount === 1) {
+          const ttlSeconds = antiSpamModule.intervaloMinutos * 60;
+          await this.redis.expire(spamKey, ttlSeconds).catch(() => null);
+        }
+        if (spamCount !== null && spamCount > antiSpamModule.maxMensagens) {
+          console.log("[anti-spam] mensagem bloqueada para:", resolvedContactNumber);
+          return;
+        }
+      }
+    }
+
     const isAiBlocked = activeConversation.aiDisabledPermanent || activeConversation.humanTakeover;
 
     if (isControlCommand && !isAdminOrInstanceSender) {
@@ -2531,6 +2627,16 @@ if (event.status === "CONNECTED") {
       ? sessaoInatividadeModule.horasInatividade * 60 * 60 * 1000
       : null;
 
+    // INCOMPLETA-06: detectar reset por inatividade antes de obter a sessao
+    // para poder enviar a mensagem de reset ao cliente
+    const existingSessionForInactivityCheck = this.conversationSessions.get(sessionKey);
+    const sessionWillResetByInactivity = Boolean(
+      !isAdminOrInstanceSender &&
+      existingSessionForInactivityCheck &&
+      inactivityMs != null &&
+      Date.now() - existingSessionForInactivityCheck.lastActivityAt.getTime() > inactivityMs
+    );
+
     const session = await this.getConversationSession(
       prisma,
       sessionKey,
@@ -2540,6 +2646,17 @@ if (event.status === "CONNECTED") {
       !isFirstContact,
       inactivityMs
     );
+
+    if (sessionWillResetByInactivity && sessaoInatividadeModule?.mensagemReset) {
+      await this.sendAutomatedTextMessage(
+        tenantId,
+        instance.id,
+        resolvedContactNumber,
+        event.remoteJid,
+        sessaoInatividadeModule.mensagemReset,
+        { action: "sessao_inatividade_reset", kind: "chatbot" }
+      );
+    }
 
     try {
       // rawTextInput ja inclui fallback de extendedTextMessage para quoted replies
@@ -2726,6 +2843,55 @@ if (event.status === "CONNECTED") {
 
         const hasPendingEscalations = hasPendingEscalationsForAdminBypass;
         if (hasPendingEscalations) {
+          // RISCO-07: quando admin responde sem citar a mensagem de escalacao e ha mais
+          // de uma conversa pendente, avisar qual cliente seria afetado antes de processar.
+          // Na segunda resposta sem citar (acknowledged), processa normalmente.
+          if (!quotedLearningConversationId) {
+            const pendingCount = await this.escalationService.countPendingEscalations(tenantId, instance.id);
+            if (pendingCount > 1) {
+              const ackKey = `${instance.id}:${event.remoteJid}`;
+              const alreadyAcknowledged = this.escalationAmbiguityAcknowledged.has(ackKey);
+              if (alreadyAcknowledged) {
+                // Admin ja foi avisado — limpa o estado e processa normalmente
+                const ackTimeout = this.escalationAmbiguityAcknowledged.get(ackKey);
+                if (ackTimeout) clearTimeout(ackTimeout);
+                this.escalationAmbiguityAcknowledged.delete(ackKey);
+              } else {
+                // Primeira vez sem citar: avisa e bloqueia ate proxima resposta
+                const oldest = await this.escalationService.peekOldestPendingEscalation(tenantId, instance.id);
+                if (oldest) {
+                  const clientDisplay =
+                    normalizeWhatsAppPhoneNumber(oldest.clientJid) ??
+                    String(oldest.clientJid).split("@")[0] ??
+                    oldest.clientJid;
+                  await this.sendAutomatedTextMessage(
+                    tenantId,
+                    instance.id,
+                    remoteNumber,
+                    event.remoteJid,
+                    [
+                      `⚠️ Há ${pendingCount} clientes aguardando resposta.`,
+                      "",
+                      `Sua resposta seria enviada ao cliente: *${clientDisplay}*`,
+                      `Pergunta: "${oldest.clientQuestion.slice(0, 120)}"`,
+                      "",
+                      "Para confirmar, envie sua resposta novamente.",
+                      "Para responder outro cliente, cite a mensagem de escalação correspondente."
+                    ].join("\n"),
+                    { action: "admin_escalation_ambiguity_warning", kind: "chatbot" }
+                  );
+                  // Marca como avisado — expira em 5 min
+                  const ackTimeout = setTimeout(() => {
+                    this.escalationAmbiguityAcknowledged.delete(ackKey);
+                  }, 5 * 60 * 1000);
+                  ackTimeout.unref?.();
+                  this.escalationAmbiguityAcknowledged.set(ackKey, ackTimeout);
+                  return;
+                }
+              }
+            }
+          }
+
           const learningResult = await this.escalationService.processAdminReply(
             tenantId,
             instance.id,
@@ -2778,12 +2944,27 @@ if (event.status === "CONNECTED") {
                   "Aprendi e respondi o cliente!",
                   "",
                   `Pergunta: "${learningResult.clientQuestion}"`,
-                  `Resposta enviada: "${clientResponse}"`
+                  `Resposta enviada: "${clientResponse}"`,
+                  "",
+                  "Se quiser corrigir a resposta, envie o texto correto nos proximos 5 min."
                 ].join("\n")
               );
 
               if (delivered === false) {
                 console.warn("[escalation] falha ao enviar confirmacao de aprendizado ao admin");
+              }
+
+              // PENDING_REVIEW: janela de 5 min para correcao pos-aprendizado
+              const adminPhoneNormalized = learningAdminPhone.replace(/\D/g, "");
+              if (adminPhoneNormalized) {
+                this.escalationService.trackPendingKnowledgeCorrection(
+                  instance.id,
+                  adminPhoneNormalized,
+                  learningResult.savedKnowledgeId,
+                  tenantId,
+                  learningResult.clientQuestion,
+                  clientResponse
+                );
               }
             }
 
@@ -2843,6 +3024,26 @@ if (event.status === "CONNECTED") {
           }
         });
         if (handled) return;
+
+        // PENDING_REVIEW: verifica se admin esta corrigindo conhecimento recem-aprendido
+        if (finalInputText && resolvedContactNumber) {
+          const correctionConsumed = await this.escalationService.consumePendingKnowledgeCorrection(
+            instance.id,
+            resolvedContactNumber,
+            finalInputText
+          );
+          if (correctionConsumed) {
+            await this.sendAutomatedTextMessage(
+              tenantId,
+              instance.id,
+              remoteNumber,
+              event.remoteJid,
+              "Conhecimento atualizado!",
+              { action: "admin_knowledge_correction_ack", kind: "chatbot" }
+            );
+            return;
+          }
+        }
       }
 
       if (finalInputText && activeConversation.awaitingAdminResponse && !canProcessAprendizadoContinuoReply) {
@@ -2881,6 +3082,30 @@ if (event.status === "CONNECTED") {
         if (imageMsg && (chatbotConfig?.visionEnabled ?? false)) {
           finalInputText = "[O cliente enviou uma imagem. Aguardando análise.]";
         } else {
+          return;
+        }
+      }
+
+      // INCOMPLETA-03: palavra-pausa — desativa o bot ao detectar palavra-chave do cliente
+      if (!isAdminOrInstanceSender && finalInputText) {
+        const pauseResult = matchesPauseWord(sanitizedChatbotModules, finalInputText);
+        if (pauseResult.matched) {
+          if (pauseResult.message) {
+            await this.sendAutomatedTextMessage(
+              tenantId,
+              instance.id,
+              resolvedContactNumber,
+              event.remoteJid,
+              pauseResult.message,
+              { action: "palavra_pausa", kind: "chatbot" }
+            );
+          }
+          await prisma.conversation.update({
+            where: { id: activeConversation.id },
+            data: { humanTakeover: true, humanTakeoverAt: new Date() } as Prisma.ConversationUncheckedUpdateInput
+          });
+          this.clearConversationSession(sessionKey);
+          console.log("[palavra-pausa] bot desativado para conversa:", activeConversation.id);
           return;
         }
       }
@@ -3678,6 +3903,8 @@ if (event.status === "CONNECTED") {
       return;
     }
 
+    session.lastActivityAt = new Date();
+
     const lastMessage = session.history.at(-1);
 
     if (lastMessage?.role === role && lastMessage.content.trim() === trimmedContent) {
@@ -4370,13 +4597,49 @@ if (event.status === "CONNECTED") {
     }
 
     await this.enforceAutomatedRateLimit(instanceId, tenantId, tenant.rateLimitPerMinute);
-    const payload: SendMessagePayload = {
+    const automatedPayload: SendMessagePayload & { automation: Record<string, unknown> } = {
       type: "text",
       to: remoteNumber,
       targetJid,
-      text
+      text,
+      automation: { kind: "chatbot", ...metadata }
     };
-    const rpcResult = await this.sendMessage(tenantId, instanceId, payload);
+
+    let rpcResult: Record<string, unknown>;
+    try {
+      rpcResult = await this.sendMessage(tenantId, instanceId, automatedPayload);
+    } catch (err) {
+      // Fila persistente: se o worker estiver indisponivel, enfileira para envio posterior
+      if (
+        err instanceof ApiError &&
+        (err.code === "WORKER_UNAVAILABLE" || err.code === "INSTANCE_RPC_TIMEOUT") &&
+        this.sendMessageQueue
+      ) {
+        const prisma = await this.tenantPrismaRegistry.getClient(tenantId);
+        const traceId = crypto.randomUUID();
+        const queued = await prisma.message.create({
+          data: {
+            instanceId,
+            remoteJid: targetJid ?? toJid(remoteNumber),
+            direction: "OUTBOUND",
+            type: "text",
+            status: "QUEUED",
+            payload: automatedPayload as unknown as Prisma.InputJsonValue,
+            traceId,
+            scheduledAt: null
+          }
+        });
+        await this.sendMessageQueue.add(`chatbot-auto:${queued.id}`, {
+          tenantId,
+          instanceId,
+          messageId: queued.id
+        });
+        console.warn("[chatbot] worker indisponivel, mensagem automatizada enfileirada:", queued.id);
+        return;
+      }
+      throw err;
+    }
+
     const externalMessageId = (rpcResult.externalMessageId as string | undefined) ?? null;
     this.rememberAutomatedOutboundEcho(instanceId, externalMessageId);
     const prisma = await this.tenantPrismaRegistry.getClient(tenantId);
@@ -4388,13 +4651,7 @@ if (event.status === "CONNECTED") {
         direction: "OUTBOUND",
         type: "text",
         status: "SENT",
-        payload: {
-          ...payload,
-          automation: {
-            kind: "chatbot",
-            ...metadata
-          }
-        } as Prisma.InputJsonValue,
+        payload: automatedPayload as unknown as Prisma.InputJsonValue,
         traceId: crypto.randomUUID(),
         sentAt: new Date()
       }

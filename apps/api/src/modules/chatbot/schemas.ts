@@ -148,14 +148,22 @@ export const chatbotSimulationBodySchema = z.object({
   text: z.string().max(2_000).default(""),
   isFirstContact: z.boolean().default(false),
   contactName: z.string().max(120).optional(),
-  phoneNumber: z.string().min(8).max(32).default("5511999999999")
+  phoneNumber: z.string().min(8).max(32).default("5511999999999"),
+  trace: z.boolean().default(false)
+});
+
+const chatbotTraceStepSchema = z.object({
+  step: z.string(),
+  result: z.enum(["pass", "skip", "match", "no_match", "error"]),
+  detail: z.string().optional()
 });
 
 export const chatbotSimulationResponseSchema = z.object({
   action: z.enum(["MATCHED", "WELCOME", "FALLBACK", "AI", "HUMAN_HANDOFF", "ESCALATE_ADMIN", "NO_MATCH"]),
   matchedRuleId: z.string().nullable().optional(),
   matchedRuleName: z.string().nullable().optional(),
-  responseText: z.string().nullable().optional()
+  responseText: z.string().nullable().optional(),
+  trace: z.array(chatbotTraceStepSchema).optional()
 });
 
 export const googleCalendarModuleSchema = z.object({

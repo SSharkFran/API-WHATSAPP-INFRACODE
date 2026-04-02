@@ -364,11 +364,18 @@ export interface ClientMemory {
   updatedAt: string;
 }
 
+export interface ChatbotTraceStep {
+  step: string;
+  result: "pass" | "skip" | "match" | "no_match" | "error";
+  detail?: string;
+}
+
 export interface ChatbotSimulationResult {
   action: "MATCHED" | "WELCOME" | "FALLBACK" | "AI" | "HUMAN_HANDOFF" | "ESCALATE_ADMIN" | "NO_MATCH";
   matchedRuleId?: string | null;
   matchedRuleName?: string | null;
   responseText?: string | null;
+  trace?: ChatbotTraceStep[];
 }
 
 export interface ChatbotModules {
@@ -952,4 +959,6 @@ export interface ResumoDiarioModuleConfig extends BaseModuleConfig {
 export interface SessaoInatividadeModuleConfig extends BaseModuleConfig {
   /** Horas de inatividade antes de resetar o histórico da sessão. Padrão: 8 */
   horasInatividade: number;
+  /** Mensagem enviada ao cliente quando a sessão é reiniciada por inatividade. Null = sem mensagem. */
+  mensagemReset: string | null;
 }

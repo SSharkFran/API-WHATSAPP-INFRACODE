@@ -223,7 +223,8 @@ const defaultChatbotModuleConfigs: ChatbotModuleConfigByKey = {
   },
   sessaoInatividade: {
     isEnabled: false,
-    horasInatividade: 8
+    horasInatividade: 8,
+    mensagemReset: null
   }
 };
 
@@ -779,6 +780,16 @@ export const ChatbotModuleConfigSheet = ({
                 onChange={(e) => updateConfig({ ...moduleConfig, horasInatividade: Math.min(720, Math.max(1, Number(e.target.value || 1))) })}
               />
               <p className="text-xs text-[var(--text-tertiary)]">Se o cliente ficar inativo por esse período, o histórico da conversa é reiniciado na próxima mensagem. Mínimo: 1h, máximo: 720h (30 dias).</p>
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-[var(--text-secondary)]">Mensagem ao reiniciar sessão (opcional)</label>
+              <textarea
+                className={[fieldClass, "min-h-[72px] py-2 resize-none"].join(" ")}
+                placeholder="Ex: Olá! Que bom te ver de volta. Como posso ajudar hoje? 😊"
+                value={moduleConfig.mensagemReset ?? ""}
+                onChange={(e) => updateConfig({ ...moduleConfig, mensagemReset: e.target.value.trim() || null })}
+              />
+              <p className="text-xs text-[var(--text-tertiary)]">Enviada ao cliente quando o histórico da sessão é reiniciado. Deixe em branco para não enviar mensagem.</p>
             </div>
           </div>
         );

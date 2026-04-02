@@ -133,7 +133,8 @@ const resumoDiarioModuleSchema = z.object({
 
 const sessaoInatividadeModuleSchema = z.object({
   isEnabled: z.boolean().default(false),
-  horasInatividade: z.number().int().min(1).max(720).default(8)
+  horasInatividade: z.number().int().min(1).max(720).default(8),
+  mensagemReset: z.string().min(1).nullable().default(null)
 });
 
 const moduleSchemas = {
@@ -429,7 +430,9 @@ export const matchesPauseWord = (
   }
 
   const normalizedInput = normalizeLookupText(inputText);
-  const matched = palavraPausaModule.palavras.some((word) => normalizeLookupText(word) === normalizedInput);
+  // MELHORIA: usa includes para detectar a palavra mesmo que o cliente envie uma frase
+  // ex: "quero falar com um atendente" deve disparar a palavra "atendente"
+  const matched = palavraPausaModule.palavras.some((word) => normalizedInput.includes(normalizeLookupText(word)));
 
   return {
     matched,

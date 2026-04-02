@@ -115,7 +115,9 @@ export const buildApp = async () => {
   });
   const escalationService = new EscalationService({
     tenantPrismaRegistry,
-    knowledgeService
+    knowledgeService,
+    redis,
+    webhookService
   });
   const instanceOrchestrator = new InstanceOrchestrator({
     config,
@@ -130,7 +132,8 @@ export const buildApp = async () => {
     adminMemoryService,
     adminCommandService,
     fiadoService,
-    escalationService
+    escalationService,
+    sendMessageQueue
   });
   const platformAlertService = new PlatformAlertService(platformPrisma, instanceOrchestrator);
   chatbotService.setPlatformAlertService(platformAlertService);

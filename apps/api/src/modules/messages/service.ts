@@ -263,6 +263,12 @@ export class MessageService {
       const rpcResult = await this.instanceOrchestrator.sendMessage(job.data.tenantId, message.instanceId, payload);
       const externalMessageId = rpcResult.externalMessageId as string | undefined;
 
+      // Fila persistente: registra echo para mensagens automatizadas do chatbot (evita auto-aprendizado)
+      const payloadAny = payload as Record<string, unknown>;
+      if ((payloadAny?.automation as Record<string, unknown> | undefined)?.kind === "chatbot") {
+        this.instanceOrchestrator.rememberAutomatedOutboundEcho(message.instanceId, externalMessageId);
+      }
+
       const updated = await prisma.message.update({
         where: { id: message.id },
         data: {

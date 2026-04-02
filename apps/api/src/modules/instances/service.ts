@@ -45,6 +45,7 @@ import type { PlanEnforcementService } from "../platform/plan-enforcement.servic
 import type { WebhookService } from "../webhooks/service.js";
 import type { FiadoService } from "../chatbot/fiado.service.js";
 import type { PlatformAlertService } from "../platform/alert.service.js";
+import type { Queue } from "bullmq";
 
 interface InstanceOrchestratorDeps {
   config: AppConfig;
@@ -61,6 +62,7 @@ interface InstanceOrchestratorDeps {
   fiadoService: FiadoService;
   escalationService: EscalationService;
   platformAlertService?: PlatformAlertService;
+  sendMessageQueue?: Queue;
 }
 
 interface StatusWorkerEvent {
@@ -247,6 +249,7 @@ export class InstanceOrchestrator {
   private readonly fiadoAgent: FiadoAgent;
   private readonly escalationService: EscalationService;
   private readonly platformAlertService?: PlatformAlertService;
+  private readonly sendMessageQueue?: Queue;
   private readonly logEmitter = new EventEmitter();
   private readonly qrEmitter = new EventEmitter();
   private readonly latestQrCodes = new Map<string, QrCodeEvent>();
@@ -285,6 +288,7 @@ export class InstanceOrchestrator {
     });
     this.escalationService = deps.escalationService;
     this.platformAlertService = deps.platformAlertService;
+    this.sendMessageQueue = deps.sendMessageQueue;
   }
 
   public setPlatformAlertService(service: PlatformAlertService): void {
@@ -4567,13 +4571,49 @@ if (event.status === "CONNECTED") {
     }
 
     await this.enforceAutomatedRateLimit(instanceId, tenantId, tenant.rateLimitPerMinute);
-    const payload: SendMessagePayload = {
+    const automatedPayload: SendMessagePayload & { automation: Record<string, unknown> } = {
       type: "text",
       to: remoteNumber,
       targetJid,
-      text
+      text,
+      automation: { kind: "chatbot", ...metadata }
     };
-    const rpcResult = await this.sendMessage(tenantId, instanceId, payload);
+
+    let rpcResult: Record<string, unknown>;
+    try {
+      rpcResult = await this.sendMessage(tenantId, instanceId, automatedPayload);
+    } catch (err) {
+      // Fila persistente: se o worker estiver indisponivel, enfileira para envio posterior
+      if (
+        err instanceof ApiError &&
+        (err.code === "WORKER_UNAVAILABLE" || err.code === "INSTANCE_RPC_TIMEOUT") &&
+        this.sendMessageQueue
+      ) {
+        const prisma = await this.tenantPrismaRegistry.getClient(tenantId);
+        const traceId = crypto.randomUUID();
+        const queued = await prisma.message.create({
+          data: {
+            instanceId,
+            remoteJid: targetJid ?? toJid(remoteNumber),
+            direction: "OUTBOUND",
+            type: "text",
+            status: "QUEUED",
+            payload: automatedPayload as unknown as Prisma.InputJsonValue,
+            traceId,
+            scheduledAt: null
+          }
+        });
+        await this.sendMessageQueue.add(`chatbot-auto:${queued.id}`, {
+          tenantId,
+          instanceId,
+          messageId: queued.id
+        });
+        console.warn("[chatbot] worker indisponivel, mensagem automatizada enfileirada:", queued.id);
+        return;
+      }
+      throw err;
+    }
+
     const externalMessageId = (rpcResult.externalMessageId as string | undefined) ?? null;
     this.rememberAutomatedOutboundEcho(instanceId, externalMessageId);
     const prisma = await this.tenantPrismaRegistry.getClient(tenantId);
@@ -4585,13 +4625,7 @@ if (event.status === "CONNECTED") {
         direction: "OUTBOUND",
         type: "text",
         status: "SENT",
-        payload: {
-          ...payload,
-          automation: {
-            kind: "chatbot",
-            ...metadata
-          }
-        } as Prisma.InputJsonValue,
+        payload: automatedPayload as unknown as Prisma.InputJsonValue,
         traceId: crypto.randomUUID(),
         sentAt: new Date()
       }

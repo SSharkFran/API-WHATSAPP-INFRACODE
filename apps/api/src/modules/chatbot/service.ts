@@ -17,7 +17,17 @@ import {
 } from "../../lib/phone.js";
 import { GroqKeyRotator } from "../../lib/groq-key-rotator.js";
 import type { ChatMessage } from "./agents/types.js";
-import { getAprendizadoContinuoModuleConfig, getMemoriaPersonalizadaModuleConfig, sanitizeChatbotModules } from "./module-runtime.js";
+import {
+  getAntiSpamModuleConfig,
+  getAprendizadoContinuoModuleConfig,
+  getHorarioAtendimentoModuleConfig,
+  getMemoriaPersonalizadaModuleConfig,
+  isPhoneAllowedByListaBranca,
+  isPhoneBlockedByBlacklist,
+  isWithinHorarioAtendimento,
+  matchesPauseWord,
+  sanitizeChatbotModules
+} from "./module-runtime.js";
 import type { PersistentMemoryService } from "./persistent-memory.service.js";
 import { chatbotAiConfigSchema, chatbotRuleSchema, googleCalendarModuleSchema, upsertChatbotAiBodySchema } from "./schemas.js";
 import { GoogleCalendarTool } from "./tools/google-calendar.tool.js";
@@ -685,6 +695,69 @@ public async simulate(
   ): Promise<ChatbotSimulationResult> {
     const { config, managedAiProvider, prisma } = await this.getContext(tenantId, instanceId);
     return this.evaluateConfig(tenantId, prisma, config, managedAiProvider, input);
+  }
+
+  public simulateModules(
+    modules: ChatbotModules,
+    input: { phone: string; text: string; currentTime?: Date }
+  ): { steps: ChatbotTraceStep[]; blocked: boolean; blockedReason?: string } {
+    const steps: ChatbotTraceStep[] = [];
+    const sanitized = sanitizeChatbotModules(modules as unknown);
+
+    // Blacklist
+    const blacklisted = isPhoneBlockedByBlacklist(sanitized, input.phone);
+    steps.push({
+      step: "blacklist",
+      result: blacklisted ? "match" : "skip",
+      detail: blacklisted ? `numero ${input.phone} bloqueado` : "numero nao bloqueado"
+    });
+    if (blacklisted) return { steps, blocked: true, blockedReason: "blacklist" };
+
+    // Lista branca
+    const allowed = isPhoneAllowedByListaBranca(sanitized, input.phone);
+    steps.push({
+      step: "lista_branca",
+      result: !allowed ? "match" : "skip",
+      detail: !allowed ? `numero ${input.phone} nao esta na lista` : "numero permitido"
+    });
+    if (!allowed) return { steps, blocked: true, blockedReason: "lista_branca" };
+
+    // Horario de atendimento
+    const horarioModule = getHorarioAtendimentoModuleConfig(sanitized);
+    if (horarioModule?.isEnabled) {
+      const within = isWithinHorarioAtendimento(horarioModule, input.currentTime);
+      steps.push({
+        step: "horario_atendimento",
+        result: within ? "pass" : "match",
+        detail: within ? "dentro do horario" : "fora do horario — mensagem bloqueada"
+      });
+      if (!within) return { steps, blocked: true, blockedReason: "fora_horario" };
+    } else {
+      steps.push({ step: "horario_atendimento", result: "skip", detail: "modulo desativado" });
+    }
+
+    // Palavra de pausa
+    if (input.text) {
+      const pauseResult = matchesPauseWord(sanitized, input.text);
+      steps.push({
+        step: "palavra_pausa",
+        result: pauseResult.matched ? "match" : "skip",
+        detail: pauseResult.matched ? "palavra detectada — bot pausado" : "nenhuma palavra de pausa"
+      });
+      if (pauseResult.matched) return { steps, blocked: true, blockedReason: "palavra_pausa" };
+    }
+
+    // Anti-spam (sem Redis na simulacao — apenas informa se esta habilitado)
+    const antiSpamModule = getAntiSpamModuleConfig(sanitized);
+    steps.push({
+      step: "anti_spam",
+      result: antiSpamModule?.isEnabled ? "pass" : "skip",
+      detail: antiSpamModule?.isEnabled
+        ? `max ${antiSpamModule.maxMensagens} msgs / ${antiSpamModule.intervaloMinutos} min (nao verificado em simulacao)`
+        : "modulo desativado"
+    });
+
+    return { steps, blocked: false };
   }
 
   public async evaluateInbound(

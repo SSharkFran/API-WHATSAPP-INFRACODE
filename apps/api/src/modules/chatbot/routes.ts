@@ -97,6 +97,28 @@ export const registerChatbotRoutes = async (app: FastifyInstance): Promise<void>
       const tenantId = requireTenantId(request);
       const params = instanceParamsSchema.parse(request.params);
       const body = chatbotSimulationBodySchema.parse(request.body);
+
+      if (body.trace) {
+        const config = await app.chatbotService.getConfig(tenantId, params.id);
+        const modulesTrace = app.chatbotService.simulateModules(
+          config.modules ?? {},
+          { phone: body.phoneNumber, text: body.text }
+        );
+
+        if (modulesTrace.blocked) {
+          return {
+            action: "NO_MATCH" as const,
+            trace: modulesTrace.steps
+          };
+        }
+
+        const result = await app.chatbotService.simulate(tenantId, params.id, body);
+        return {
+          ...result,
+          trace: [...modulesTrace.steps, ...(result.trace ?? [])]
+        };
+      }
+
       return app.chatbotService.simulate(tenantId, params.id, body);
     }
   );
@@ -394,6 +416,7 @@ export const registerChatbotRoutes = async (app: FastifyInstance): Promise<void>
       if (!result) {
         throw new Error("Conhecimento nao encontrado nesta instancia");
       }
+      void app.chatbotService.triggerKnowledgeSynthesis(tenantId, params.id).catch(() => null);
       return result;
     }
   );
@@ -416,7 +439,27 @@ export const registerChatbotRoutes = async (app: FastifyInstance): Promise<void>
       if (!deleted) {
         throw new Error("Conhecimento nao encontrado nesta instancia");
       }
+      void app.chatbotService.triggerKnowledgeSynthesis(tenantId, params.id).catch(() => null);
       return reply.status(204).send();
+    }
+  );
+
+  app.post(
+    "/instances/:id/knowledge/synthesize",
+    {
+      config: { auth: "tenant", allowApiKey: true, requiredScopes: ["write"] },
+      schema: {
+        tags: ["Chatbot"],
+        summary: "Dispara (re)geracao da sintese de conhecimento via IA",
+        params: instanceParamsSchema,
+        response: { 200: z.object({ ok: z.boolean() }) }
+      }
+    },
+    async (request) => {
+      const tenantId = requireTenantId(request);
+      const params = instanceParamsSchema.parse(request.params);
+      await app.chatbotService.triggerKnowledgeSynthesis(tenantId, params.id);
+      return { ok: true };
     }
   );
 };

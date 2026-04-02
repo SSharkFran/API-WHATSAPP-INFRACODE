@@ -192,6 +192,18 @@ export class KnowledgeService {
   }
 
   /**
+   * Invalida a sintese de conhecimento gerada por IA para a instancia.
+   * Chamado automaticamente apos PATCH ou DELETE de knowledge.
+   */
+  public async invalidateSynthesis(tenantId: string, instanceId: string): Promise<void> {
+    const prisma = await this.tenantPrismaRegistry.getClient(tenantId);
+    await prisma.chatbotConfig.updateMany({
+      where: { instanceId },
+      data: { knowledgeSynthesis: null, knowledgeSynthesisUpdatedAt: null }
+    });
+  }
+
+  /**
    * Retorna o conhecimento da instancia como bloco de contexto para o system prompt.
    * Prioriza o documento de sintese (gerado por IA, organizado e deduplicado).
    * Fallback para lista crua de Q&As se sintese ainda nao existir.

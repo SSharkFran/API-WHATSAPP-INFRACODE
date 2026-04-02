@@ -286,6 +286,8 @@ export const ChatbotStudio = ({ initialInstances }: ChatbotStudioProps) => {
   const [knowledgeLoading, setKnowledgeLoading] = useState(false);
   const [editingKnowledgeId, setEditingKnowledgeId] = useState<string | null>(null);
   const [editingAnswer, setEditingAnswer] = useState("");
+  const [synthesisSaving, setSynthesisSaving] = useState(false);
+  const [knowledgeSynthesis, setKnowledgeSynthesis] = useState<string | null>(null);
 
   const selectedInstance = useMemo(
     () => instances.find((instance) => instance.id === selectedInstanceId) ?? null,
@@ -358,6 +360,9 @@ export const ChatbotStudio = ({ initialInstances }: ChatbotStudioProps) => {
       .then((list) => { if (active) setKnowledgeList(list); })
       .catch(() => { if (active) setError("Falha ao carregar conhecimentos."); })
       .finally(() => { if (active) setKnowledgeLoading(false); });
+    requestClientApi<{ knowledgeSynthesis?: string | null }>(`/instances/${selectedInstanceId}/chatbot`)
+      .then((cfg) => { if (active) setKnowledgeSynthesis(cfg.knowledgeSynthesis ?? null); })
+      .catch(() => null);
     return () => { active = false; };
   }, [activeTab, selectedInstanceId]);
 
@@ -499,6 +504,20 @@ export const ChatbotStudio = ({ initialInstances }: ChatbotStudioProps) => {
       setError("Falha ao carregar conhecimentos.");
     } finally {
       setKnowledgeLoading(false);
+    }
+  };
+
+  const triggerSynthesis = async () => {
+    if (!selectedInstance) return;
+    setSynthesisSaving(true);
+    try {
+      await requestClientApi(`/instances/${selectedInstance.id}/knowledge/synthesize`, { method: "POST" });
+      await loadKnowledge();
+      setSuccess("Síntese regenerada com sucesso.");
+    } catch {
+      setError("Falha ao regenerar síntese.");
+    } finally {
+      setSynthesisSaving(false);
     }
   };
 
@@ -1358,6 +1377,9 @@ export const ChatbotStudio = ({ initialInstances }: ChatbotStudioProps) => {
               <Button variant="secondary" size="sm" loading={knowledgeLoading} onClick={() => void loadKnowledge()}>
                 Recarregar
               </Button>
+              <Button variant="primary" size="sm" loading={synthesisSaving} onClick={() => void triggerSynthesis()}>
+                Regenerar síntese IA
+              </Button>
             </div>
             <div className="p-5 space-y-3">
               {knowledgeLoading ? (
@@ -1419,6 +1441,14 @@ export const ChatbotStudio = ({ initialInstances }: ChatbotStudioProps) => {
                       </div>
                     </div>
                   ))}
+                </div>
+              )}
+              {knowledgeSynthesis && (
+                <div className="space-y-1.5">
+                  <p className="text-[10px] uppercase tracking-widest text-[var(--text-tertiary)] font-mono">Síntese gerada pela IA</p>
+                  <pre className="whitespace-pre-wrap rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[#0d1117] p-3 text-xs text-[var(--text-secondary)] font-mono leading-relaxed overflow-auto max-h-64">
+                    {knowledgeSynthesis}
+                  </pre>
                 </div>
               )}
             </div>

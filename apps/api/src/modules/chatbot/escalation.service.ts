@@ -408,6 +408,8 @@ export class EscalationService {
     const existing = this.pendingCorrectionMap.get(key);
     if (existing) {
       clearTimeout(existing.timer);
+      // Limpa Redis existente para evitar TTL desatualizado
+      void this.redis?.del(`knowledge:pending_correction:${instanceId}:${adminPhone}`).catch(() => null);
     }
 
     const timer = setTimeout(() => {
@@ -416,6 +418,11 @@ export class EscalationService {
 
     timer.unref?.();
     this.pendingCorrectionMap.set(key, { tenantId, instanceId, knowledgeId, question, answer, timer });
+    void this.redis?.set(
+      `knowledge:pending_correction:${instanceId}:${adminPhone}`,
+      JSON.stringify({ tenantId, instanceId, knowledgeId, question, answer }),
+      "EX", Math.ceil(windowMs / 1000)
+    ).catch(() => null);
   }
 
   /**
@@ -431,7 +438,27 @@ export class EscalationService {
   ): Promise<boolean> {
     const key = `${instanceId}:${adminPhone}`;
     const pending = this.pendingCorrectionMap.get(key);
-    if (!pending) return false;
+    if (!pending) {
+      // Fallback Redis (sobrevive a restarts)
+      if (this.redis) {
+        const redisKey = `knowledge:pending_correction:${instanceId}:${adminPhone}`;
+        const raw = await this.redis.getdel(redisKey).catch(() => null);
+        if (raw) {
+          try {
+            const parsed = JSON.parse(raw) as { tenantId: string; instanceId: string; knowledgeId: string; question: string; answer: string };
+            const normalized = correctionText.trim().toLowerCase().replace(/[^a-z]/g, "");
+            const isConfirmation = ["ok", "sim", "confirmar", "confirma", "certo"].includes(normalized);
+            if (!isConfirmation) {
+              await this.processAdminCorrection(parsed.tenantId, parsed.instanceId, parsed.question, correctionText.trim());
+            }
+            return true;
+          } catch {
+            return false;
+          }
+        }
+      }
+      return false;
+    }
 
     clearTimeout(pending.timer);
     this.pendingCorrectionMap.delete(key);

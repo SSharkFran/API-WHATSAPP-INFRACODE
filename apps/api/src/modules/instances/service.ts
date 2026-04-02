@@ -28,6 +28,7 @@ import type { ChatMessage, ConversationSession as BaseConversationSession, LeadD
 import type { EscalationService } from "../chatbot/escalation.service.js";
 import type { ClientMemoryService } from "../chatbot/memory.service.js";
 import {
+  getAgendamentoAdminModuleConfig,
   getAprendizadoContinuoModuleConfig,
   getAntiSpamModuleConfig,
   getHorarioAtendimentoModuleConfig,
@@ -3044,6 +3045,50 @@ if (event.status === "CONNECTED") {
             return;
           }
         }
+
+        // Agendamento via Admin: verifica se admin esta respondendo disponibilidade para um cliente
+        if (finalInputText && resolvedContactNumber) {
+          const schedulingPending = await this.escalationService.consumePendingSchedulingReply(
+            instance.id,
+            resolvedContactNumber
+          );
+          if (schedulingPending) {
+            const clientRemoteNumber =
+              normalizeWhatsAppPhoneNumber(schedulingPending.clientJid) ??
+              normalizePhoneNumber(String(schedulingPending.clientJid).split("@")[0] ?? "");
+
+            if (clientRemoteNumber) {
+              // Reformula a disponibilidade informada pelo admin via IA
+              const synthesized = await this.chatbotService.synthesizeKnowledgeEntry(
+                tenantId,
+                instance.id,
+                `${schedulingPending.clientName} perguntou sobre disponibilidade para: ${schedulingPending.assunto}`,
+                finalInputText
+              ).catch(() => ({ question: "", answer: finalInputText }));
+
+              const availabilityMessage = synthesized.answer;
+
+              await this.sendAutomatedTextMessage(
+                tenantId,
+                instance.id,
+                clientRemoteNumber,
+                schedulingPending.clientJid,
+                availabilityMessage,
+                { action: "scheduling_availability_reply", kind: "chatbot" }
+              );
+
+              await this.sendAutomatedTextMessage(
+                tenantId,
+                instance.id,
+                remoteNumber,
+                event.remoteJid,
+                `✅ Disponibilidade enviada para *${schedulingPending.clientName}*!`,
+                { action: "scheduling_availability_ack", kind: "chatbot" }
+              );
+            }
+            return;
+          }
+        }
       }
 
       if (finalInputText && activeConversation.awaitingAdminResponse && !canProcessAprendizadoContinuoReply) {
@@ -4188,6 +4233,66 @@ if (event.status === "CONNECTED") {
           text: `Transbordo humano solicitado pelo cliente ${params.resolvedContactNumber}. O bot foi pausado para este contato.`
         });
       }
+      return;
+    }
+
+    if (chatbotResult?.action === "SCHEDULING_REQUEST" && chatbotResult.schedulingPayload) {
+      const payload = chatbotResult.schedulingPayload;
+
+      // Resolve o adminPhone: usa o configurado no modulo ou cai para o admin do aprendizadoContinuo
+      const aprendizadoContinuoModule = getAprendizadoContinuoModuleConfig(params.chatbotConfig?.modules ?? undefined);
+      const resolvedAdminPhone = payload.adminPhone?.replace(/\D/g, "") ||
+        this.resolveConfiguredPhone(
+          aprendizadoContinuoModule?.verifiedPhone ?? null,
+          ...(aprendizadoContinuoModule?.verifiedPhones ?? []),
+          params.chatbotConfig?.leadsPhoneNumber,
+          platformConfig?.adminAlertPhone
+        );
+
+      if (resolvedAdminPhone) {
+        // Monta a mensagem para o admin preenchendo o template
+        const adminMessage = (payload.adminAlertTemplate || "📅 *{{nome}}* quer agendar.\nAssunto: {{assunto}}\nPreferência: {{data_preferencia}}\nTelefone: {{telefone}}\n\nQual sua disponibilidade?")
+          .replace(/\{\{nome\}\}/g, payload.clientName)
+          .replace(/\{\{assunto\}\}/g, payload.assunto)
+          .replace(/\{\{data_preferencia\}\}/g, payload.dataPreferencia)
+          .replace(/\{\{telefone\}\}/g, params.remoteNumber ?? "não informado");
+
+        // Envia mensagem ao admin
+        try {
+          await this.sendMessage(params.tenantId, params.instance.id, {
+            type: "text",
+            to: resolvedAdminPhone,
+            text: adminMessage
+          });
+        } catch (err) {
+          console.warn("[scheduling] falha ao notificar admin:", err);
+        }
+
+        // Registra no mapa de pendentes (30 min para o admin responder)
+        this.escalationService.trackPendingSchedulingRequest(
+          params.instance.id,
+          resolvedAdminPhone,
+          params.tenantId,
+          params.targetJid,
+          payload.clientName,
+          payload.assunto,
+          payload.dataPreferencia
+        );
+      } else {
+        console.warn("[scheduling] adminPhone nao configurado, solicitacao de agendamento ignorada");
+      }
+
+      // Envia mensagem de espera ao cliente
+      const clientMessage = payload.clientPendingMessage;
+      await this.sendAutomatedTextMessage(
+        params.tenantId,
+        params.instance.id,
+        params.remoteNumber,
+        params.targetJid,
+        clientMessage,
+        { action: "scheduling_request_sent", kind: "chatbot" }
+      );
+      this.appendConversationHistory(params.session, "assistant", clientMessage);
       return;
     }
 

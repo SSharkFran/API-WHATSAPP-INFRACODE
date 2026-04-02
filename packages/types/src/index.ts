@@ -371,11 +371,12 @@ export interface ChatbotTraceStep {
 }
 
 export interface ChatbotSimulationResult {
-  action: "MATCHED" | "WELCOME" | "FALLBACK" | "AI" | "HUMAN_HANDOFF" | "ESCALATE_ADMIN" | "NO_MATCH";
+  action: "MATCHED" | "WELCOME" | "FALLBACK" | "AI" | "HUMAN_HANDOFF" | "ESCALATE_ADMIN" | "NO_MATCH" | "SCHEDULING_REQUEST";
   matchedRuleId?: string | null;
   matchedRuleName?: string | null;
   responseText?: string | null;
   trace?: ChatbotTraceStep[];
+  schedulingPayload?: { assunto: string; dataPreferencia: string; clientName: string; clientPendingMessage: string; adminAlertTemplate: string; adminPhone: string | null };
 }
 
 export interface ChatbotModules {
@@ -401,6 +402,7 @@ export interface ChatbotModules {
   webhook?: WebhookModuleConfig;
   webhookBidirecional?: WebhookBidirecionalModuleConfig;
   googleCalendar?: GoogleCalendarModuleConfig;
+  agendamentoAdmin?: AgendamentoAdminModuleConfig;
   planilhaGoogle?: PlanilhaGoogleModuleConfig;
   listaBranca?: ListaBrancaModuleConfig;
   blacklist?: BlacklistModuleConfig;
@@ -636,6 +638,15 @@ export const CHATBOT_MODULE_CATALOG: ChatbotModuleCatalogItem[] = [
     category: "integracoes",
     supportLevel: "operational",
     executionMode: "tool",
+    requiresConfig: true
+  },
+  {
+    key: "agendamentoAdmin",
+    label: "Agendamento via Admin",
+    description: "Coleta assunto e preferência de horário do cliente, notifica o admin no WhatsApp e repassa a disponibilidade informada de volta ao cliente.",
+    category: "integracoes",
+    supportLevel: "operational",
+    executionMode: "prompt",
     requiresConfig: true
   },
   {
@@ -877,6 +888,12 @@ export interface GoogleCalendarModuleConfig extends BaseModuleConfig {
   clientSecret: string;
   refreshToken: string;
   calendarId: string;
+}
+
+export interface AgendamentoAdminModuleConfig extends BaseModuleConfig {
+  adminPhone?: string | null;
+  clientPendingMessage: string;
+  adminAlertTemplate: string;
 }
 
 export interface PlanilhaGoogleModuleConfig extends BaseModuleConfig {

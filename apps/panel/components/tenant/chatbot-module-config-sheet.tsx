@@ -164,6 +164,12 @@ const defaultChatbotModuleConfigs: ChatbotModuleConfigByKey = {
     refreshToken: "",
     calendarId: ""
   },
+  agendamentoAdmin: {
+    isEnabled: false,
+    adminPhone: null,
+    clientPendingMessage: "Estou verificando a disponibilidade da equipe e te retorno em breve! ✅",
+    adminAlertTemplate: "📅 *{{nome}}* quer agendar uma reunião.\n*Assunto:* {{assunto}}\n*Preferência de horário:* {{data_preferencia}}\n*Telefone:* {{telefone}}\n\nQual sua disponibilidade?"
+  },
   planilhaGoogle: {
     isEnabled: false,
     spreadsheetId: "",

@@ -63,6 +63,19 @@ export class EscalationService {
       timer: NodeJS.Timeout;
     }
   >();
+  /** Agendamento via Admin: rastrea solicitacao de disponibilidade enviada ao admin */
+  private readonly pendingSchedulingMap = new Map<
+    string, // key: `${instanceId}:${adminPhone}`
+    {
+      tenantId: string;
+      instanceId: string;
+      clientJid: string;
+      clientName: string;
+      assunto: string;
+      dataPreferencia: string;
+      timer: NodeJS.Timeout;
+    }
+  >();
 
   public constructor(deps: EscalationServiceDeps) {
     this.tenantPrismaRegistry = deps.tenantPrismaRegistry;
@@ -496,6 +509,68 @@ export class EscalationService {
     }
 
     return true;
+  }
+
+  /**
+   * Registra uma solicitacao de agendamento pendente (aguardando resposta do admin).
+   * TTL de 30 minutos.
+   */
+  public trackPendingSchedulingRequest(
+    instanceId: string,
+    adminPhone: string,
+    tenantId: string,
+    clientJid: string,
+    clientName: string,
+    assunto: string,
+    dataPreferencia: string,
+    windowMs = 30 * 60 * 1000
+  ): void {
+    const key = `${instanceId}:${adminPhone}`;
+    const existing = this.pendingSchedulingMap.get(key);
+    if (existing) {
+      clearTimeout(existing.timer);
+    }
+    const timer = setTimeout(() => {
+      this.pendingSchedulingMap.delete(key);
+      void this.redis?.del(`scheduling:pending:${key}`).catch(() => null);
+    }, windowMs);
+    timer.unref?.();
+    this.pendingSchedulingMap.set(key, { tenantId, instanceId, clientJid, clientName, assunto, dataPreferencia, timer });
+    void this.redis?.set(
+      `scheduling:pending:${key}`,
+      JSON.stringify({ tenantId, instanceId, clientJid, clientName, assunto, dataPreferencia }),
+      "PX",
+      windowMs
+    ).catch(() => null);
+  }
+
+  /**
+   * Consome (remove) uma solicitacao de agendamento pendente para este admin.
+   * Verifica mapa em memoria primeiro, depois Redis como fallback.
+   */
+  public async consumePendingSchedulingReply(
+    instanceId: string,
+    adminPhone: string
+  ): Promise<{ tenantId: string; instanceId: string; clientJid: string; clientName: string; assunto: string; dataPreferencia: string } | null> {
+    const key = `${instanceId}:${adminPhone}`;
+    const inMemory = this.pendingSchedulingMap.get(key);
+    if (inMemory) {
+      clearTimeout(inMemory.timer);
+      this.pendingSchedulingMap.delete(key);
+      void this.redis?.del(`scheduling:pending:${key}`).catch(() => null);
+      return inMemory;
+    }
+    if (this.redis) {
+      const raw = await this.redis.getdel(`scheduling:pending:${key}`).catch(() => null);
+      if (raw) {
+        try {
+          return JSON.parse(raw) as { tenantId: string; instanceId: string; clientJid: string; clientName: string; assunto: string; dataPreferencia: string };
+        } catch {
+          return null;
+        }
+      }
+    }
+    return null;
   }
 
   /**

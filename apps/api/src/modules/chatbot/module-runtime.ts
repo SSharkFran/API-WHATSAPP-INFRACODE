@@ -1,4 +1,5 @@
 import type {
+  AgendamentoAdminModuleConfig,
   AprendizadoContinuoModuleConfig,
   AgendaModuleConfig,
   AntiSpamModuleConfig,
@@ -18,7 +19,7 @@ import type {
 import { CHATBOT_MODULE_CATALOG } from "@infracode/types";
 import { z } from "zod";
 import { normalizePhoneNumber } from "../../lib/phone.js";
-import { googleCalendarModuleSchema } from "./schemas.js";
+import { agendamentoAdminModuleSchema, googleCalendarModuleSchema } from "./schemas.js";
 
 const faqModuleSchema = z.object({
   isEnabled: z.boolean().default(false),
@@ -272,6 +273,11 @@ export const getSessaoInatividadeModuleConfig = (
 ): SessaoInatividadeModuleConfig | null =>
   getParsedModuleConfig(sessaoInatividadeModuleSchema, modules?.sessaoInatividade);
 
+export const getAgendamentoAdminModuleConfig = (
+  modules: ChatbotModules | undefined
+): AgendamentoAdminModuleConfig | null =>
+  getParsedModuleConfig(agendamentoAdminModuleSchema, modules?.agendamentoAdmin);
+
 export const buildOperationalModuleInstructions = (modules: ChatbotModules | undefined): string[] => {
   const instructions: string[] = [];
   const faqModule = getFaqModuleConfig(modules);
@@ -319,6 +325,21 @@ export const buildOperationalModuleInstructions = (modules: ChatbotModules | und
       "### GOOGLE CALENDAR ###",
       "Antes de prometer disponibilidade real, use a tool checkAvailability.",
       "So use createEvent depois que o cliente confirmar claramente a data/horario escolhido."
+    );
+  }
+
+  const agendamentoAdminModule = getAgendamentoAdminModuleConfig(modules);
+  const googleCalendarIsActive = googleCalendarModule?.isEnabled === true;
+
+  if (agendamentoAdminModule?.isEnabled && !googleCalendarIsActive) {
+    instructions.push(
+      "### AGENDAMENTO VIA ADMIN ###",
+      "Quando o cliente demonstrar intenção de agendar reunião, visita, apresentação ou qualquer tipo de encontro:",
+      "1. PRIMEIRO colete as duas informações obrigatórias: (a) assunto/motivo e (b) preferência de data e horário.",
+      "2. Somente após ter AMBAS, inclua EXATAMENTE este marcador no início da sua resposta:",
+      '   [AGENDAR_ADMIN:{"assunto":"<assunto>","dataPreferencia":"<preferencia>","clientName":"<nome do cliente>"}]',
+      "3. Logo após o marcador, escreva a mensagem ao cliente informando que está verificando a disponibilidade.",
+      "NUNCA invente horários disponíveis. NUNCA use o marcador sem ter o assunto E a preferência de horário."
     );
   }
 

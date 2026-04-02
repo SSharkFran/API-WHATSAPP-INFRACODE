@@ -18,6 +18,7 @@ import {
 import { GroqKeyRotator } from "../../lib/groq-key-rotator.js";
 import type { ChatMessage } from "./agents/types.js";
 import {
+  getAgendamentoAdminModuleConfig,
   getAntiSpamModuleConfig,
   getAprendizadoContinuoModuleConfig,
   getHorarioAtendimentoModuleConfig,
@@ -2173,6 +2174,38 @@ private async evaluateConfig(
 
       if (!responseText) {
         return null;
+      }
+
+      // Agendamento via Admin: detecta [AGENDAR_ADMIN:{...}] antes de outros marcadores
+      const agendamentoAdminModuleConfig = getAgendamentoAdminModuleConfig(config.modules ?? undefined);
+      const googleCalendarActive = googleCalendarModuleSchema.safeParse(config.modules?.googleCalendar).data?.isEnabled === true;
+      const schedulingMatch = /\[AGENDAR_ADMIN:(\{[^[\]]*\})\]/i.exec(responseText);
+
+      if (schedulingMatch && agendamentoAdminModuleConfig?.isEnabled && !googleCalendarActive) {
+        const cleanedResponse = responseText.replace(/\[AGENDAR_ADMIN:\{[^[\]]*\}\]/gi, "").trim();
+        try {
+          const payload = JSON.parse(schedulingMatch[1]) as { assunto?: string; dataPreferencia?: string; clientName?: string };
+          const assunto = (payload.assunto ?? "").trim();
+          const dataPreferencia = (payload.dataPreferencia ?? "").trim();
+          if (assunto && dataPreferencia) {
+            return {
+              action: "SCHEDULING_REQUEST",
+              matchedRuleId: null,
+              matchedRuleName: `${managedAiProvider.provider}:scheduling_request`,
+              responseText: cleanedResponse || agendamentoAdminModuleConfig.clientPendingMessage,
+              schedulingPayload: {
+                assunto,
+                dataPreferencia,
+                clientName: (payload.clientName ?? input.contactName ?? "Cliente").trim(),
+                clientPendingMessage: cleanedResponse || agendamentoAdminModuleConfig.clientPendingMessage,
+                adminAlertTemplate: agendamentoAdminModuleConfig.adminAlertTemplate,
+                adminPhone: agendamentoAdminModuleConfig.adminPhone ?? null
+              }
+            };
+          }
+        } catch {
+          // JSON parse falhou, trata como resposta normal
+        }
       }
 
       const isHandoff = /\[TRANSBORDO_HUMANO\]/i.test(responseText);

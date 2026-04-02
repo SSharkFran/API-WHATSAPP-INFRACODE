@@ -173,3 +173,10 @@ export const googleCalendarModuleSchema = z.object({
   refreshToken: z.string().min(1),
   calendarId: z.string().min(1)
 });
+
+export const agendamentoAdminModuleSchema = z.object({
+  isEnabled: z.boolean().default(false),
+  adminPhone: z.string().nullable().optional(),
+  clientPendingMessage: z.string().default("Estou verificando a disponibilidade da equipe e te retorno em breve! ✅"),
+  adminAlertTemplate: z.string().default("📅 *{{nome}}* quer agendar uma reunião.\n*Assunto:* {{assunto}}\n*Preferência de horário:* {{data_preferencia}}\n*Telefone:* {{telefone}}\n\nQual sua disponibilidade?")
+});

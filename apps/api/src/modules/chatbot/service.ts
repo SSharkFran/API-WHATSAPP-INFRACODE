@@ -251,6 +251,8 @@ const matchesRule = (rule: ChatbotRule, normalizedInput: string, isFirstContact:
       } catch {
         return false;
       }
+    default:
+      return false;
   }
 };
 
@@ -309,6 +311,20 @@ export class ChatbotService {
 
   public invalidateGlobalSystemPromptCache(): void {
     this.globalSystemPromptCache = undefined;
+  }
+
+  /** Retorna a proxima chave GROQ disponivel do pool rotativo. */
+  public getNextGroqApiKey(): string | null {
+    return this.groqKeyRotator.availableKeys()[0] ?? null;
+  }
+
+  /** Reporta sucesso/falha de uma chamada GROQ para o rotador de chaves. */
+  public reportGroqKeyResult(key: string, status: "success" | number): void {
+    if (status === "success") {
+      this.groqKeyRotator.reportSuccess(key);
+    } else {
+      this.groqKeyRotator.reportFailure(key, status);
+    }
   }
 
   public async extractPersistentMemory(

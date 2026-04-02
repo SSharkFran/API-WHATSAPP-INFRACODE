@@ -952,4 +952,6 @@ export interface ResumoDiarioModuleConfig extends BaseModuleConfig {
 export interface SessaoInatividadeModuleConfig extends BaseModuleConfig {
   /** Horas de inatividade antes de resetar o histórico da sessão. Padrão: 8 */
   horasInatividade: number;
+  /** Mensagem enviada ao cliente quando a sessão é reiniciada por inatividade. Null = sem mensagem. */
+  mensagemReset: string | null;
 }

@@ -1,3 +1,4 @@
+import type { Redis as IORedis } from "ioredis";
 import type { TenantPrismaRegistry } from "../../lib/database.js";
 import type { PlatformAlertService } from "../platform/alert.service.js";
 import type { KnowledgeService } from "./knowledge.service.js";
@@ -7,6 +8,7 @@ interface EscalationServiceDeps {
   tenantPrismaRegistry: TenantPrismaRegistry;
   platformAlertService?: PlatformAlertService;
   knowledgeService: KnowledgeService;
+  redis?: IORedis;
 }
 
 interface EscalationContext {
@@ -22,6 +24,7 @@ export class EscalationService {
   private readonly tenantPrismaRegistry: TenantPrismaRegistry;
   private readonly knowledgeService: KnowledgeService;
   private readonly platformAlertService?: PlatformAlertService;
+  private readonly redis?: IORedis;
   private readonly adminAlertMessageMap = new Map<
     string,
     {
@@ -41,6 +44,7 @@ export class EscalationService {
     this.tenantPrismaRegistry = deps.tenantPrismaRegistry;
     this.knowledgeService = deps.knowledgeService;
     this.platformAlertService = deps.platformAlertService;
+    this.redis = deps.redis;
   }
 
   public setPlatformAlertService(service: PlatformAlertService): void {
@@ -53,6 +57,19 @@ export class EscalationService {
     }
 
     return this.adminAlertMessageMap.get(messageId)?.conversationId ?? null;
+  }
+
+  /**
+   * RISCO-02: versao async que faz fallback ao Redis quando o mapa em memoria
+   * nao contem o ID (ex: apos reinicializacao do processo).
+   */
+  public async resolveConversationIdByAdminAlertMessageAsync(
+    messageId?: string | null
+  ): Promise<string | null> {
+    const inMemory = this.resolveConversationIdByAdminAlertMessage(messageId);
+    if (inMemory || !messageId || !this.redis) return inMemory;
+    const redisValue = await this.redis.get(`escalation:alert:msg:${messageId}`).catch(() => null);
+    return redisValue ?? null;
   }
 
   public resolveConversationIdByAdminAlertChat(remoteJid?: string | null): string | null {
@@ -336,6 +353,46 @@ export class EscalationService {
     return count > 0;
   }
 
+  /**
+   * Retorna o numero de conversas pausadas aguardando resposta do admin.
+   */
+  public async countPendingEscalations(
+    tenantId: string,
+    instanceId: string
+  ): Promise<number> {
+    const prisma = await this.tenantPrismaRegistry.getClient(tenantId);
+    return prisma.conversation.count({
+      where: { instanceId, awaitingAdminResponse: true }
+    });
+  }
+
+  /**
+   * Retorna a conversa mais antiga aguardando resposta do admin sem modifica-la.
+   * Util para avisar o admin qual cliente esta em fila antes de processar a resposta.
+   */
+  public async peekOldestPendingEscalation(
+    tenantId: string,
+    instanceId: string
+  ): Promise<{ conversationId: string; clientJid: string; clientQuestion: string } | null> {
+    const prisma = await this.tenantPrismaRegistry.getClient(tenantId);
+    const conv = await prisma.conversation.findFirst({
+      where: {
+        instanceId,
+        awaitingAdminResponse: true,
+        pendingClientJid: { not: null },
+        pendingClientQuestion: { not: null }
+      },
+      orderBy: { updatedAt: "asc" },
+      select: { id: true, pendingClientJid: true, pendingClientQuestion: true }
+    });
+    if (!conv?.pendingClientJid || !conv.pendingClientQuestion) return null;
+    return {
+      conversationId: conv.id,
+      clientJid: conv.pendingClientJid,
+      clientQuestion: conv.pendingClientQuestion
+    };
+  }
+
   public async releaseTimedOutEscalations(
     tenantId: string,
     instanceId: string,
@@ -482,6 +539,11 @@ export class EscalationService {
         conversationId,
         timeout
       });
+
+      // RISCO-02: persiste no Redis para sobreviver a reinicializacoes (TTL 2h)
+      void this.redis
+        ?.set(`escalation:alert:msg:${messageId}`, conversationId, "EX", Math.floor(timeoutMs / 1000))
+        .catch(() => null);
     }
 
     this.trackAdminAlertChat(remoteJid, conversationId, timeoutMs);

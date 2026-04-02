@@ -115,7 +115,8 @@ export const buildApp = async () => {
   });
   const escalationService = new EscalationService({
     tenantPrismaRegistry,
-    knowledgeService
+    knowledgeService,
+    redis
   });
   const instanceOrchestrator = new InstanceOrchestrator({
     config,

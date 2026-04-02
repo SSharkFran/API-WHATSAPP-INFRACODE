@@ -2,6 +2,7 @@ import type { Redis as IORedis } from "ioredis";
 import type { TenantPrismaRegistry } from "../../lib/database.js";
 import type { PlatformAlertService } from "../platform/alert.service.js";
 import type { KnowledgeService } from "./knowledge.service.js";
+import type { WebhookService } from "../webhooks/service.js";
 import type { Prisma } from "../../../../../prisma/generated/tenant-client/index.js";
 
 interface EscalationServiceDeps {
@@ -9,6 +10,7 @@ interface EscalationServiceDeps {
   platformAlertService?: PlatformAlertService;
   knowledgeService: KnowledgeService;
   redis?: IORedis;
+  webhookService?: WebhookService;
 }
 
 interface EscalationContext {
@@ -25,6 +27,7 @@ export class EscalationService {
   private readonly knowledgeService: KnowledgeService;
   private readonly platformAlertService?: PlatformAlertService;
   private readonly redis?: IORedis;
+  private readonly webhookService?: WebhookService;
   private readonly adminAlertMessageMap = new Map<
     string,
     {
@@ -39,12 +42,32 @@ export class EscalationService {
       timeout: NodeJS.Timeout;
     }
   >();
+  private readonly escalationRetryMap = new Map<
+    string,
+    {
+      timer: NodeJS.Timeout;
+      ctx: EscalationContext;
+    }
+  >();
+  /** PENDING_REVIEW: rastrea janela de 5 min para correcao pos-aprendizado */
+  private readonly pendingCorrectionMap = new Map<
+    string,
+    {
+      tenantId: string;
+      instanceId: string;
+      knowledgeId: string;
+      question: string;
+      answer: string;
+      timer: NodeJS.Timeout;
+    }
+  >();
 
   public constructor(deps: EscalationServiceDeps) {
     this.tenantPrismaRegistry = deps.tenantPrismaRegistry;
     this.knowledgeService = deps.knowledgeService;
     this.platformAlertService = deps.platformAlertService;
     this.redis = deps.redis;
+    this.webhookService = deps.webhookService;
   }
 
   public setPlatformAlertService(service: PlatformAlertService): void {
@@ -168,6 +191,7 @@ export class EscalationService {
       }
 
       this.trackAdminAlertRouting(result.externalMessageId, result.remoteJid, ctx.conversationId);
+      this.scheduleEscalationRetry(ctx);
       const existingAdminContact = await prisma.contact.findUnique({
         where: {
           instanceId_phoneNumber: {
@@ -253,6 +277,7 @@ export class EscalationService {
     clientQuestion: string;
     formulatedAnswer: string;
     conversationId: string;
+    savedKnowledgeId: string;
   } | null> {
     const prisma = await this.tenantPrismaRegistry.getClient(tenantId);
 
@@ -284,7 +309,7 @@ export class EscalationService {
     const clientQuestion = pausedConversation.pendingClientQuestion;
     const clientJid = pausedConversation.pendingClientJid;
 
-    await this.knowledgeService.save(
+    const savedKnowledge = await this.knowledgeService.save(
       tenantId,
       instanceId,
       clientQuestion,
@@ -292,6 +317,19 @@ export class EscalationService {
       adminRawAnswer,
       "admin"
     );
+
+    void this.webhookService?.enqueueEvent({
+      tenantId,
+      instanceId,
+      eventType: "knowledge.learned",
+      payload: {
+        id: savedKnowledge.id,
+        question: savedKnowledge.question,
+        answer: savedKnowledge.answer,
+        taughtBy: savedKnowledge.taughtBy,
+        createdAt: savedKnowledge.createdAt
+      }
+    }).catch(() => null);
 
     await prisma.conversation.update({
       where: { id: pausedConversation.id },
@@ -312,7 +350,8 @@ export class EscalationService {
       clientJid,
       clientQuestion,
       formulatedAnswer: adminRawAnswer,
-      conversationId: pausedConversation.pendingClientConversationId ?? pausedConversation.id
+      conversationId: pausedConversation.pendingClientConversationId ?? pausedConversation.id,
+      savedKnowledgeId: savedKnowledge.id
     };
   }
 
@@ -327,7 +366,7 @@ export class EscalationService {
     originalQuestion: string,
     correctedAnswer: string
   ): Promise<void> {
-    await this.knowledgeService.save(
+    const savedKnowledge = await this.knowledgeService.save(
       tenantId,
       instanceId,
       originalQuestion,
@@ -336,7 +375,78 @@ export class EscalationService {
       "admin_correction"
     );
 
+    void this.webhookService?.enqueueEvent({
+      tenantId,
+      instanceId,
+      eventType: "knowledge.learned",
+      payload: {
+        id: savedKnowledge.id,
+        question: savedKnowledge.question,
+        answer: savedKnowledge.answer,
+        taughtBy: savedKnowledge.taughtBy,
+        createdAt: savedKnowledge.createdAt
+      }
+    }).catch(() => null);
+
     console.log(`[escalation] correcao de conhecimento registrada para: "${originalQuestion}"`);
+  }
+
+  /**
+   * PENDING_REVIEW: abre uma janela de 5 min para o admin corrigir o conhecimento recem-aprendido.
+   * Chamado pelo caller apos processAdminReply retornar com sucesso.
+   */
+  public trackPendingKnowledgeCorrection(
+    instanceId: string,
+    adminPhone: string,
+    knowledgeId: string,
+    tenantId: string,
+    question: string,
+    answer: string,
+    windowMs = 5 * 60 * 1000
+  ): void {
+    const key = `${instanceId}:${adminPhone}`;
+    const existing = this.pendingCorrectionMap.get(key);
+    if (existing) {
+      clearTimeout(existing.timer);
+    }
+
+    const timer = setTimeout(() => {
+      this.pendingCorrectionMap.delete(key);
+    }, windowMs);
+
+    timer.unref?.();
+    this.pendingCorrectionMap.set(key, { tenantId, instanceId, knowledgeId, question, answer, timer });
+  }
+
+  /**
+   * PENDING_REVIEW: consome a janela de correcao.
+   * Se o admin enviou "ok"/"confirmar" → nada a fazer (ja salvo).
+   * Qualquer outro texto → salva como correcao e dispara webhook.
+   * Retorna true se uma correcao pendente foi encontrada e consumida.
+   */
+  public async consumePendingKnowledgeCorrection(
+    instanceId: string,
+    adminPhone: string,
+    correctionText: string
+  ): Promise<boolean> {
+    const key = `${instanceId}:${adminPhone}`;
+    const pending = this.pendingCorrectionMap.get(key);
+    if (!pending) return false;
+
+    clearTimeout(pending.timer);
+    this.pendingCorrectionMap.delete(key);
+
+    const normalized = correctionText.trim().toLowerCase().replace(/[^a-z]/g, "");
+    const isConfirmation = ["ok", "sim", "confirmar", "confirma", "certo"].includes(normalized);
+
+    if (!isConfirmation) {
+      await this.processAdminCorrection(pending.tenantId, pending.instanceId, pending.question, correctionText.trim());
+      console.log(`[escalation] correcao aplicada pelo admin para: "${pending.question}"`);
+    } else {
+      console.log(`[escalation] admin confirmou conhecimento sem correcao para: "${pending.question}"`);
+    }
+
+    return true;
   }
 
   /**
@@ -609,6 +719,70 @@ export class EscalationService {
         clearTimeout(entry.timeout);
         this.adminAlertChatMap.delete(remoteJid);
       }
+    }
+
+    const retry = this.escalationRetryMap.get(conversationId);
+    if (retry) {
+      clearTimeout(retry.timer);
+      this.escalationRetryMap.delete(conversationId);
+    }
+  }
+
+  private scheduleEscalationRetry(ctx: EscalationContext, retryDelayMs = 10 * 60 * 1000): void {
+    const existing = this.escalationRetryMap.get(ctx.conversationId);
+    if (existing) {
+      clearTimeout(existing.timer);
+    }
+
+    const timer = setTimeout(() => {
+      this.escalationRetryMap.delete(ctx.conversationId);
+      void this.sendEscalationReminder(ctx);
+    }, retryDelayMs);
+
+    timer.unref?.();
+    this.escalationRetryMap.set(ctx.conversationId, { timer, ctx });
+  }
+
+  private async sendEscalationReminder(ctx: EscalationContext): Promise<void> {
+    try {
+      const prisma = await this.tenantPrismaRegistry.getClient(ctx.tenantId);
+      const stillPending = await prisma.conversation.findFirst({
+        where: { id: ctx.conversationId, awaitingAdminResponse: true },
+        select: { id: true }
+      });
+
+      if (!stillPending) {
+        return;
+      }
+
+      if (!this.platformAlertService) {
+        return;
+      }
+
+      const reminderMessage = [
+        "*[LEMBRETE] Aprendizado pendente*",
+        "---------------",
+        `Instancia: ${ctx.instanceId}`,
+        "O cliente ainda aguarda resposta. Pergunta original:",
+        `"${ctx.clientQuestion}"`,
+        "",
+        "Responda esta mensagem para eu aprender e responder o cliente automaticamente.",
+        `ID: ${ctx.conversationId}`
+      ].join("\n");
+
+      const result = await this.platformAlertService.sendTrackedInstanceAlert(
+        ctx.tenantId,
+        ctx.instanceId,
+        ctx.adminPhone,
+        reminderMessage
+      );
+
+      if (result.delivered) {
+        this.trackAdminAlertRouting(result.externalMessageId, result.remoteJid, ctx.conversationId);
+        console.log(`[escalation] lembrete enviado ao admin para conversa ${ctx.conversationId}`);
+      }
+    } catch (err) {
+      console.error("[escalation] erro ao enviar lembrete ao admin:", err);
     }
   }
 }

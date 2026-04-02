@@ -2914,12 +2914,27 @@ if (event.status === "CONNECTED") {
                   "Aprendi e respondi o cliente!",
                   "",
                   `Pergunta: "${learningResult.clientQuestion}"`,
-                  `Resposta enviada: "${clientResponse}"`
+                  `Resposta enviada: "${clientResponse}"`,
+                  "",
+                  "Se quiser corrigir a resposta, envie o texto correto nos proximos 5 min."
                 ].join("\n")
               );
 
               if (delivered === false) {
                 console.warn("[escalation] falha ao enviar confirmacao de aprendizado ao admin");
+              }
+
+              // PENDING_REVIEW: janela de 5 min para correcao pos-aprendizado
+              const adminPhoneNormalized = learningAdminPhone.replace(/\D/g, "");
+              if (adminPhoneNormalized) {
+                this.escalationService.trackPendingKnowledgeCorrection(
+                  instance.id,
+                  adminPhoneNormalized,
+                  learningResult.savedKnowledgeId,
+                  tenantId,
+                  learningResult.clientQuestion,
+                  clientResponse
+                );
               }
             }
 
@@ -2979,6 +2994,26 @@ if (event.status === "CONNECTED") {
           }
         });
         if (handled) return;
+
+        // PENDING_REVIEW: verifica se admin esta corrigindo conhecimento recem-aprendido
+        if (finalInputText && resolvedContactNumber) {
+          const correctionConsumed = await this.escalationService.consumePendingKnowledgeCorrection(
+            instance.id,
+            resolvedContactNumber,
+            finalInputText
+          );
+          if (correctionConsumed) {
+            await this.sendAutomatedTextMessage(
+              tenantId,
+              instance.id,
+              remoteNumber,
+              event.remoteJid,
+              "Conhecimento atualizado!",
+              { action: "admin_knowledge_correction_ack", kind: "chatbot" }
+            );
+            return;
+          }
+        }
       }
 
       if (finalInputText && activeConversation.awaitingAdminResponse && !canProcessAprendizadoContinuoReply) {

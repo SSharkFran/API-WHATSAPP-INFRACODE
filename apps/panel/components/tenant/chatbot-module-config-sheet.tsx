@@ -537,6 +537,49 @@ export const ChatbotModuleConfigSheet = ({
         );
       }
 
+      case "agendamentoAdmin": {
+        const moduleConfig = currentConfig as NonNullable<ChatbotModules["agendamentoAdmin"]>;
+
+        return (
+          <div className="space-y-4">
+            <div className="rounded-[var(--radius-md)] bg-amber-900/20 border border-amber-700/30 px-3 py-2">
+              <p className="text-[11px] text-amber-400">
+                ⚠️ Este módulo é desativado automaticamente quando o <strong>Google Calendar</strong> estiver ativo — eles cobrem o mesmo fluxo por caminhos diferentes.
+              </p>
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-[var(--text-secondary)]">Telefone do admin <span className="text-[var(--text-tertiary)] font-normal">(opcional)</span></label>
+              <p className="text-[11px] text-[var(--text-tertiary)]">Deixe em branco para usar o telefone do Aprendizado Contínuo.</p>
+              <input
+                className={[fieldClass, "h-11"].join(" ")}
+                placeholder="Ex: 5511999998888"
+                value={moduleConfig.adminPhone ?? ""}
+                onChange={(e) => updateConfig({ ...moduleConfig, adminPhone: e.target.value.trim() || null })}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-[var(--text-secondary)]">Mensagem ao cliente enquanto aguarda</label>
+              <textarea
+                className={textareaClass}
+                value={moduleConfig.clientPendingMessage}
+                onChange={(e) => updateConfig({ ...moduleConfig, clientPendingMessage: e.target.value })}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-[var(--text-secondary)]">Template de notificação ao admin</label>
+              <p className="text-[11px] text-[var(--text-tertiary)]">
+                Variáveis disponíveis: <code className="bg-[var(--bg-active)] px-1 rounded">{"{{nome}}"}</code> <code className="bg-[var(--bg-active)] px-1 rounded">{"{{assunto}}"}</code> <code className="bg-[var(--bg-active)] px-1 rounded">{"{{data_preferencia}}"}</code> <code className="bg-[var(--bg-active)] px-1 rounded">{"{{telefone}}"}</code>
+              </p>
+              <textarea
+                className={[textareaClass, "min-h-[120px]"].join(" ")}
+                value={moduleConfig.adminAlertTemplate}
+                onChange={(e) => updateConfig({ ...moduleConfig, adminAlertTemplate: e.target.value })}
+              />
+            </div>
+          </div>
+        );
+      }
+
       case "listaBranca": {
         const moduleConfig = currentConfig as NonNullable<ChatbotModules["listaBranca"]>;
 

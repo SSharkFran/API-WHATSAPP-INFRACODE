@@ -285,7 +285,7 @@ export class ChatbotService {
   private readonly knowledgeService?: KnowledgeService;
   private readonly persistentMemoryService?: PersistentMemoryService;
   private readonly groqKeyRotator: GroqKeyRotator;
-  private globalSystemPromptCache: string | null | undefined;
+  private globalSystemPromptCache: { value: string | null; expiresAt: number } | undefined;
 
   public constructor(deps: ChatbotServiceDeps) {
     this.config = deps.config;
@@ -308,7 +308,7 @@ export class ChatbotService {
   }
 
   public invalidateGlobalSystemPromptCache(): void {
-    this.globalSystemPromptCache = undefined;
+    this.globalSystemPromptCache = undefined; // força re-fetch na próxima chamada
   }
 
   public async extractPersistentMemory(
@@ -830,18 +830,17 @@ public async simulate(
   }
 
   private async getGlobalSystemPrompt(): Promise<string | null> {
-    if (this.globalSystemPromptCache !== undefined) {
-      return this.globalSystemPromptCache;
+    const now = Date.now();
+    if (this.globalSystemPromptCache !== undefined && now < this.globalSystemPromptCache.expiresAt) {
+      return this.globalSystemPromptCache.value;
     }
 
     const setting = await this.platformPrisma.platformSetting.findUnique({
-      where: {
-        key: chatbotGlobalSystemPromptSettingKey
-      }
+      where: { key: chatbotGlobalSystemPromptSettingKey }
     });
 
     const resolvedPrompt = typeof setting?.value === "string" && setting.value.trim() ? setting.value.trim() : null;
-    this.globalSystemPromptCache = resolvedPrompt;
+    this.globalSystemPromptCache = { value: resolvedPrompt, expiresAt: now + 5 * 60 * 1000 };
     return resolvedPrompt;
   }
 
@@ -2126,7 +2125,23 @@ private async evaluateConfig(
       ].join("\n"));
     }
 
-    const system = systemParts.join("\n");
+    // Trunca partes opcionais do system prompt se estimativa de tokens ultrapassar limite
+    // Estimativa: chars / 4 ≈ tokens (regra geral para PT-BR)
+    const MAX_SYSTEM_TOKENS = 6000;
+    const estimateTokens = (text: string): number => Math.ceil(text.length / 4);
+    const truncatableIndexes = [2, 3]; // índices de memória local e clientContext — os mais variáveis
+    let systemJoined = systemParts.join("\n");
+    if (estimateTokens(systemJoined) > MAX_SYSTEM_TOKENS) {
+      for (const idx of truncatableIndexes) {
+        if (systemParts[idx] && estimateTokens(systemJoined) > MAX_SYSTEM_TOKENS) {
+          const original = systemParts[idx]!;
+          const maxChars = Math.max(200, original.length - (estimateTokens(systemJoined) - MAX_SYSTEM_TOKENS) * 4);
+          systemParts[idx] = original.slice(0, maxChars) + "\n[...truncado por limite de contexto]";
+          systemJoined = systemParts.join("\n");
+        }
+      }
+    }
+    const system = systemJoined;
 
     const messages: Array<{ role: "user" | "assistant"; content: string }> = [];
 

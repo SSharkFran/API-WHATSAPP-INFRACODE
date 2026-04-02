@@ -288,15 +288,21 @@ export class InstanceOrchestrator {
       });
     }, 15 * 60 * 1000);
 
-    // Verifica resumo diário a cada hora (dispara às 8h UTC)
-    this.dailySummaryInterval = setInterval(() => {
-      const hour = new Date().getUTCHours();
-      if (hour === 8) {
+    // Agenda resumo diário para disparar exatamente na próxima hora cheia UTC
+    // e depois repetir a cada 1h — evita disparos duplos após restart
+    const scheduleDailySummaryTick = (): void => {
+      const now = new Date();
+      const msUntilNextHour =
+        (60 - now.getUTCMinutes()) * 60 * 1000 - now.getUTCSeconds() * 1000 - now.getUTCMilliseconds();
+      this.dailySummaryInterval = setTimeout(() => {
         void this.runDailySummaryForAllInstances().catch((err) => {
           console.warn("[scheduler] erro no resumo diario:", err);
         });
-      }
-    }, 60 * 60 * 1000);
+        // Reagenda para a próxima hora exata
+        scheduleDailySummaryTick();
+      }, msUntilNextHour);
+    };
+    scheduleDailySummaryTick();
   }
 
   public stopSchedulers(): void {
@@ -305,7 +311,7 @@ export class InstanceOrchestrator {
       this.escalationCleanupInterval = null;
     }
     if (this.dailySummaryInterval) {
-      clearInterval(this.dailySummaryInterval);
+      clearTimeout(this.dailySummaryInterval);
       this.dailySummaryInterval = null;
     }
   }
@@ -330,7 +336,9 @@ export class InstanceOrchestrator {
       if (!tenantId || !instanceId) continue;
 
       const summaryKey = `${tenantId}:${instanceId}`;
-      if (this.dailySummarySentDates.get(summaryKey) === today) continue;
+      const redisDedupeKey = `daily-summary:sent:${summaryKey}:${today}`;
+      const alreadySentRedis = await this.redis.get(redisDedupeKey).catch(() => null);
+      if (alreadySentRedis || this.dailySummarySentDates.get(summaryKey) === today) continue;
 
       try {
         const prisma = await this.tenantPrismaRegistry.getClient(tenantId);
@@ -369,6 +377,7 @@ export class InstanceOrchestrator {
         );
 
         this.dailySummarySentDates.set(summaryKey, today);
+        await this.redis.set(redisDedupeKey, "1", "EX", 86400).catch(() => null);
       } catch (err) {
         console.warn(`[scheduler] erro ao enviar resumo diario para ${workerKey}:`, err);
       }
@@ -1627,8 +1636,25 @@ if (event.status === "CONNECTED") {
     });
 
     if (extractedVerificationCode !== aprendizadoContinuoModule.pendingCode) {
+      // Rate limiting: bloqueia após 5 tentativas erradas em 10 minutos
+      if (extractedVerificationCode) {
+        const rateLimitKey = `aprendizado:verify:ratelimit:${params.instanceId}:${params.event.remoteJid}`;
+        const attempts = await this.redis.incr(rateLimitKey).catch(() => null);
+        if (attempts === 1) {
+          await this.redis.expire(rateLimitKey, 10 * 60).catch(() => null);
+        }
+        if (attempts !== null && attempts >= 5) {
+          console.warn("[aprendizado-continuo] rate limit atingido para verificacao de admin", {
+            instanceId: params.instanceId,
+            remoteJid: params.event.remoteJid,
+            attempts
+          });
+          return true;
+        }
+      }
+
       if (params.rawTextInput.trim()) {
-        console.log("[aprendizado-continuo] mensagem do admin recebida durante verificacao pendente, aguardando codigo correto", {
+        console.log("[aprendizado-continuo] mensagem recebida durante verificacao pendente, aguardando codigo correto", {
           instanceId: params.instanceId,
           remoteJid: params.event.remoteJid,
           senderJid: params.senderJid,
@@ -4098,8 +4124,8 @@ if (event.status === "CONNECTED") {
         const emailMatch = resumoLead.match(/E-mail:\s*(.+)/i);
         const empresaMatch = resumoLead.match(/Empresa:\s*(.+)/i);
         const problemaMatch = resumoLead.match(/Problema:\s*(.+)/i);
-        const servicoMatch = resumoLead.match(/ServiÃ§o de interesse:\s*(.+)/i);
-        const horarioMatch = resumoLead.match(/HorÃ¡rio agendado:\s*(.+)/i);
+        const servicoMatch = resumoLead.match(/Servi[çc]o de interesse:\s*(.+)/i);
+        const horarioMatch = resumoLead.match(/Hor[áa]rio agendado:\s*(.+)/i);
 
         leadData = {
           rawSummary: resumoLead,
@@ -4133,7 +4159,7 @@ if (event.status === "CONNECTED") {
             params.instance.id,
             leadsPhone,
             leadsJid,
-            `ðŸ”” Novo lead agendado:\n\n${resumoLead}`,
+            `🔔 Novo lead agendado:\n\n${resumoLead}`,
             { action: "lead_summary", kind: "chatbot" }
           );
 

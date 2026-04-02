@@ -4612,7 +4612,7 @@ if (event.status === "CONNECTED") {
       // Fila persistente: se o worker estiver indisponivel, enfileira para envio posterior
       if (
         err instanceof ApiError &&
-        (err.code === "WORKER_UNAVAILABLE" || err.code === "INSTANCE_RPC_TIMEOUT") &&
+        (err.publicCode === "WORKER_UNAVAILABLE" || err.publicCode === "INSTANCE_RPC_TIMEOUT") &&
         this.sendMessageQueue
       ) {
         const prisma = await this.tenantPrismaRegistry.getClient(tenantId);

@@ -287,6 +287,7 @@ export const ChatbotStudio = ({ initialInstances }: ChatbotStudioProps) => {
   const [editingKnowledgeId, setEditingKnowledgeId] = useState<string | null>(null);
   const [editingAnswer, setEditingAnswer] = useState("");
   const [synthesisSaving, setSynthesisSaving] = useState(false);
+  const [synthesizingEntryId, setSynthesizingEntryId] = useState<string | null>(null);
   const [knowledgeSynthesis, setKnowledgeSynthesis] = useState<string | null>(null);
 
   const selectedInstance = useMemo(
@@ -529,6 +530,23 @@ export const ChatbotStudio = ({ initialInstances }: ChatbotStudioProps) => {
       setSuccess("Conhecimento removido.");
     } catch {
       setError("Falha ao remover conhecimento.");
+    }
+  };
+
+  const synthesizeEntry = async (knowledgeId: string) => {
+    if (!selectedInstance) return;
+    setSynthesizingEntryId(knowledgeId);
+    try {
+      const updated = await requestClientApi<{ id: string; question: string; answer: string; taughtBy: string | null; createdAt: string }>(
+        `/instances/${selectedInstance.id}/knowledge/${knowledgeId}/synthesize`,
+        { method: "POST" }
+      );
+      setKnowledgeList((prev) => prev.map((k) => k.id === knowledgeId ? { ...k, question: updated.question, answer: updated.answer } : k));
+      setSuccess("Entrada reformulada pela IA.");
+    } catch {
+      setError("Falha ao sintetizar entrada.");
+    } finally {
+      setSynthesizingEntryId(null);
     }
   };
 
@@ -1401,12 +1419,21 @@ export const ChatbotStudio = ({ initialInstances }: ChatbotStudioProps) => {
                         </p>
                         <div className="flex gap-1.5 shrink-0">
                           {editingKnowledgeId !== k.id && (
-                            <button
-                              className="text-[10px] px-2 py-1 rounded bg-[var(--bg-active)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
-                              onClick={() => { setEditingKnowledgeId(k.id); setEditingAnswer(k.answer); }}
-                            >
-                              Editar
-                            </button>
+                            <>
+                              <button
+                                className="text-[10px] px-2 py-1 rounded bg-[var(--bg-active)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
+                                onClick={() => { setEditingKnowledgeId(k.id); setEditingAnswer(k.answer); }}
+                              >
+                                Editar
+                              </button>
+                              <button
+                                className="text-[10px] px-2 py-1 rounded bg-purple-900/30 text-purple-400 hover:bg-purple-900/50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                                disabled={synthesizingEntryId === k.id}
+                                onClick={() => void synthesizeEntry(k.id)}
+                              >
+                                {synthesizingEntryId === k.id ? "..." : "Sintetizar IA"}
+                              </button>
+                            </>
                           )}
                           <button
                             className="text-[10px] px-2 py-1 rounded bg-red-900/30 text-red-400 hover:bg-red-900/50 transition-colors"

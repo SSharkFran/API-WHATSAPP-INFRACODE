@@ -462,4 +462,51 @@ export const registerChatbotRoutes = async (app: FastifyInstance): Promise<void>
       return { ok: true };
     }
   );
+
+  app.post(
+    "/instances/:id/knowledge/:knowledgeId/synthesize",
+    {
+      config: { auth: "tenant", allowApiKey: true, requiredScopes: ["write"] },
+      schema: {
+        tags: ["Chatbot"],
+        summary: "Re-sintetiza uma entrada de conhecimento via IA (reformula pergunta e resposta)",
+        params: knowledgeParamsSchema,
+        response: { 200: knowledgeItemSchema }
+      }
+    },
+    async (request) => {
+      const tenantId = requireTenantId(request);
+      const params = knowledgeParamsSchema.parse(request.params);
+
+      // Busca a entrada atual para ter question e answer originais
+      const list = await app.knowledgeService.list(tenantId, params.id);
+      const entry = list.find((k) => k.id === params.knowledgeId);
+      if (!entry) {
+        throw new Error("Conhecimento nao encontrado nesta instancia");
+      }
+
+      // Sintetiza via IA
+      const synthesized = await app.chatbotService.synthesizeKnowledgeEntry(
+        tenantId,
+        params.id,
+        entry.question,
+        entry.answer
+      );
+
+      const result = await app.knowledgeService.update(
+        tenantId,
+        params.id,
+        params.knowledgeId,
+        synthesized.answer,
+        synthesized.question
+      );
+
+      if (!result) {
+        throw new Error("Conhecimento nao encontrado nesta instancia");
+      }
+
+      void app.chatbotService.triggerKnowledgeSynthesis(tenantId, params.id).catch(() => null);
+      return result;
+    }
+  );
 };

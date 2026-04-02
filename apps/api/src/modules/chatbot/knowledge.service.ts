@@ -176,7 +176,8 @@ export class KnowledgeService {
     tenantId: string,
     instanceId: string,
     knowledgeId: string,
-    answer: string
+    answer: string,
+    question?: string
   ): Promise<LearnedKnowledge | null> {
     const prisma = await this.tenantPrismaRegistry.getClient(tenantId);
     const existing = await prisma.tenantKnowledge.findFirst({
@@ -186,7 +187,12 @@ export class KnowledgeService {
     if (!existing) return null;
     const updated = await prisma.tenantKnowledge.update({
       where: { id: knowledgeId },
-      data: { answer: answer.trim(), rawAnswer: answer.trim(), taughtBy: "admin_panel" }
+      data: {
+        answer: answer.trim(),
+        rawAnswer: answer.trim(),
+        taughtBy: "admin_panel",
+        ...(question?.trim() ? { question: question.trim() } : {})
+      }
     });
     return this.mapRecord(updated);
   }

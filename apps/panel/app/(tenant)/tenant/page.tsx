@@ -44,7 +44,7 @@ export default async function TenantDashboardPage() {
           icon={Send}
         />
         <StatCard
-          label="Escalações hoje"
+          label="Escalações ativas hoje"
           value={String(dashboard.escalationsToday)}
           icon={Bell}
         />

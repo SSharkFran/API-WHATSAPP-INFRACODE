@@ -351,6 +351,7 @@ export class TenantManagementService {
       }),
       prisma.conversation.count({
         where: {
+          awaitingAdminResponse: true,
           pendingClientQuestion: { not: null },
           updatedAt: { gte: startOfToday }
         }

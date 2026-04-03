@@ -521,6 +521,24 @@ export const registerChatbotRoutes = async (app: FastifyInstance): Promise<void>
         );
       }
 
+      // Abre janela de 5 min para correcao pos-aprendizado (mesmo comportamento do reply via WhatsApp)
+      const chatbotConfig = await app.chatbotService.getConfig(tenantId, params.id).catch(() => null);
+      const aprendizadoContinuoModule = chatbotConfig?.modules?.aprendizadoContinuo;
+      const adminPhoneForCorrection = (aprendizadoContinuoModule as { verifiedPhone?: string | null } | undefined)?.verifiedPhone?.replace(/\D/g, "");
+      if (adminPhoneForCorrection) {
+        app.escalationService.trackPendingKnowledgeCorrection(
+          params.id,
+          adminPhoneForCorrection,
+          result.savedKnowledgeId,
+          tenantId,
+          result.clientQuestion,
+          clientResponse
+        );
+      }
+
+      // Fire-and-forget: regenera sintese de conhecimento
+      void app.chatbotService.triggerKnowledgeSynthesis(tenantId, params.id).catch(() => null);
+
       return { ok: true, clientJid: result.clientJid };
     }
   );
@@ -566,12 +584,12 @@ export const registerChatbotRoutes = async (app: FastifyInstance): Promise<void>
         throw new Error("Conhecimento nao encontrado nesta instancia");
       }
 
-      // Sintetiza via IA
+      // Sintetiza via IA — usa rawAnswer (texto bruto original) para preservar fidelidade
       const synthesized = await app.chatbotService.synthesizeKnowledgeEntry(
         tenantId,
         params.id,
         entry.question,
-        entry.answer
+        entry.rawAnswer ?? entry.answer
       );
 
       const result = await app.knowledgeService.update(

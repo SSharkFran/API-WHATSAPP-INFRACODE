@@ -1,4 +1,4 @@
-import { Server, MessageSquare, Users, Zap } from "lucide-react";
+import { Server, MessageSquare, Users, Zap, Send, Bell, BookOpen, CheckCircle } from "lucide-react";
 import { StatCard } from "../../../components/dashboard/stat-card";
 import { getTenantDashboard, getTenantInstances } from "../../../lib/api";
 import { Badge } from "../../../components/ui/Badge";
@@ -33,6 +33,30 @@ export default async function TenantDashboardPage() {
           label="Mensagens/mês"
           value={`${formatNumber(dashboard.messagesThisMonth)}/${formatNumber(dashboard.messagesPerMonth)}`}
           icon={MessageSquare}
+        />
+      </section>
+
+      {/* Analytics cards */}
+      <section className="grid gap-4 grid-cols-2 xl:grid-cols-4">
+        <StatCard
+          label="Mensagens enviadas hoje"
+          value={String(dashboard.messagesTodayOutbound)}
+          icon={Send}
+        />
+        <StatCard
+          label="Escalações hoje"
+          value={String(dashboard.escalationsToday)}
+          icon={Bell}
+        />
+        <StatCard
+          label="Conhecimentos aprendidos hoje"
+          value={String(dashboard.knowledgeLearnedToday)}
+          icon={BookOpen}
+        />
+        <StatCard
+          label="Taxa de resolução (7d)"
+          value={`${dashboard.resolutionRateLast7Days}%`}
+          icon={CheckCircle}
         />
       </section>
 

@@ -70,7 +70,7 @@ interface SimulationFormState {
   trace: boolean;
 }
 
-type StudioTab = "geral" | "prompt" | "leads" | "fiado" | "modulos" | "ia-reserva" | "estado" | "conhecimento";
+type StudioTab = "geral" | "prompt" | "leads" | "fiado" | "modulos" | "ia-reserva" | "estado" | "conhecimento" | "escalacoes" | "historico";
 
 const triggerTypeLabels: Record<ChatbotTriggerType, string> = {
   EXACT: "Exato",
@@ -234,6 +234,8 @@ const tabs: { id: StudioTab; label: string }[] = [
   { id: "modulos", label: "Módulos" },
   { id: "ia-reserva", label: "IA Reserva" },
   { id: "conhecimento", label: "Conhecimento" },
+  { id: "escalacoes", label: "Escalações" },
+  { id: "historico", label: "Histórico" },
   { id: "estado", label: "Estado" }
 ];
 
@@ -289,6 +291,16 @@ export const ChatbotStudio = ({ initialInstances }: ChatbotStudioProps) => {
   const [synthesisSaving, setSynthesisSaving] = useState(false);
   const [synthesizingEntryId, setSynthesizingEntryId] = useState<string | null>(null);
   const [knowledgeSynthesis, setKnowledgeSynthesis] = useState<string | null>(null);
+  // Escalações pendentes
+  const [pendingEscalations, setPendingEscalations] = useState<Array<{ conversationId: string; clientJid: string; clientQuestion: string; waitingSince: string }>>([]);
+  const [escalationsLoading, setEscalationsLoading] = useState(false);
+  const [replyingEscalationId, setReplyingEscalationId] = useState<string | null>(null);
+  const [replyText, setReplyText] = useState("");
+  const [escalationReplyLoading, setEscalationReplyLoading] = useState(false);
+  // Histórico de mensagens
+  const [historyPhone, setHistoryPhone] = useState("");
+  const [historyMessages, setHistoryMessages] = useState<Array<{ id: string; remoteJid: string; direction: string; type: string; payload: unknown; createdAt: string }>>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
 
   const selectedInstance = useMemo(
     () => instances.find((instance) => instance.id === selectedInstanceId) ?? null,
@@ -364,6 +376,17 @@ export const ChatbotStudio = ({ initialInstances }: ChatbotStudioProps) => {
     requestClientApi<{ knowledgeSynthesis?: string | null }>(`/instances/${selectedInstanceId}/chatbot`)
       .then((cfg) => { if (active) setKnowledgeSynthesis(cfg.knowledgeSynthesis ?? null); })
       .catch(() => null);
+    return () => { active = false; };
+  }, [activeTab, selectedInstanceId]);
+
+  useEffect(() => {
+    if (activeTab !== "escalacoes" || !selectedInstanceId) return;
+    let active = true;
+    setEscalationsLoading(true);
+    requestClientApi<typeof pendingEscalations>(`/instances/${selectedInstanceId}/chatbot/escalations/pending`)
+      .then((list) => { if (active) setPendingEscalations(list); })
+      .catch(() => { if (active) setError("Falha ao carregar escalações."); })
+      .finally(() => { if (active) setEscalationsLoading(false); });
     return () => { active = false; };
   }, [activeTab, selectedInstanceId]);
 
@@ -505,6 +528,52 @@ export const ChatbotStudio = ({ initialInstances }: ChatbotStudioProps) => {
       setError("Falha ao carregar conhecimentos.");
     } finally {
       setKnowledgeLoading(false);
+    }
+  };
+
+  const loadEscalations = async () => {
+    if (!selectedInstance) return;
+    setEscalationsLoading(true);
+    try {
+      const result = await requestClientApi<typeof pendingEscalations>(`/instances/${selectedInstance.id}/chatbot/escalations/pending`);
+      setPendingEscalations(result);
+    } catch {
+      setError("Falha ao carregar escalações.");
+    } finally {
+      setEscalationsLoading(false);
+    }
+  };
+
+  const replyToEscalation = async (conversationId: string) => {
+    if (!selectedInstance || !replyText.trim()) return;
+    setEscalationReplyLoading(true);
+    try {
+      await requestClientApi(`/instances/${selectedInstance.id}/chatbot/escalations/${conversationId}/reply`, {
+        method: "POST",
+        body: { answer: replyText.trim() }
+      });
+      setReplyingEscalationId(null);
+      setReplyText("");
+      setSuccess("Resposta enviada com sucesso.");
+      await loadEscalations();
+    } catch {
+      setError("Falha ao enviar resposta.");
+    } finally {
+      setEscalationReplyLoading(false);
+    }
+  };
+
+  const loadHistory = async () => {
+    if (!selectedInstance || !historyPhone.trim()) return;
+    setHistoryLoading(true);
+    try {
+      const jid = historyPhone.trim().includes("@") ? historyPhone.trim() : `${historyPhone.trim().replace(/\D/g, "")}@s.whatsapp.net`;
+      const result = await requestClientApi<{ data: typeof historyMessages }>(`/instances/${selectedInstance.id}/messages?pageSize=50&remoteJid=${encodeURIComponent(jid)}`);
+      setHistoryMessages(result.data);
+    } catch {
+      setError("Falha ao carregar histórico.");
+    } finally {
+      setHistoryLoading(false);
     }
   };
 
@@ -1311,7 +1380,7 @@ export const ChatbotStudio = ({ initialInstances }: ChatbotStudioProps) => {
                       return (
                         <div
                           key={moduleDefinition.key}
-                          className="rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--bg-tertiary)] p-4"
+                          className={["rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--bg-tertiary)] p-4", moduleDefinition.supportLevel !== "operational" ? "opacity-40 pointer-events-none" : ""].join(" ").trim()}
                         >
                           <div className="flex items-start justify-between gap-3">
                             <div className="space-y-2">
@@ -1328,7 +1397,7 @@ export const ChatbotStudio = ({ initialInstances }: ChatbotStudioProps) => {
                             </div>
 
                             <div className="flex items-center gap-2 flex-shrink-0">
-                              {moduleDefinition.requiresConfig ? (
+                              {moduleDefinition.supportLevel === "operational" && moduleDefinition.requiresConfig && (
                                 <button
                                   type="button"
                                   aria-label={`Configurar módulo ${moduleDefinition.label}`}
@@ -1337,7 +1406,7 @@ export const ChatbotStudio = ({ initialInstances }: ChatbotStudioProps) => {
                                 >
                                   <Settings2 className="h-4 w-4" />
                                 </button>
-                              ) : null}
+                              )}
 
                               <label className="flex items-center gap-2 cursor-pointer">
                                 <span
@@ -1476,6 +1545,144 @@ export const ChatbotStudio = ({ initialInstances }: ChatbotStudioProps) => {
                   <pre className="whitespace-pre-wrap rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[#0d1117] p-3 text-xs text-[var(--text-secondary)] font-mono leading-relaxed overflow-auto max-h-64">
                     {knowledgeSynthesis}
                   </pre>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* ── ESCALAÇÕES ────────────────────────────────────────────────── */}
+        {activeTab === "escalacoes" && (
+          <div className="rounded-[var(--radius-lg)] border border-[var(--border-subtle)] bg-[var(--bg-secondary)] overflow-hidden max-w-3xl">
+            <div className="px-5 py-4 border-b border-[var(--border-subtle)] flex items-center justify-between">
+              <div>
+                <p className="text-[10px] font-mono uppercase tracking-widest text-[var(--text-tertiary)] mb-1">Fila de atendimento</p>
+                <h2 className="text-base font-semibold text-[var(--text-primary)]">
+                  Escalações pendentes
+                  {pendingEscalations.length > 0 && (
+                    <span className="ml-2 inline-flex items-center justify-center rounded-full bg-[var(--accent-red)]/20 text-[var(--accent-red)] text-[10px] font-bold px-2 py-0.5">
+                      {pendingEscalations.length}
+                    </span>
+                  )}
+                </h2>
+              </div>
+              <Button variant="secondary" size="sm" loading={escalationsLoading} onClick={() => void loadEscalations()}>
+                Recarregar
+              </Button>
+            </div>
+            <div className="p-5 space-y-3">
+              {escalationsLoading ? (
+                <p className="text-xs text-[var(--text-tertiary)] text-center py-8">Carregando...</p>
+              ) : pendingEscalations.length === 0 ? (
+                <div className="text-center py-10 space-y-2">
+                  <p className="text-sm text-[var(--text-secondary)]">Nenhuma escalação pendente.</p>
+                  <p className="text-xs text-[var(--text-tertiary)]">Quando clientes fizerem perguntas sem resposta, elas aparecerão aqui.</p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {pendingEscalations.map((k) => (
+                    <div key={k.conversationId} className="rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--bg-tertiary)] p-3.5 space-y-2">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex-1 space-y-1">
+                          <p className="text-xs font-medium text-[var(--text-primary)] font-mono">
+                            {String(k.clientJid).split("@")[0]}
+                          </p>
+                          <p className="text-xs text-[var(--text-secondary)]">
+                            {k.clientQuestion.length > 200 ? k.clientQuestion.slice(0, 200) + "…" : k.clientQuestion}
+                          </p>
+                          <p className="text-[10px] text-[var(--text-tertiary)] font-mono">
+                            há {Math.floor((Date.now() - new Date(k.waitingSince).getTime()) / 60000)} min
+                          </p>
+                        </div>
+                        {replyingEscalationId !== k.conversationId && (
+                          <button
+                            className="text-[10px] px-2 py-1 rounded bg-[var(--accent-blue)]/20 text-[var(--accent-blue)] hover:bg-[var(--accent-blue)]/30 transition-colors shrink-0"
+                            onClick={() => { setReplyingEscalationId(k.conversationId); setReplyText(""); }}
+                          >
+                            Responder
+                          </button>
+                        )}
+                      </div>
+                      {replyingEscalationId === k.conversationId && (
+                        <div className="space-y-2">
+                          <textarea
+                            className="w-full rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-3 py-2 text-xs text-[var(--text-primary)] resize-none focus:outline-none focus:border-[var(--accent-blue)] min-h-[80px]"
+                            value={replyText}
+                            onChange={(e) => setReplyText(e.target.value)}
+                            placeholder="Digite a resposta para o cliente..."
+                          />
+                          <div className="flex gap-2">
+                            <Button variant="primary" size="sm" loading={escalationReplyLoading} onClick={() => void replyToEscalation(k.conversationId)}>
+                              Enviar
+                            </Button>
+                            <Button variant="secondary" size="sm" onClick={() => setReplyingEscalationId(null)}>
+                              Cancelar
+                            </Button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* ── HISTÓRICO ─────────────────────────────────────────────────── */}
+        {activeTab === "historico" && (
+          <div className="rounded-[var(--radius-lg)] border border-[var(--border-subtle)] bg-[var(--bg-secondary)] overflow-hidden max-w-3xl">
+            <div className="px-5 py-4 border-b border-[var(--border-subtle)]">
+              <p className="text-[10px] font-mono uppercase tracking-widest text-[var(--text-tertiary)] mb-1">Mensagens por contato</p>
+              <h2 className="text-base font-semibold text-[var(--text-primary)]">Histórico de conversas</h2>
+            </div>
+            <div className="p-5 space-y-4">
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  className={[fieldClass, "h-10 flex-1"].join(" ")}
+                  value={historyPhone}
+                  onChange={(e) => setHistoryPhone(e.target.value)}
+                  placeholder="Número ou JID (ex: 5511999999999)"
+                  onKeyDown={(e) => { if (e.key === "Enter") void loadHistory(); }}
+                />
+                <Button variant="primary" size="sm" loading={historyLoading} onClick={() => void loadHistory()}>
+                  Buscar
+                </Button>
+              </div>
+              {historyLoading ? (
+                <p className="text-xs text-[var(--text-tertiary)] text-center py-8">Carregando...</p>
+              ) : historyMessages.length === 0 ? (
+                <p className="text-xs text-[var(--text-tertiary)] text-center py-8">
+                  {historyPhone.trim() ? "Nenhuma mensagem encontrada para este contato." : "Informe um número para buscar o histórico."}
+                </p>
+              ) : (
+                <div className="space-y-2">
+                  <p className="text-xs text-[var(--text-tertiary)]">{historyMessages.length} mensagem{historyMessages.length !== 1 ? "s" : ""}</p>
+                  {historyMessages.map((msg) => {
+                    const payload = msg.payload as Record<string, unknown> | null;
+                    const text = (payload?.text as string | undefined) ?? ((payload?.message as Record<string, unknown> | undefined)?.text as string | undefined) ?? "(mídia)";
+                    const isOutbound = msg.direction === "OUTBOUND";
+                    return (
+                      <div
+                        key={msg.id}
+                        className={["rounded-[var(--radius-md)] border p-3 text-xs", isOutbound
+                          ? "border-[var(--accent-blue)]/20 bg-[var(--accent-blue)]/5 ml-8"
+                          : "border-[var(--border-subtle)] bg-[var(--bg-tertiary)] mr-8"
+                        ].join(" ")}
+                      >
+                        <div className="flex items-center justify-between gap-2 mb-1">
+                          <span className="font-mono text-[10px] text-[var(--text-tertiary)]">
+                            {isOutbound ? "→ saída" : "← entrada"}
+                          </span>
+                          <span className="font-mono text-[10px] text-[var(--text-tertiary)]">
+                            {new Date(msg.createdAt).toLocaleString("pt-BR")}
+                          </span>
+                        </div>
+                        <p className="text-[var(--text-primary)] break-words">{text}</p>
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </div>

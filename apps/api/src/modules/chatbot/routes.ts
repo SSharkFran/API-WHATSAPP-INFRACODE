@@ -444,6 +444,87 @@ export const registerChatbotRoutes = async (app: FastifyInstance): Promise<void>
     }
   );
 
+  // ── ESCALATIONS ──────────────────────────────────────────────────────────
+
+  app.get(
+    "/instances/:id/chatbot/escalations/pending",
+    {
+      config: { auth: "tenant", allowApiKey: true, requiredScopes: ["read"] },
+      schema: {
+        tags: ["Chatbot"],
+        summary: "Lista escalacoes pendentes aguardando resposta do admin",
+        params: instanceParamsSchema,
+        response: {
+          200: z.array(z.object({
+            conversationId: z.string(),
+            clientJid: z.string(),
+            clientQuestion: z.string(),
+            waitingSince: z.string()
+          }))
+        }
+      }
+    },
+    async (request) => {
+      const tenantId = requireTenantId(request);
+      const params = instanceParamsSchema.parse(request.params);
+      return app.escalationService.listPendingEscalations(tenantId, params.id);
+    }
+  );
+
+  app.post(
+    "/instances/:id/chatbot/escalations/:conversationId/reply",
+    {
+      config: { auth: "tenant", allowApiKey: true, requiredScopes: ["write"] },
+      schema: {
+        tags: ["Chatbot"],
+        summary: "Responde uma escalacao pendente diretamente pelo painel",
+        params: instanceParamsSchema.extend({ conversationId: z.string().min(1) }),
+        body: z.object({ answer: z.string().min(1).max(4000) }),
+        response: { 200: z.object({ ok: z.boolean(), clientJid: z.string() }) }
+      }
+    },
+    async (request) => {
+      const tenantId = requireTenantId(request);
+      const params = instanceParamsSchema.extend({ conversationId: z.string().min(1) }).parse(request.params);
+      const body = z.object({ answer: z.string().min(1).max(4000) }).parse(request.body);
+
+      const result = await app.escalationService.processAdminReply(
+        tenantId,
+        params.id,
+        body.answer,
+        params.conversationId
+      );
+
+      if (!result) {
+        throw new Error("Escalacao nao encontrada ou ja respondida");
+      }
+
+      const clientResponse = await app.chatbotService.formulateAdminAnswerForClient(
+        tenantId,
+        params.id,
+        result.clientQuestion,
+        result.formulatedAnswer
+      );
+
+      const { normalizeWhatsAppPhoneNumber, normalizePhoneNumber } = await import("../../lib/phone.js");
+      const clientRemoteNumber =
+        normalizeWhatsAppPhoneNumber(result.clientJid) ??
+        normalizePhoneNumber(String(result.clientJid).split("@")[0] ?? "");
+
+      if (clientRemoteNumber) {
+        await app.instanceOrchestrator.sendAutomatedTextMessagePublic(
+          tenantId,
+          params.id,
+          clientRemoteNumber,
+          result.clientJid,
+          clientResponse
+        );
+      }
+
+      return { ok: true, clientJid: result.clientJid };
+    }
+  );
+
   app.post(
     "/instances/:id/knowledge/synthesize",
     {

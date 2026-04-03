@@ -155,7 +155,8 @@ export const registerMessageRoutes = async (app: FastifyInstance): Promise<void>
         query.page,
         query.pageSize,
         query.status,
-        query.type
+        query.type,
+        query.remoteJid
       );
     }
   );

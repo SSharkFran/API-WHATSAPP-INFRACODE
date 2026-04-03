@@ -935,6 +935,7 @@ export interface AprendizadoContinuoModuleConfig extends BaseModuleConfig {
   verifiedPhones: string[];
   verifiedRemoteJids: string[];
   verifiedSenderJids: string[];
+  additionalAdminPhones: string[];
 }
 
 export interface DisparoMassaModuleConfig extends BaseModuleConfig {

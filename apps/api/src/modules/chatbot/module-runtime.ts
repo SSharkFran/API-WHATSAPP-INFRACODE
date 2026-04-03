@@ -124,7 +124,8 @@ const aprendizadoContinuoModuleSchema = z.object({
   challengeRemoteJid: z.string().min(1).nullable().optional().default(null),
   verifiedPhones: z.array(z.string().min(8)).default([]),
   verifiedRemoteJids: z.array(z.string().min(1)).default([]),
-  verifiedSenderJids: z.array(z.string().min(1)).default([])
+  verifiedSenderJids: z.array(z.string().min(1)).default([]),
+  additionalAdminPhones: z.array(z.string().min(8)).default([])
 });
 
 const resumoDiarioModuleSchema = z.object({

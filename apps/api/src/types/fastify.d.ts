@@ -20,6 +20,7 @@ import type { TenantManagementService } from "../modules/tenant/service.js";
 import type { FiadoService } from "../modules/chatbot/fiado.service.js";
 import type { PlanEnforcementService } from "../modules/platform/plan-enforcement.service.js";
 import type { PlatformAlertService } from "../modules/platform/alert.service.js";
+import type { EscalationService } from "../modules/chatbot/escalation.service.js";
 
 declare module "fastify" {
   interface FastifyRequest {
@@ -55,6 +56,7 @@ declare module "fastify" {
     tenantManagementService: TenantManagementService;
     planEnforcementService: PlanEnforcementService;
     platformAlertService: PlatformAlertService;
+    escalationService: EscalationService;
     queues: {
       sendMessage: Queue;
       webhookDispatch: Queue;

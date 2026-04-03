@@ -70,5 +70,9 @@ export const tenantDashboardSchema = z.object({
   messagesThisMonth: z.number().int(),
   messagesPerMonth: z.number().int(),
   usersUsed: z.number().int(),
-  usersLimit: z.number().int()
+  usersLimit: z.number().int(),
+  messagesTodayOutbound: z.number().default(0),
+  escalationsToday: z.number().default(0),
+  knowledgeLearnedToday: z.number().default(0),
+  resolutionRateLast7Days: z.number().default(0)
 });

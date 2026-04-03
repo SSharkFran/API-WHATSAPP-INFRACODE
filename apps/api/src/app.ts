@@ -177,6 +177,7 @@ export const buildApp = async () => {
   app.decorate("planEnforcementService", planEnforcementService);
   app.decorate("instanceOrchestrator", instanceOrchestrator);
   app.decorate("platformAlertService", platformAlertService);
+  app.decorate("escalationService", escalationService);
   app.decorate("messageService", messageService);
   app.decorate("privacyService", privacyService);
   app.decorate("webhookService", webhookService);

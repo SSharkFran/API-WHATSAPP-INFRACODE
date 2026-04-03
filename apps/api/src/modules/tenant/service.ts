@@ -308,7 +308,23 @@ export class TenantManagementService {
   public async getDashboard(tenantId: string) {
     const tenant = await this.requireTenant(tenantId);
     const prisma = await this.tenantPrismaRegistry.getClient(tenantId);
-    const [instances, connectedInstances, queuedMessages, usersUsed] = await Promise.all([
+
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+
+    const [
+      instances,
+      connectedInstances,
+      queuedMessages,
+      usersUsed,
+      messagesTodayOutbound,
+      escalationsToday,
+      knowledgeLearnedToday,
+      resolvedCount,
+      pendingCount
+    ] = await Promise.all([
       prisma.instance.count(),
       prisma.instance.count({
         where: {
@@ -326,15 +342,50 @@ export class TenantManagementService {
         where: {
           tenantId
         }
+      }),
+      prisma.message.count({
+        where: {
+          direction: "OUTBOUND",
+          createdAt: { gte: startOfToday }
+        }
+      }),
+      prisma.conversation.count({
+        where: {
+          pendingClientQuestion: { not: null },
+          updatedAt: { gte: startOfToday }
+        }
+      }),
+      prisma.tenantKnowledge.count({
+        where: { createdAt: { gte: startOfToday } }
+      }),
+      prisma.conversation.count({
+        where: {
+          awaitingAdminResponse: false,
+          pendingClientQuestion: null,
+          updatedAt: { gte: sevenDaysAgo }
+        }
+      }),
+      prisma.conversation.count({
+        where: {
+          awaitingAdminResponse: true,
+          updatedAt: { gte: sevenDaysAgo }
+        }
       })
     ]);
+
+    const total = resolvedCount + pendingCount;
+    const resolutionRateLast7Days = total > 0 ? Math.round((resolvedCount / total) * 1000) / 10 : 0;
 
     return {
       activeInstances: connectedInstances,
       connectedInstances,
+      escalationsToday,
+      knowledgeLearnedToday,
       messagesPerMonth: tenant.messagesPerMonth,
       messagesThisMonth: tenant.messagesThisMonth,
+      messagesTodayOutbound,
       queuedMessages,
+      resolutionRateLast7Days,
       tenantId: tenant.id,
       tenantName: tenant.name,
       totalInstances: instances,

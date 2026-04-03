@@ -169,13 +169,15 @@ export class MessageService {
     page: number,
     pageSize: number,
     status?: string,
-    type?: string
+    type?: string,
+    remoteJid?: string
   ): Promise<PaginatedResult<MessageRecord>> {
     const prisma = await this.tenantPrismaRegistry.getClient(tenantId);
     const where: Prisma.MessageWhereInput = {
       instanceId,
       status: status as never | undefined,
-      type: type as never | undefined
+      type: type as never | undefined,
+      ...(remoteJid ? { remoteJid } : {})
     };
 
     const [total, messages] = await Promise.all([

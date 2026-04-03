@@ -19,6 +19,10 @@ export interface TenantDashboardSnapshot {
   messagesPerMonth: number;
   usersUsed: number;
   usersLimit: number;
+  messagesTodayOutbound: number;
+  escalationsToday: number;
+  knowledgeLearnedToday: number;
+  resolutionRateLast7Days: number;
 }
 
 export interface OnboardingSnapshot {
@@ -176,7 +180,11 @@ const mockTenantDashboard: TenantDashboardSnapshot = {
   messagesThisMonth: 18240,
   messagesPerMonth: 50000,
   usersUsed: 3,
-  usersLimit: 8
+  usersLimit: 8,
+  messagesTodayOutbound: 0,
+  escalationsToday: 0,
+  knowledgeLearnedToday: 0,
+  resolutionRateLast7Days: 0
 };
 
 const mockOnboarding: OnboardingSnapshot = {

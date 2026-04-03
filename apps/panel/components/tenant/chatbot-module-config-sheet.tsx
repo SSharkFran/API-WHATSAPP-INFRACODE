@@ -196,7 +196,8 @@ const defaultChatbotModuleConfigs: ChatbotModuleConfigByKey = {
     challengeRemoteJid: null,
     verifiedPhones: [],
     verifiedRemoteJids: [],
-    verifiedSenderJids: []
+    verifiedSenderJids: [],
+    additionalAdminPhones: []
   },
   memoriaPersonalizada: {
     isEnabled: false,
@@ -272,6 +273,16 @@ export const ChatbotModuleConfigSheet = ({
   const executionModeInfo = executionModeMeta[moduleDefinition.executionMode];
 
   const renderOperationalForm = () => {
+    const catalogEntry = CHATBOT_MODULE_CATALOG.find((m) => m.key === moduleKey);
+    if (catalogEntry && catalogEntry.supportLevel !== "operational") {
+      return (
+        <div className="rounded-[var(--radius-md)] bg-[var(--bg-tertiary)] border border-[var(--border-subtle)] p-5 text-center space-y-2">
+          <p className="text-sm font-medium text-[var(--text-secondary)]">Módulo em desenvolvimento</p>
+          <p className="text-xs text-[var(--text-tertiary)]">Este módulo ainda não está disponível. Será lançado em breve.</p>
+        </div>
+      );
+    }
+
     switch (moduleKey) {
       case "faq": {
         const moduleConfig = currentConfig as NonNullable<ChatbotModules["faq"]>;
@@ -731,6 +742,22 @@ export const ChatbotModuleConfigSheet = ({
                   Ultima solicitacao: {moduleConfig.lastVerificationRequestedAt || "nunca"}
                 </p>
               </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-[var(--text-secondary)]">Admins adicionais</label>
+              <p className="text-[11px] text-[var(--text-tertiary)]">
+                Um número por linha. Esses números também poderão responder escalações e receber alertas, sem precisar de verificação.
+              </p>
+              <textarea
+                className={textareaClass}
+                placeholder={"5511999998888\n5511988887777"}
+                value={(moduleConfig.additionalAdminPhones ?? []).join("\n")}
+                onChange={(e) => updateConfig({
+                  ...moduleConfig,
+                  additionalAdminPhones: e.target.value.split("\n").map((l) => l.trim().replace(/\D/g, "")).filter((l) => l.length >= 8)
+                })}
+              />
             </div>
           </div>
         );

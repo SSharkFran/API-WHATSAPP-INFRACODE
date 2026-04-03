@@ -127,5 +127,6 @@ export const listMessagesQuerySchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(100).default(20),
   status: z.string().optional(),
-  type: z.string().optional()
+  type: z.string().optional(),
+  remoteJid: z.string().optional()
 });

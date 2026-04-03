@@ -574,6 +574,32 @@ export class EscalationService {
   }
 
   /**
+   * Lista todas as conversas pausadas aguardando resposta do admin.
+   */
+  public async listPendingEscalations(
+    tenantId: string,
+    instanceId: string
+  ): Promise<Array<{ conversationId: string; clientJid: string; clientQuestion: string; waitingSince: string }>> {
+    const prisma = await this.tenantPrismaRegistry.getClient(tenantId);
+    const records = await prisma.conversation.findMany({
+      where: {
+        instanceId,
+        awaitingAdminResponse: true,
+        pendingClientJid: { not: null },
+        pendingClientQuestion: { not: null }
+      },
+      orderBy: { updatedAt: "asc" },
+      select: { id: true, pendingClientJid: true, pendingClientQuestion: true, updatedAt: true }
+    });
+    return records.map((r) => ({
+      conversationId: r.id,
+      clientJid: r.pendingClientJid ?? "",
+      clientQuestion: r.pendingClientQuestion ?? "",
+      waitingSince: r.updatedAt.toISOString()
+    }));
+  }
+
+  /**
    * Verifica se uma instancia tem conversas aguardando resposta do admin.
    */
   public async hasPendingEscalations(

@@ -1489,7 +1489,8 @@ if (event.status === "CONNECTED") {
         [
           aprendizadoContinuoModule.configuredAdminPhone,
           aprendizadoContinuoModule.verifiedPhone,
-          ...aprendizadoContinuoModule.verifiedPhones
+          ...aprendizadoContinuoModule.verifiedPhones,
+          ...(aprendizadoContinuoModule.additionalAdminPhones ?? [])
         ],
         candidatePhones
       ) ||
@@ -2054,7 +2055,8 @@ if (event.status === "CONNECTED") {
         ? [
             aprendizadoContinuoModule.configuredAdminPhone ?? null,
             aprendizadoContinuoModule.verifiedPhone ?? null,
-            ...aprendizadoContinuoModule.verifiedPhones
+            ...aprendizadoContinuoModule.verifiedPhones,
+            ...(aprendizadoContinuoModule.additionalAdminPhones ?? [])
           ]
         : [];
     const verifiedAdminJids =
@@ -2933,6 +2935,7 @@ if (event.status === "CONNECTED") {
             const learningAdminPhone = this.resolveConfiguredPhone(
               aprendizadoContinuoModule?.verifiedPhone ?? null,
               ...(aprendizadoContinuoModule?.verifiedPhones ?? []),
+              ...(aprendizadoContinuoModule?.additionalAdminPhones ?? []),
               chatbotConfig?.leadsPhoneNumber,
               platformConfig?.adminAlertPhone
             );
@@ -4245,6 +4248,7 @@ if (event.status === "CONNECTED") {
         this.resolveConfiguredPhone(
           aprendizadoContinuoModule?.verifiedPhone ?? null,
           ...(aprendizadoContinuoModule?.verifiedPhones ?? []),
+          ...(aprendizadoContinuoModule?.additionalAdminPhones ?? []),
           params.chatbotConfig?.leadsPhoneNumber,
           platformConfig?.adminAlertPhone
         );
@@ -4336,6 +4340,7 @@ if (event.status === "CONNECTED") {
       const adminPhone = this.resolveConfiguredPhone(
         aprendizadoContinuoModule?.verifiedPhone ?? null,
         ...(aprendizadoContinuoModule?.verifiedPhones ?? []),
+        ...(aprendizadoContinuoModule?.additionalAdminPhones ?? []),
         params.chatbotConfig?.leadsPhoneNumber,
         platformConfig?.adminAlertPhone
       );
@@ -4680,6 +4685,19 @@ if (event.status === "CONNECTED") {
         }
       }
     }
+  }
+
+  /**
+   * Versao publica de sendAutomatedTextMessage para uso em rotas externas.
+   */
+  public async sendAutomatedTextMessagePublic(
+    tenantId: string,
+    instanceId: string,
+    remoteNumber: string,
+    targetJid: string | undefined,
+    text: string
+  ): Promise<void> {
+    await this.sendAutomatedTextMessage(tenantId, instanceId, remoteNumber, targetJid, text, { action: "admin_learning_reply", kind: "chatbot" });
   }
 
   private async sendAutomatedTextMessage(

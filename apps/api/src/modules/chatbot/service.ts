@@ -2055,9 +2055,16 @@ private async evaluateConfig(
     }
 
     const aprendizadoContinuoModule = getAprendizadoContinuoModuleConfig(config.modules);
+    const hasAdminPhone = !!(
+      aprendizadoContinuoModule?.verifiedPhone?.trim() ||
+      (aprendizadoContinuoModule?.verifiedPhones ?? []).some(Boolean) ||
+      (aprendizadoContinuoModule?.additionalAdminPhones ?? []).some(Boolean) ||
+      config.leadsPhoneNumber?.trim()
+    );
     const allowAdminEscalation =
       aprendizadoContinuoModule?.isEnabled === true &&
-      aprendizadoContinuoModule.verificationStatus === "VERIFIED";
+      aprendizadoContinuoModule.verificationStatus === "VERIFIED" &&
+      hasAdminPhone;
 
     if (
       !managedAiProvider.isConfigured ||
@@ -2285,9 +2292,14 @@ private async evaluateConfig(
       "10. Perguntas sobre a propria empresa, servicos oferecidos, horarios, equipe, visitas presenciais, quantidade de funcionarios, capacidade tecnica ou politicas internas so podem ser respondidas se a informacao estiver EXPLICITAMENTE no contexto autorizado.",
       allowAdminEscalation
         ? "11. Se a pergunta institucional nao estiver explicitamente documentada no prompt da instancia, no memory.md ou no conhecimento aprendido, responda com [ESCALATE_ADMIN]."
-        : "11. Se faltar contexto institucional, diga de forma breve e honesta que nao tem essa informacao agora, sem inventar e sem usar [ESCALATE_ADMIN].",
+        : "11. Se faltar contexto institucional, diga de forma breve e honesta que nao tem essa informacao agora, sem inventar e sem usar [ESCALATE_ADMIN]. NUNCA diga 'vou verificar', 'vou confirmar', 'aguarde que vou checar' ou qualquer variacao — voce nao consegue consultar ninguem. Responda diretamente o que sabe ou admita que nao tem a informacao.",
       "12. Nunca use suposicoes sobre o que empresas de tecnologia normalmente fazem.",
-      "13. AGENDAMENTOS: Antes de confirmar qualquer reuniao, visita ou horario, voce DEVE ter coletado obrigatoriamente: (a) o nome do cliente e (b) o interesse/objetivo do contato. Se ainda nao tiver essas informacoes, pergunte primeiro — nunca confirme um agendamento sem elas."
+      "13. AGENDAMENTOS: Seu objetivo principal e gerar uma reuniao ou contato com o cliente. Regras obrigatorias:",
+      "    a) Colete APENAS o nome do cliente e o interesse/objetivo principal (maximo 2 perguntas no total antes de propor a reuniao).",
+      "    b) Assim que tiver nome + interesse, PROPONHA IMEDIATAMENTE a reuniao. Nao aprofunde detalhes tecnicos, orcamentos ou escopo — isso e papel da reuniao.",
+      "    c) Nao faca mais de 2 perguntas seguidas sem avançar para a proposta de reuniao.",
+      "    d) Exemplo correto: cliente disse que quer um sistema de e-commerce -> pergunte o nome -> proponha a reuniao.",
+      "    e) Nunca confirme data/horario fixo sem verificar disponibilidade real."
     ];
     const groundingSources = [
       ...(globalSystemPrompt ? [globalSystemPrompt] : []),

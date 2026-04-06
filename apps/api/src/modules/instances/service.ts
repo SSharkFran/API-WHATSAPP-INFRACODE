@@ -4579,6 +4579,21 @@ if (event.status === "CONNECTED") {
       }
     }
 
+    // Extrai e salva memória persistente do cliente (fire-and-forget)
+    const memoriaModule = getMemoriaPersonalizadaModuleConfig(
+      sanitizeChatbotModules(params.chatbotConfig?.modules)
+    );
+    if (memoriaModule?.isEnabled === true && memoriaModule.fields.length > 0) {
+      void this.chatbotService.extractPersistentMemory(
+        params.tenantId,
+        params.instance.id,
+        params.resolvedContactNumber,
+        params.session.history
+      ).catch((err) => {
+        console.warn("[persistent-memory] erro no fire-and-forget:", err);
+      });
+    }
+
     const leadAutoExtractValue = params.chatbotConfig?.leadAutoExtract as unknown;
     const leadAutoExtractEnabled = leadAutoExtractValue === true || leadAutoExtractValue === "true";
     const responseText = clientText.replace(/\|\|\|/g, " ");

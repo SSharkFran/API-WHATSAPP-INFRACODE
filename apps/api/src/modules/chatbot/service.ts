@@ -2219,6 +2219,15 @@ private async evaluateConfig(
       const cleanedText = responseText.replace(/\[TRANSBORDO_HUMANO\]/gi, "").trim();
       const isEscalation = /\[ESCALATE_ADMIN\]/i.test(responseText);
 
+      // Deteccao de fallback: IA disse "vou verificar/confirmar/checar" sem emitir o marcador correto.
+      // Trata como escalacao implicita para evitar que a conversa trave sem acao.
+      const implicitCheckPhrases = /\b(vou verificar|vou confirmar|vou checar|deixa eu verificar|deixa eu confirmar|vou consultar|vou perguntar|aguarde que vou|vou ver com|vou falar com)\b/i;
+      const hasNoMarker = !isEscalation && !isHandoff && !schedulingMatch;
+      const isImplicitEscalation = hasNoMarker && allowAdminEscalation && implicitCheckPhrases.test(responseText);
+      const isImplicitScheduling = hasNoMarker && !isImplicitEscalation &&
+        agendamentoAdminModuleConfig?.isEnabled && !googleCalendarActive &&
+        /\b(vou verificar a disponibilidade|vou checar a agenda|vou confirmar a disponibilidade|vou ver a agenda)\b/i.test(responseText);
+
       if (isEscalation) {
         if (!allowAdminEscalation) {
           return {
@@ -2233,6 +2242,28 @@ private async evaluateConfig(
           action: "ESCALATE_ADMIN",
           matchedRuleId: null,
           matchedRuleName: `${managedAiProvider.provider}:${managedAiProvider.model}`,
+          responseText: ""
+        };
+      }
+
+      // Escalacao implicita: IA disse "vou verificar" sem emitir [ESCALATE_ADMIN]
+      if (isImplicitEscalation) {
+        console.warn(`[chatbot:ai] escalacao implicita detectada — IA disse "vou verificar" sem marcador. Convertendo para ESCALATE_ADMIN.`);
+        return {
+          action: "ESCALATE_ADMIN",
+          matchedRuleId: null,
+          matchedRuleName: `${managedAiProvider.provider}:${managedAiProvider.model}:implicit_escalation`,
+          responseText: ""
+        };
+      }
+
+      // Agendamento implicito: IA disse "vou verificar disponibilidade" sem emitir [AGENDAR_ADMIN]
+      if (isImplicitScheduling) {
+        console.warn(`[chatbot:ai] agendamento implicito detectado — IA disse "vou verificar disponibilidade" sem marcador. Convertendo para ESCALATE_ADMIN.`);
+        return {
+          action: "ESCALATE_ADMIN",
+          matchedRuleId: null,
+          matchedRuleName: `${managedAiProvider.provider}:${managedAiProvider.model}:implicit_scheduling`,
           responseText: ""
         };
       }
@@ -2347,8 +2378,9 @@ private async evaluateConfig(
         "Se voce nao tem certeza sobre a resposta ou a informacao nao esta no seu contexto:",
         "1. NAO invente ou adivinhe respostas",
         "2. NAO responda de forma vaga como 'nao sei' ou 'entre em contato conosco'",
-        "3. Responda EXATAMENTE com o token: [ESCALATE_ADMIN]",
-        "4. Use [ESCALATE_ADMIN] somente quando genuinamente nao souber - para perguntas gerais, responda normalmente.",
+        "3. Responda EXATAMENTE com o token: [ESCALATE_ADMIN] — sem texto adicional.",
+        "4. NUNCA escreva 'vou verificar', 'vou confirmar', 'vou checar', 'aguarde que consulto' ou similares SEM incluir [ESCALATE_ADMIN] na mesma mensagem. Se voce quer verificar algo, use [ESCALATE_ADMIN] — o sistema cuida do resto.",
+        "5. Use [ESCALATE_ADMIN] somente quando genuinamente nao souber - para perguntas gerais, responda normalmente.",
         "Exemplos de quando escalar: preco especifico de um produto, informacao interna da empresa, dado que nao foi fornecido.",
         "Exemplos de quando NAO escalar: saudacoes, perguntas genericas, informacoes que estao no contexto."
       ].join("\n"));

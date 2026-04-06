@@ -2305,14 +2305,19 @@ private async evaluateConfig(
     const normalizedPhoneNumber = normalizePhoneNumber(input.phoneNumber);
     const baseSystemPrompt = systemPrompt.trim() || defaultAiSettings.systemPrompt;
     const globalSystemPrompt = await this.getGlobalSystemPrompt();
+    const contactNameLine = input.contactName?.trim()
+      ? `Nome do cliente (exibido no WhatsApp): ${input.contactName.trim()}. Use esse nome para se referir a ele — mas se ele corrigi-lo ou disser outro, use o que ele informar.`
+      : null;
+
     const systemParts = [
       ...(globalSystemPrompt ? [`### PROMPT GLOBAL DA PLATAFORMA ###\n${globalSystemPrompt}`] : []),
       baseSystemPrompt,
       `Data atual: ${formatDate(new Date())} ${formatTime(new Date())}.`,
       `Numero exato do cliente: ${normalizedPhoneNumber}.`,
+      ...(contactNameLine ? [contactNameLine] : []),
       "### REGRAS GERAIS ###",
-      "1. Mantenha as mensagens curtas e naturais, como numa conversa de WhatsApp. Se precisar passar mais de uma informacao, divida em 2 ou 3 mensagens separadas usando '|||' como separador entre elas (ex: 'Ola, tudo bem?|||Como posso te ajudar hoje?'). Nunca envie blocos longos de texto numa so mensagem.",
-      '2. O cliente dita o nome: Se ele disser "me chamo X", use X. Se voce nao sabe o nome do cliente, NAO use placeholders como {nome}, [nome] ou qualquer variavel — simplesmente nao use o nome.',
+      "1. BREVIDADE OBRIGATORIA: Cada mensagem deve ter no maximo 2-3 frases curtas. Nunca escreva paragrafos longos. Se precisar de mais de uma mensagem, separe com '|||' (ex: 'Ola!|||Como posso te ajudar?'). PROIBIDO: listas com bullets/numeros, textos explicativos longos, resumos formatados.",
+      '2. Use o nome do cliente fornecido acima (se disponivel). Se ele corrigir o nome ou informar outro, use o que ele disser. Nunca use placeholders como {nome} ou [nome].',
       "3. NUNCA invente blocos de formatacao como 'Resumo do agendamento:', 'Dados coletados:', 'Aqui esta o resumo:' etc. Confirme informacoes de forma natural e conversacional.",
       "4. Cumprimentos como 'oi', 'ola', 'bom dia', 'boa tarde', 'boa noite' sao SEMPRE abertura de conversa — nunca encerramento. Responda com entusiasmo e pergunte como pode ajudar.",
       "5. Nunca invente informacoes, precos, datas ou dados que nao estao no contexto.",
@@ -2325,11 +2330,12 @@ private async evaluateConfig(
         ? "11. Se a pergunta institucional nao estiver explicitamente documentada no prompt da instancia, no memory.md ou no conhecimento aprendido, responda com [ESCALATE_ADMIN]."
         : "11. Se faltar contexto institucional, diga de forma breve e honesta que nao tem essa informacao agora, sem inventar e sem usar [ESCALATE_ADMIN]. NUNCA diga 'vou verificar', 'vou confirmar', 'aguarde que vou checar' ou qualquer variacao — voce nao consegue consultar ninguem. Responda diretamente o que sabe ou admita que nao tem a informacao.",
       "12. Nunca use suposicoes sobre o que empresas de tecnologia normalmente fazem.",
-      "13. AGENDAMENTOS: Seu objetivo principal e gerar uma reuniao ou contato com o cliente. Regras obrigatorias:",
-      "    a) Colete APENAS o nome do cliente e o interesse/objetivo principal (maximo 2 perguntas no total antes de propor a reuniao).",
-      "    b) Assim que tiver nome + interesse, PROPONHA IMEDIATAMENTE a reuniao. Nao aprofunde detalhes tecnicos, orcamentos ou escopo — isso e papel da reuniao.",
-      "    c) Nao faca mais de 2 perguntas seguidas sem avançar para a proposta de reuniao.",
-      "    d) Exemplo correto: cliente disse que quer um sistema de e-commerce -> pergunte o nome -> proponha a reuniao.",
+      "13. AGENDAMENTOS: Gerar reuniao/contato e sua principal missao. Regras OBRIGATORIAS:",
+      `    a) Se ja temos o nome do cliente (fornecido acima), NAO pergunte o nome novamente. Va direto para o interesse.`,
+      "    b) Colete nome (se nao tiver) e objetivo em NO MAXIMO 2 perguntas. Cada pergunta = 1 mensagem curta.",
+      "    c) Com nome + objetivo: PROPONHA A REUNIAO IMEDIATAMENTE. Nao pergunte mais nada antes.",
+      "    d) Nunca aprofunde tecnicalidades, orcamentos ou escopo antes da reuniao — isso e papel da reuniao.",
+      "    e) Fluxo ideal: saudacao -> (perguntar nome se necessario) -> perguntar interesse -> propor reuniao.",
       "    e) Nunca confirme data/horario fixo sem verificar disponibilidade real."
     ];
     const groundingSources = [

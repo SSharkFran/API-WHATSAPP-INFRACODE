@@ -29,7 +29,7 @@ export class ConversationAgent {
     return this.chatbotService.evaluateInbound(params.tenantId, params.instanceId, {
       text: params.message,
       isFirstContact: params.isFirstContact,
-      contactName: undefined,
+      contactName: params.contactName ?? undefined,
       phoneNumber: params.phoneNumber,
       remoteJid: params.remoteJid,
       clientContext: params.clientContext

@@ -4210,7 +4210,7 @@ if (event.status === "CONNECTED") {
       history: params.session.history,
       clientContext: contextString,
       isFirstContact: shouldSendWelcomeFirst ? false : params.isFirstContact,
-      contactName: undefined,
+      contactName: params.contactDisplayName ?? null,
       phoneNumber: params.contactPhoneNumber ?? params.remoteNumber,
       remoteJid: shouldSendWelcomeFirst ? null : params.targetJid
     });

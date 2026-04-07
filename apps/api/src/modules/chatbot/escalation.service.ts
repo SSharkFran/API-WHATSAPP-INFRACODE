@@ -76,6 +76,20 @@ export class EscalationService {
       timer: NodeJS.Timeout;
     }
   >();
+  /** Agendamento via Admin: rastrea aguardo de preferencia de horario do cliente */
+  private readonly pendingSchedulingClientPreferenceMap = new Map<
+    string, // key: `${instanceId}:${clientPhone}`
+    {
+      tenantId: string;
+      instanceId: string;
+      adminPhone: string;
+      adminJid: string;
+      clientName: string;
+      assunto: string;
+      adminAvailability: string;
+      timer: NodeJS.Timeout;
+    }
+  >();
 
   public constructor(deps: EscalationServiceDeps) {
     this.tenantPrismaRegistry = deps.tenantPrismaRegistry;
@@ -597,6 +611,69 @@ export class EscalationService {
       if (raw) {
         try {
           return JSON.parse(raw) as { tenantId: string; instanceId: string; clientJid: string; clientName: string; assunto: string; dataPreferencia: string };
+        } catch {
+          return null;
+        }
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Registra que o bot aguarda a preferencia de horario do CLIENTE
+   * apos o admin ter informado disponibilidade. TTL 30 minutos.
+   */
+  public trackPendingSchedulingClientPreference(
+    instanceId: string,
+    clientPhone: string,
+    tenantId: string,
+    adminPhone: string,
+    adminJid: string,
+    clientName: string,
+    assunto: string,
+    adminAvailability: string,
+    windowMs = 30 * 60 * 1000
+  ): void {
+    const key = `${instanceId}:${clientPhone}`;
+    const existing = this.pendingSchedulingClientPreferenceMap.get(key);
+    if (existing) {
+      clearTimeout(existing.timer);
+    }
+    const timer = setTimeout(() => {
+      this.pendingSchedulingClientPreferenceMap.delete(key);
+      void this.redis?.del(`scheduling:client_pref:${key}`).catch(() => null);
+    }, windowMs);
+    timer.unref?.();
+    this.pendingSchedulingClientPreferenceMap.set(key, { tenantId, instanceId, adminPhone, adminJid, clientName, assunto, adminAvailability, timer });
+    void this.redis?.set(
+      `scheduling:client_pref:${key}`,
+      JSON.stringify({ tenantId, instanceId, adminPhone, adminJid, clientName, assunto, adminAvailability }),
+      "PX",
+      windowMs
+    ).catch(() => null);
+  }
+
+  /**
+   * Consome a preferencia de horario pendente do cliente.
+   * Verifica mapa em memoria primeiro, depois Redis como fallback.
+   */
+  public async consumePendingSchedulingClientPreference(
+    instanceId: string,
+    clientPhone: string
+  ): Promise<{ tenantId: string; instanceId: string; adminPhone: string; adminJid: string; clientName: string; assunto: string; adminAvailability: string } | null> {
+    const key = `${instanceId}:${clientPhone}`;
+    const inMemory = this.pendingSchedulingClientPreferenceMap.get(key);
+    if (inMemory) {
+      clearTimeout(inMemory.timer);
+      this.pendingSchedulingClientPreferenceMap.delete(key);
+      void this.redis?.del(`scheduling:client_pref:${key}`).catch(() => null);
+      return inMemory;
+    }
+    if (this.redis) {
+      const raw = await this.redis.getdel(`scheduling:client_pref:${key}`).catch(() => null);
+      if (raw) {
+        try {
+          return JSON.parse(raw) as { tenantId: string; instanceId: string; adminPhone: string; adminJid: string; clientName: string; assunto: string; adminAvailability: string };
         } catch {
           return null;
         }

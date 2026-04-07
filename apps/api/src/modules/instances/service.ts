@@ -3061,55 +3061,69 @@ if (event.status === "CONNECTED") {
           }
         }
 
-        // Agendamento via Admin: verifica se admin esta respondendo disponibilidade para um cliente
-        if (finalInputText && resolvedContactNumber) {
-          const schedulingPending = await this.escalationService.consumePendingSchedulingReply(
-            instance.id,
-            resolvedContactNumber
-          );
-          if (schedulingPending) {
-            const clientRemoteNumber =
-              (normalizeWhatsAppPhoneNumber(schedulingPending.clientJid) ??
-              normalizePhoneNumber(String(schedulingPending.clientJid).split("@")[0] ?? "")) ||
-              schedulingPending.clientJid; // Fallback: usa JID direto se normalização falhar
+      }
 
-            if (clientRemoteNumber && clientRemoteNumber.trim()) {
-              // Reformula a disponibilidade informada pelo admin via IA
-              const synthesized = await this.chatbotService.synthesizeKnowledgeEntry(
-                tenantId,
-                instance.id,
-                `${schedulingPending.clientName} perguntou sobre disponibilidade para: ${schedulingPending.assunto}`,
-                finalInputText
-              ).catch(() => ({ question: "", answer: finalInputText }));
+      // Agendamento via Admin: independente do canProcessAprendizadoContinuoReply.
+      // O admin pode responder disponibilidade mesmo sem ter o modulo de aprendizado verificado.
+      if (finalInputText && resolvedContactNumber && isAdminSender) {
+        const schedulingPending = await this.escalationService.consumePendingSchedulingReply(
+          instance.id,
+          resolvedContactNumber
+        );
+        if (schedulingPending) {
+          const clientRemoteNumber =
+            (normalizeWhatsAppPhoneNumber(schedulingPending.clientJid) ??
+            normalizePhoneNumber(String(schedulingPending.clientJid).split("@")[0] ?? "")) ||
+            schedulingPending.clientJid;
 
-              const availabilityMessage = synthesized.answer;
+          if (clientRemoteNumber && clientRemoteNumber.trim()) {
+            // Formula mensagem pedindo preferencia de horario ao cliente
+            const synthesized = await this.chatbotService.synthesizeKnowledgeEntry(
+              tenantId,
+              instance.id,
+              `Qual horario ${schedulingPending.clientName} prefere para ${schedulingPending.assunto}?`,
+              finalInputText
+            ).catch(() => ({ question: "", answer: finalInputText }));
 
-              await this.sendAutomatedTextMessage(
-                tenantId,
-                instance.id,
-                clientRemoteNumber,
-                schedulingPending.clientJid,
-                availabilityMessage,
-                { action: "scheduling_availability_reply", kind: "chatbot" }
-              );
+            const clientAskMessage = synthesized.answer + "\n\nQual horário dentro dessas opções seria melhor para você?";
 
-              await this.sendAutomatedTextMessage(
-                tenantId,
-                instance.id,
-                remoteNumber,
-                event.remoteJid,
-                `✅ Disponibilidade enviada para *${schedulingPending.clientName}*!`,
-                { action: "scheduling_availability_ack", kind: "chatbot" }
-              );
-            } else {
-              console.warn("[scheduling] falha ao normalizar número do cliente para agendamento", {
-                instanceId: instance.id,
-                clientJid: schedulingPending.clientJid,
-                clientRemoteNumber
-              });
-            }
-            return;
+            await this.sendAutomatedTextMessage(
+              tenantId,
+              instance.id,
+              clientRemoteNumber,
+              schedulingPending.clientJid,
+              clientAskMessage,
+              { action: "scheduling_ask_client_preference", kind: "chatbot" }
+            );
+
+            // Salva estado aguardando preferencia do cliente (30 min)
+            this.escalationService.trackPendingSchedulingClientPreference(
+              instance.id,
+              clientRemoteNumber,
+              tenantId,
+              resolvedContactNumber,
+              event.remoteJid,
+              schedulingPending.clientName,
+              schedulingPending.assunto,
+              finalInputText
+            );
+
+            await this.sendAutomatedTextMessage(
+              tenantId,
+              instance.id,
+              remoteNumber,
+              event.remoteJid,
+              `✅ Disponibilidade enviada para *${schedulingPending.clientName}*! Aguardando ele escolher o horário.`,
+              { action: "scheduling_availability_ack", kind: "chatbot" }
+            );
+          } else {
+            console.warn("[scheduling] falha ao normalizar numero do cliente para agendamento", {
+              instanceId: instance.id,
+              clientJid: schedulingPending.clientJid,
+              clientRemoteNumber
+            });
           }
+          return;
         }
       }
 
@@ -3149,6 +3163,49 @@ if (event.status === "CONNECTED") {
         if (imageMsg && (chatbotConfig?.visionEnabled ?? false)) {
           finalInputText = "[O cliente enviou uma imagem. Aguardando análise.]";
         } else {
+          return;
+        }
+      }
+
+      // Agendamento: cliente esta respondendo com preferencia de horario
+      if (!isAdminOrInstanceSender && finalInputText && resolvedContactNumber) {
+        const clientPref = await this.escalationService.consumePendingSchedulingClientPreference(
+          instance.id,
+          resolvedContactNumber
+        );
+        if (clientPref) {
+          const adminJid = clientPref.adminJid || `${clientPref.adminPhone}@s.whatsapp.net`;
+
+          // Confirma ao cliente
+          const clientConfirmMsg = `Perfeito! ✅ Sua preferência foi registrada. Em breve nossa equipe confirmará o agendamento com você.`;
+          await this.sendAutomatedTextMessage(
+            tenantId,
+            instance.id,
+            resolvedContactNumber,
+            event.remoteJid,
+            clientConfirmMsg,
+            { action: "scheduling_client_preference_ack", kind: "chatbot" }
+          );
+
+          // Notifica o admin com o horario escolhido pelo cliente
+          const adminNotifyMsg = [
+            `📅 *${clientPref.clientName}* escolheu um horário para: *${clientPref.assunto}*`,
+            ``,
+            `Disponibilidade que você informou: ${clientPref.adminAvailability}`,
+            `Preferência do cliente: ${finalInputText}`,
+            ``,
+            `Confirme o agendamento diretamente com o cliente.`
+          ].join("\n");
+
+          await this.sendAutomatedTextMessage(
+            tenantId,
+            instance.id,
+            clientPref.adminPhone,
+            adminJid,
+            adminNotifyMsg,
+            { action: "scheduling_admin_confirmation_alert", kind: "chatbot" }
+          ).catch((err) => console.warn("[scheduling] falha ao notificar admin com preferencia do cliente:", err));
+
           return;
         }
       }

@@ -38,6 +38,10 @@ export class IntentRouter {
     const assistantJustProposedSchedule = agendamento?.isEnabled &&
       /\b(marcar|agendar|reunião|reuniao|conversa|horário|horario|disponibilidade|data e hora)\b/i.test(lastAssistantMsg);
 
+    // Detecta se a última mensagem do assistente fez uma pergunta de confirmação (sim/não)
+    const assistantJustAskedConfirmation = /\?(\s*)$/.test(lastAssistantMsg.trim()) ||
+      /\b(é isso|correto|certo|confirma|confirmar|pode ser|tá certo|está certo)\b\s*[\?]?\s*$/i.test(lastAssistantMsg.trim());
+
     const systemPrompt = [
       "Você é um classificador de intenção para chatbot de WhatsApp.",
       "Analise as últimas mensagens e classifique a INTENÇÃO DA ÚLTIMA MENSAGEM do cliente.",
@@ -45,14 +49,22 @@ export class IntentRouter {
       "Intenções disponíveis:",
       ...capabilities,
       "",
-      "Regras:",
-      "- Prefira GENERAL quando houver dúvida entre FAQ e GENERAL.",
-      "- ESCALATE só se o módulo estiver disponível e a pergunta for claramente institucional/interna.",
+      "Regras OBRIGATÓRIAS:",
+      "- Prefira GENERAL quando houver qualquer dúvida.",
+      "- ESCALATE exige: pergunta ESPECÍFICA sobre dado interno (ex: estoque exato, preço interno, prazo específico não documentado). Confidence mínimo: 0.85.",
+      "- ESCALATE NUNCA deve ser usado para: confirmações (sim/não/exatamente), intenções de compra/contratação, pedidos genéricos de serviço, ou continuações de conversa.",
+      "- Expressões de intenção ('quero contratar', 'quero fazer', 'sim quero') → SEMPRE GENERAL ou FAQ, NUNCA ESCALATE.",
       "- SCHEDULE só se o módulo estiver disponível e o cliente demonstrar intenção clara de agendar.",
       ...(assistantJustProposedSchedule
         ? [
             "- IMPORTANTE: a última mensagem do assistente propôs um agendamento/reunião. Se o cliente CONFIRMOU (ex: 'sim', 'claro', 'com certeza', 'quero', 'pode ser', 'vamos', 'ok', 'combinado') → classifique como SCHEDULE.",
             "- Qualquer confirmação positiva após proposta de agendamento é SCHEDULE, não ESCALATE."
+          ]
+        : []),
+      ...(assistantJustAskedConfirmation
+        ? [
+            "- IMPORTANTE: a última mensagem do assistente fez uma pergunta de confirmação. Se o cliente confirmou (ex: 'sim', 'exatamente', 'isso mesmo', 'correto', 'é isso', 'perfeito') → classifique como GENERAL.",
+            "- Confirmações após pergunta do assistente são SEMPRE GENERAL, nunca ESCALATE."
           ]
         : []),
       "",
@@ -72,16 +84,18 @@ export class IntentRouter {
           const intent = parsed.intent as ChatIntent;
 
           if (VALID_INTENTS.includes(intent)) {
+            const confidence = typeof parsed.confidence === "number" ? parsed.confidence : 0.8;
+
             // Valida que o intent é compatível com os módulos ativos
+            // ESCALATE requer confiança >= 0.85 — threshold alto para evitar falsos positivos
+            // que geram notificações desnecessárias ao admin
             const resolvedIntent: ChatIntent =
               intent === "ESCALATE" && !ctx.allowAdminEscalation ? "GENERAL"
+              : intent === "ESCALATE" && confidence < 0.85 ? "GENERAL"
               : intent === "SCHEDULE" && !agendamento?.isEnabled ? "GENERAL"
               : intent;
 
-            return {
-              intent: resolvedIntent,
-              confidence: typeof parsed.confidence === "number" ? parsed.confidence : 0.8
-            };
+            return { intent: resolvedIntent, confidence };
           }
         }
       }

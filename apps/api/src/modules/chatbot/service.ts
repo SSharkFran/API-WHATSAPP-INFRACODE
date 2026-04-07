@@ -16,7 +16,8 @@ import {
   toJid
 } from "../../lib/phone.js";
 import { GroqKeyRotator } from "../../lib/groq-key-rotator.js";
-import type { ChatMessage } from "./agents/types.js";
+import type { AgentContext, AiCaller, ChatMessage, ContextBlocks } from "./agents/types.js";
+import { OrchestratorAgent } from "./agents/orchestrator.agent.js";
 import {
   getAgendamentoAdminModuleConfig,
   getAntiSpamModuleConfig,
@@ -299,6 +300,7 @@ export class ChatbotService {
   private readonly knowledgeService?: KnowledgeService;
   private readonly persistentMemoryService?: PersistentMemoryService;
   private readonly groqKeyRotator: GroqKeyRotator;
+  private readonly orchestratorAgent: OrchestratorAgent;
   private globalSystemPromptCache: { value: string | null; expiresAt: number } | undefined;
 
   public constructor(deps: ChatbotServiceDeps) {
@@ -308,6 +310,7 @@ export class ChatbotService {
     this.platformAlertService = deps.platformAlertService;
     this.knowledgeService = deps.knowledgeService;
     this.persistentMemoryService = deps.persistentMemoryService;
+    this.orchestratorAgent = new OrchestratorAgent();
 
     const extraKeys = (deps.config.GROQ_EXTRA_API_KEYS ?? "")
       .split(",")
@@ -2110,6 +2113,7 @@ private async evaluateConfig(
         };
       }
 
+      // ─── Google Calendar tool runtime (para compatibilidade) ────────────────
       let toolRuntime: ChatbotToolRuntime | undefined;
       const googleCalendarConfigResult = googleCalendarModuleSchema.safeParse(config.modules?.googleCalendar);
 
@@ -2169,15 +2173,50 @@ private async evaluateConfig(
         };
       }
 
-      const responseText = await this.callAiWithFallback(
-        tenantId,
-        managedAiProvider,
-        apiKey,
-        conversation,
-        config.ai.temperature,
-        config,
-        toolRuntime
-      );
+      // ─── Orquestrador de sub-agents ──────────────────────────────────────────
+      // Quando Google Calendar NÃO está ativo, usa o OrchestratorAgent (2 etapas:
+      // classificação de intenção + agent especializado).
+      // Quando Google Calendar está ativo, mantém o fluxo direto (toolRuntime necessário).
+      const googleCalendarActive = googleCalendarConfigResult.data?.isEnabled === true;
+
+      let responseText: string | null;
+
+      if (!googleCalendarActive) {
+        // Monta callAi encapsulando o provider configurado
+        const callAi: AiCaller = (system, messages, opts) =>
+          this.callAiWithFallback(
+            tenantId,
+            managedAiProvider,
+            apiKey,
+            { system, messages },
+            opts?.temperature ?? config.ai.temperature,
+            config
+          );
+
+        const agentCtx: AgentContext = {
+          tenantId,
+          instanceId: config.instanceId,
+          isFirstContact: input.isFirstContact,
+          history: conversation.messages,
+          blocks: conversation.blocks,
+          modules: config.modules ?? undefined,
+          allowAdminEscalation,
+          callAi
+        };
+
+        responseText = await this.orchestratorAgent.process(agentCtx);
+      } else {
+        // Fluxo direto com toolRuntime (Google Calendar)
+        responseText = await this.callAiWithFallback(
+          tenantId,
+          managedAiProvider,
+          apiKey,
+          conversation,
+          config.ai.temperature,
+          config,
+          toolRuntime
+        );
+      }
 
       if (!responseText) {
         return null;
@@ -2185,7 +2224,6 @@ private async evaluateConfig(
 
       // Agendamento via Admin: detecta [AGENDAR_ADMIN:{...}] antes de outros marcadores
       const agendamentoAdminModuleConfig = getAgendamentoAdminModuleConfig(config.modules ?? undefined);
-      const googleCalendarActive = googleCalendarModuleSchema.safeParse(config.modules?.googleCalendar).data?.isEnabled === true;
       const schedulingMatch = /\[AGENDAR_ADMIN:(\{[^[\]]*\})\]/i.exec(responseText);
 
       if (schedulingMatch && agendamentoAdminModuleConfig?.isEnabled && !googleCalendarActive) {
@@ -2301,10 +2339,16 @@ private async evaluateConfig(
     system: string;
     messages: Array<{ role: "user" | "assistant"; content: string }>;
     groundingContext: string;
+    blocks: ContextBlocks;
   }> {
     const normalizedPhoneNumber = normalizePhoneNumber(input.phoneNumber);
     const baseSystemPrompt = systemPrompt.trim() || defaultAiSettings.systemPrompt;
     const globalSystemPrompt = await this.getGlobalSystemPrompt();
+    // Blocos individuais para os sub-agents
+    let memoryMdBlock = "";
+    let clientContextBlock = "";
+    let knowledgeBlockContent = "";
+    let persistentMemoryBlockContent = "";
     const systemParts = [
       ...(globalSystemPrompt ? [`### PROMPT GLOBAL DA PLATAFORMA ###\n${globalSystemPrompt}`] : []),
       baseSystemPrompt,
@@ -2342,6 +2386,7 @@ private async evaluateConfig(
     try {
       const memoryContent = await readFile(memoryFilePath, "utf-8");
       if (memoryContent.trim()) {
+        memoryMdBlock = memoryContent.trim();
         systemParts.push(`\n--- CONTEXTO LOCAL (memory.md) ---\n${memoryContent.trim()}`);
         groundingSources.push(memoryContent.trim());
       }
@@ -2352,6 +2397,7 @@ private async evaluateConfig(
     }
 
     if (input.clientContext?.trim()) {
+      clientContextBlock = input.clientContext.trim();
       systemParts.push(input.clientContext.trim());
       groundingSources.push(input.clientContext.trim());
     }
@@ -2359,6 +2405,7 @@ private async evaluateConfig(
     if (this.knowledgeService) {
       const knowledgeBlock = await this.knowledgeService.buildContextBlock(tenantId, instanceId);
       if (knowledgeBlock) {
+        knowledgeBlockContent = knowledgeBlock;
         systemParts.push(knowledgeBlock);
         groundingSources.push(knowledgeBlock);
       }
@@ -2369,6 +2416,7 @@ private async evaluateConfig(
       const memData = await this.persistentMemoryService.getData(tenantId, instanceId, normalizedPhoneNumber);
       const memBlock = this.persistentMemoryService.buildContextBlock(memData, memoriaModule.fields);
       if (memBlock) {
+        persistentMemoryBlockContent = memBlock;
         systemParts.push(memBlock);
       }
     }
@@ -2466,10 +2514,22 @@ private async evaluateConfig(
       });
     }
 
+    const blocks: ContextBlocks = {
+      globalSystemPrompt: globalSystemPrompt ?? "",
+      baseSystemPrompt,
+      memoryMd: memoryMdBlock,
+      clientContext: clientContextBlock,
+      knowledge: knowledgeBlockContent,
+      persistentMemory: persistentMemoryBlockContent,
+      phoneNumber: normalizedPhoneNumber,
+      currentDateLine: `Data atual: ${formatDate(new Date())} ${formatTime(new Date())}.`
+    };
+
     return {
       system,
       messages,
-      groundingContext: groundingSources.join("\n\n").trim()
+      groundingContext: groundingSources.join("\n\n").trim(),
+      blocks
     };
   }
 

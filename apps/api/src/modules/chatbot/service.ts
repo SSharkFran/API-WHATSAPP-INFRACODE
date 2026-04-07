@@ -930,6 +930,85 @@ public async simulate(
     }
   }
 
+  /**
+   * Formula uma pergunta clara e contextualizada para o admin quando ocorre escalação.
+   * Em vez de enviar a mensagem bruta do cliente ("Sim, quero fazer o site"),
+   * sintetiza a DÚVIDA REAL com base no histórico da conversa:
+   * Ex: "O cliente Gleidson quer saber se vocês oferecem desenvolvimento de sites.
+   *     Se sim, qual seria o processo e os valores?"
+   * Retorna o rawMessage original como fallback se a IA falhar.
+   */
+  public async formulateEscalationQuestionForAdmin(
+    tenantId: string,
+    instanceId: string,
+    clientName: string | null,
+    rawMessage: string,
+    history: Array<{ role: "user" | "assistant"; content: string }>
+  ): Promise<string> {
+    const fallback = rawMessage.trim();
+
+    try {
+      const { config, managedAiProvider } = await this.getContext(tenantId, instanceId);
+
+      if (
+        !managedAiProvider.isConfigured ||
+        !managedAiProvider.isActive ||
+        !managedAiProvider.apiKeyEncrypted
+      ) {
+        return fallback;
+      }
+
+      const apiKey = decrypt(managedAiProvider.apiKeyEncrypted, this.config.API_ENCRYPTION_KEY);
+
+      // Monta o resumo das últimas mensagens para dar contexto ao modelo
+      const recentHistory = history.slice(-8).map((m) =>
+        `${m.role === "user" ? "Cliente" : "Bot"}: ${m.content.slice(0, 200)}`
+      ).join("\n");
+
+      const clientLabel = clientName ? `cliente "${clientName}"` : "o cliente";
+
+      const response = await this.callAiWithFallback(
+        tenantId,
+        managedAiProvider,
+        apiKey,
+        {
+          system: [
+            "Você é um assistente que ajuda a formular perguntas para o administrador de uma empresa.",
+            "O chatbot não conseguiu responder o cliente e precisa perguntar ao admin.",
+            "Sua tarefa: analisar o histórico da conversa e formular UMA pergunta clara e direta para o admin.",
+            "A pergunta deve explicar o contexto e o que o admin precisa informar para resolver a dúvida do cliente.",
+            "Seja conciso (máximo 2 frases). Não use aspas na resposta. Escreva em português."
+          ].join("\n"),
+          messages: [
+            {
+              role: "user",
+              content: [
+                `Histórico recente da conversa com ${clientLabel}:`,
+                recentHistory,
+                "",
+                `Última mensagem do cliente: "${rawMessage}"`,
+                "",
+                "Formule uma pergunta clara para o admin explicando o que o cliente precisa saber:"
+              ].join("\n")
+            }
+          ]
+        },
+        0.2,
+        config
+      );
+
+      const cleaned = response
+        ?.replace(/\[TRANSBORDO_HUMANO\]/gi, "")
+        .replace(/\[ESCALATE_ADMIN\]/gi, "")
+        .trim();
+
+      return cleaned || fallback;
+    } catch (err) {
+      console.warn("[chatbot:escalation-question] erro ao formular pergunta, usando fallback:", err);
+      return fallback;
+    }
+  }
+
   private isInstitutionalQuestion(input: string): boolean {
     const normalizedInput = normalizeLeadLookup(input);
 

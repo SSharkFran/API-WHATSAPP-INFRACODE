@@ -4463,10 +4463,27 @@ if (event.status === "CONNECTED") {
         return;
       }
 
+      // Formula uma pergunta contextualizada para o admin — em vez de enviar
+      // a mensagem bruta do cliente ("Sim, quero fazer o site"), o bot analisa
+      // o histórico e explica a dúvida real ao admin com contexto.
+      const formulatedAdminQuestion = await this.chatbotService
+        .formulateEscalationQuestionForAdmin(
+          params.tenantId,
+          params.instance.id,
+          params.contactDisplayName,
+          params.inputText,
+          params.session.history
+        )
+        .catch((err) => {
+          console.warn("[escalation] erro ao formular pergunta para admin, usando mensagem bruta:", err);
+          return params.inputText;
+        });
+
       console.log("[escalation] enviando pergunta ao admin", {
         instanceId: params.instance.id,
         conversationId: params.conversationId,
-        adminPhone
+        adminPhone,
+        formulatedAdminQuestion
       });
 
       const escalated = await this.escalationService.escalateToAdmin({
@@ -4474,7 +4491,7 @@ if (event.status === "CONNECTED") {
         instanceId: params.instance.id,
         conversationId: params.conversationId,
         clientJid: params.targetJid,
-        clientQuestion: params.inputText,
+        clientQuestion: formulatedAdminQuestion,
         adminPhone
       });
 

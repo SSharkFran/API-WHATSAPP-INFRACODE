@@ -3069,8 +3069,8 @@ if (event.status === "CONNECTED") {
           );
           if (schedulingPending) {
             const clientRemoteNumber =
-              normalizeWhatsAppPhoneNumber(schedulingPending.clientJid) ??
-              normalizePhoneNumber(String(schedulingPending.clientJid).split("@")[0] ?? "") ||
+              (normalizeWhatsAppPhoneNumber(schedulingPending.clientJid) ??
+              normalizePhoneNumber(String(schedulingPending.clientJid).split("@")[0] ?? "")) ||
               schedulingPending.clientJid; // Fallback: usa JID direto se normalização falhar
 
             if (clientRemoteNumber && clientRemoteNumber.trim()) {

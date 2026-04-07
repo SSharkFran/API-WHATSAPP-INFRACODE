@@ -3093,83 +3093,48 @@ if (event.status === "CONNECTED") {
             schedulingPending.clientJid;
 
           if (clientRemoteNumber && clientRemoteNumber.trim()) {
-            const clientAlreadyHasPreference =
+            // O admin SEMPRE confirma — mesmo que o cliente tenha dado preferência de horário,
+            // pode não haver vaga naquele momento. O bot interpreta a resposta do admin
+            // (confirmou, propôs outro horário, não tem disponibilidade) e comunica ao cliente.
+            const hasClientPreference =
               schedulingPending.dataPreferencia &&
               schedulingPending.dataPreferencia.trim().toLowerCase() !== "sem preferência" &&
               schedulingPending.dataPreferencia.trim().toLowerCase() !== "sem preferencia" &&
               schedulingPending.dataPreferencia.trim() !== "";
 
-            if (clientAlreadyHasPreference) {
-              // Fluxo de CONFIRMAÇÃO: cliente já escolheu um horário e o admin está confirmando.
-              // Notifica o cliente que o agendamento foi confirmado.
-              const confirmMsgToClient = await this.chatbotService.formulateAdminAnswerForClient(
-                tenantId,
-                instance.id,
-                `Confirmar agendamento para ${schedulingPending.assunto} em ${schedulingPending.dataPreferencia}`,
-                finalInputText
-              ).catch(() =>
-                `✅ Ótima notícia! Seu agendamento foi confirmado para *${schedulingPending.dataPreferencia}*.\n\nAssunto: ${schedulingPending.assunto}\n\nAté lá! 😊`
-              );
+            // Contexto completo para a IA formular a mensagem ao cliente corretamente
+            const questionContext = hasClientPreference
+              ? `O cliente ${schedulingPending.clientName} quer agendar: ${schedulingPending.assunto}. Preferência de horário do cliente: ${schedulingPending.dataPreferencia}. Resposta do administrador:`
+              : `O cliente ${schedulingPending.clientName} quer agendar: ${schedulingPending.assunto}. Resposta do administrador sobre disponibilidade:`;
 
-              await this.sendAutomatedTextMessage(
-                tenantId,
-                instance.id,
-                clientRemoteNumber,
-                schedulingPending.clientJid,
-                confirmMsgToClient,
-                { action: "scheduling_confirmed_to_client", kind: "chatbot" }
-              );
+            const msgToClient = await this.chatbotService.formulateAdminAnswerForClient(
+              tenantId,
+              instance.id,
+              questionContext,
+              finalInputText
+            ).catch(() =>
+              hasClientPreference
+                ? `Olá! Temos uma atualização sobre o seu agendamento para *${schedulingPending.dataPreferencia}*.\n\n${finalInputText}`
+                : finalInputText
+            );
 
-              await this.sendAutomatedTextMessage(
-                tenantId,
-                instance.id,
-                remoteNumber,
-                event.remoteJid,
-                `✅ Confirmação enviada para *${schedulingPending.clientName}*!\n\nAgendamento: ${schedulingPending.assunto}\nHorário: ${schedulingPending.dataPreferencia}`,
-                { action: "scheduling_confirmation_ack", kind: "chatbot" }
-              );
-            } else {
-              // Fluxo de NEGOCIAÇÃO: cliente não tinha preferência, admin deu slots disponíveis.
-              // Encaminha a disponibilidade do admin ao cliente para ele escolher.
-              const synthesized = await this.chatbotService.synthesizeKnowledgeEntry(
-                tenantId,
-                instance.id,
-                `Qual horario ${schedulingPending.clientName} prefere para ${schedulingPending.assunto}?`,
-                finalInputText
-              ).catch(() => ({ question: "", answer: finalInputText }));
+            await this.sendAutomatedTextMessage(
+              tenantId,
+              instance.id,
+              clientRemoteNumber,
+              schedulingPending.clientJid,
+              msgToClient,
+              { action: "scheduling_admin_reply_to_client", kind: "chatbot" }
+            );
 
-              const clientAskMessage = synthesized.answer + "\n\nQual horário dentro dessas opções seria melhor para você?";
-
-              await this.sendAutomatedTextMessage(
-                tenantId,
-                instance.id,
-                clientRemoteNumber,
-                schedulingPending.clientJid,
-                clientAskMessage,
-                { action: "scheduling_ask_client_preference", kind: "chatbot" }
-              );
-
-              // Salva estado aguardando preferencia do cliente (30 min)
-              this.escalationService.trackPendingSchedulingClientPreference(
-                instance.id,
-                clientRemoteNumber,
-                tenantId,
-                resolvedContactNumber,
-                event.remoteJid,
-                schedulingPending.clientName,
-                schedulingPending.assunto,
-                finalInputText
-              );
-
-              await this.sendAutomatedTextMessage(
-                tenantId,
-                instance.id,
-                remoteNumber,
-                event.remoteJid,
-                `✅ Disponibilidade enviada para *${schedulingPending.clientName}*! Aguardando ele escolher o horário.`,
-                { action: "scheduling_availability_ack", kind: "chatbot" }
-              );
-            }
+            await this.sendAutomatedTextMessage(
+              tenantId,
+              instance.id,
+              remoteNumber,
+              event.remoteJid,
+              `✅ Resposta enviada para *${schedulingPending.clientName}*!\n\nAssunto: ${schedulingPending.assunto}${hasClientPreference ? `\nPreferência do cliente: ${schedulingPending.dataPreferencia}` : ""}`,
+              { action: "scheduling_admin_reply_ack", kind: "chatbot" }
+            );
           } else {
             console.warn("[scheduling] falha ao normalizar numero do cliente para agendamento", {
               instanceId: instance.id,

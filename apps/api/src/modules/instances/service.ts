@@ -4426,8 +4426,19 @@ if (event.status === "CONNECTED") {
         console.warn("[scheduling] adminPhone nao configurado, solicitacao de agendamento ignorada");
       }
 
-      // Envia mensagem de espera ao cliente
-      const clientMessage = payload.clientPendingMessage;
+      // Envia mensagem de espera ao cliente.
+      // IMPORTANTE: strip [RESUMO_LEAD] — NUNCA deve ser enviado ao cliente.
+      // A IA às vezes gera o bloco de lead junto com o [AGENDAR_ADMIN:] na mesma resposta
+      // (ex: quando o cliente confirma data/hora). O bloco deve ir ao admin, não ao cliente.
+      const resumoLeadInScheduling = payload.clientPendingMessage
+        .match(/\[RESUMO_LEAD\][\s\S]*?\[\/RESUMO_LEAD\]/)?.[0] ?? null;
+      const agendamentoModuleForPendingMsg = getAgendamentoAdminModuleConfig(params.chatbotConfig?.modules ?? undefined);
+      const clientMessage = (
+        payload.clientPendingMessage
+          .replace(/\[RESUMO_LEAD\][\s\S]*?\[\/RESUMO_LEAD\]/, "")
+          .trim()
+      ) || agendamentoModuleForPendingMsg?.clientPendingMessage || "Estou verificando a disponibilidade da equipe e te retorno em breve! ✅";
+
       await this.sendAutomatedTextMessage(
         params.tenantId,
         params.instance.id,
@@ -4437,6 +4448,58 @@ if (event.status === "CONNECTED") {
         { action: "scheduling_request_sent", kind: "chatbot" }
       );
       this.appendConversationHistory(params.session, "assistant", clientMessage);
+
+      // Processa lead extraído da resposta de agendamento (se presente)
+      if (resumoLeadInScheduling && !params.session.leadAlreadySent) {
+        const leadsPhone = params.chatbotConfig?.leadsPhoneNumber;
+        const leadsEnabled = params.chatbotConfig?.leadsEnabled ?? true;
+        if (leadsPhone && leadsEnabled) {
+          const normalizedLeadNumber = normalizePhoneNumber(params.resolvedContactNumber) ?? params.resolvedContactNumber;
+          const normalizedResumeLead = resumoLeadInScheduling
+            .replace(/\{\{\s*numero\s*\}\}/gi, normalizedLeadNumber)
+            .replace(/^(Contato:\s*).*$/im, `$1${normalizedLeadNumber}`);
+
+          const hashInput = [
+            normalizedResumeLead.match(/^Nome:\s*(.+)$/im)?.[1]?.trim() ?? "",
+            normalizedResumeLead.match(/^Servi[çc]o de interesse:\s*(.+)$/im)?.[1]?.trim() ?? "",
+            params.resolvedContactNumber
+          ].join("|");
+          const hash = Buffer.from(hashInput).toString("base64").slice(0, 32);
+          const dedupeKey = `leads:dedup:${params.instance.id}:${params.remoteNumber}:${hash}`;
+          const jaEnviado = await this.redis.get(dedupeKey).catch(() => null);
+
+          if (!jaEnviado) {
+            await this.redis.set(dedupeKey, "1", "EX", 86400);
+            const leadsJid = `${leadsPhone}@s.whatsapp.net`;
+            await this.sendAutomatedTextMessage(
+              params.tenantId,
+              params.instance.id,
+              leadsPhone,
+              leadsJid,
+              `🔔 Novo lead agendado:\n\n${normalizedResumeLead}`,
+              { action: "lead_summary", kind: "chatbot" }
+            );
+            await this.markConversationLeadSent(prisma, params.conversationId, params.session);
+
+            // Alerta de plataforma apenas quando o adminAlertPhone for diferente do leadsPhone
+            const platformAdminPhone = platformConfig?.adminAlertPhone?.replace(/\D/g, "") ?? null;
+            const leadsPhoneDigits = leadsPhone.replace(/\D/g, "");
+            if (platformAdminPhone && platformAdminPhone !== leadsPhoneDigits) {
+              await this.platformAlertService?.alertNewLead(
+                params.tenantId,
+                params.instance.name,
+                normalizedResumeLead,
+                params.resolvedContactNumber
+              ).catch((err) => {
+                console.error("[orchestrator] erro ao alertar novo lead (scheduling):", err);
+              });
+            }
+          } else {
+            console.log("[leads] resumo de scheduling duplicado ignorado");
+          }
+        }
+      }
+
       return;
     }
 

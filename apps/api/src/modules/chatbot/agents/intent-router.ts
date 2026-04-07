@@ -33,6 +33,11 @@ export class IntentRouter {
 
     capabilities.push("- HANDOFF: cliente pede EXPLICITAMENTE para falar com uma pessoa humana ou atendente");
 
+    // Verifica se o assistente acabou de propor agendamento na ultima mensagem
+    const lastAssistantMsg = [...ctx.history].reverse().find((m) => m.role === "assistant")?.content ?? "";
+    const assistantJustProposedSchedule = agendamento?.isEnabled &&
+      /\b(marcar|agendar|reunião|reuniao|conversa|horário|horario|disponibilidade|data e hora)\b/i.test(lastAssistantMsg);
+
     const systemPrompt = [
       "Você é um classificador de intenção para chatbot de WhatsApp.",
       "Analise as últimas mensagens e classifique a INTENÇÃO DA ÚLTIMA MENSAGEM do cliente.",
@@ -44,12 +49,18 @@ export class IntentRouter {
       "- Prefira GENERAL quando houver dúvida entre FAQ e GENERAL.",
       "- ESCALATE só se o módulo estiver disponível e a pergunta for claramente institucional/interna.",
       "- SCHEDULE só se o módulo estiver disponível e o cliente demonstrar intenção clara de agendar.",
+      ...(assistantJustProposedSchedule
+        ? [
+            "- IMPORTANTE: a última mensagem do assistente propôs um agendamento/reunião. Se o cliente CONFIRMOU (ex: 'sim', 'claro', 'com certeza', 'quero', 'pode ser', 'vamos', 'ok', 'combinado') → classifique como SCHEDULE.",
+            "- Qualquer confirmação positiva após proposta de agendamento é SCHEDULE, não ESCALATE."
+          ]
+        : []),
       "",
       'Retorne APENAS JSON válido: {"intent":"GENERAL","confidence":0.9}'
     ].join("\n");
 
-    // Usa apenas as últimas 4 mensagens para classificação (rápido e focado)
-    const classifyMessages = ctx.history.slice(-4);
+    // Usa apenas as últimas 6 mensagens para classificação (garante contexto de proposta anterior)
+    const classifyMessages = ctx.history.slice(-6);
 
     try {
       const response = await ctx.callAi(systemPrompt, classifyMessages, { temperature: 0.0, model: ROUTER_MODEL });

@@ -1,5 +1,8 @@
 import type { AgentContext } from "./types.js";
 
+/** Melhor modelo do Groq — segue instruções complexas e PT-BR com precisão. */
+const SPECIALIST_MODEL = "llama-3.3-70b-versatile";
+
 /**
  * Agent especializado em lidar com perguntas que requerem verificação interna.
  * Tem duas saídas possíveis:
@@ -48,6 +51,6 @@ export class EscalationAgent {
       "Pergunta: 'Vocês atendem aos sábados?' | Horário está no contexto → responda brevemente."
     ].join("\n"));
 
-    return ctx.callAi(parts.join("\n\n"), ctx.history, { temperature: 0.0 });
+    return ctx.callAi(parts.join("\n\n"), ctx.history, { temperature: 0.0, model: SPECIALIST_MODEL });
   }
 }

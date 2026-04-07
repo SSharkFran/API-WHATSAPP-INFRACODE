@@ -1,5 +1,8 @@
 import type { AgentContext } from "./types.js";
 
+/** Melhor modelo do Groq — segue instruções complexas e PT-BR com precisão. */
+const SPECIALIST_MODEL = "llama-3.3-70b-versatile";
+
 /**
  * Agent especializado em responder perguntas sobre produtos, serviços e informações
  * da empresa. Usa APENAS o que está documentado no contexto — nunca inventa.
@@ -39,6 +42,6 @@ export class FaqAgent {
       "6. Nunca diga que é uma IA a menos que perguntado diretamente."
     ].join("\n"));
 
-    return ctx.callAi(parts.join("\n\n"), ctx.history, { temperature: 0.3 });
+    return ctx.callAi(parts.join("\n\n"), ctx.history, { temperature: 0.3, model: SPECIALIST_MODEL });
   }
 }

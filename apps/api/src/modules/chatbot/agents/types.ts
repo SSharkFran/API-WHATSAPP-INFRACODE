@@ -13,7 +13,11 @@ export interface ChatMessage {
 export type AiCaller = (
   system: string,
   messages: Array<{ role: "user" | "assistant"; content: string }>,
-  opts?: { temperature?: number }
+  opts?: {
+    temperature?: number;
+    /** Sobrescreve o modelo configurado. Útil para usar um modelo leve no router. */
+    model?: string;
+  }
 ) => Promise<string | null>;
 
 /** Intenções detectadas pelo IntentRouter */

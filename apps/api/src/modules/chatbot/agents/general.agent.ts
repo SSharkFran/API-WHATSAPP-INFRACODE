@@ -1,5 +1,8 @@
 import type { AgentContext } from "./types.js";
 
+/** Melhor modelo do Groq — segue instruções complexas e PT-BR com precisão. */
+const SPECIALIST_MODEL = "llama-3.3-70b-versatile";
+
 /**
  * Agent de conversação geral — fallback para interações que não se encaixam
  * em FAQ, escalação ou agendamento. Recebe o contexto completo e responde
@@ -52,6 +55,6 @@ export class GeneralAgent {
       ...escalationRule
     ].join("\n"));
 
-    return ctx.callAi(parts.join("\n\n"), ctx.history, { temperature: 0.7 });
+    return ctx.callAi(parts.join("\n\n"), ctx.history, { temperature: 0.7, model: SPECIALIST_MODEL });
   }
 }

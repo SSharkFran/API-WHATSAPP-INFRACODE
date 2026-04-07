@@ -2182,16 +2182,24 @@ private async evaluateConfig(
       let responseText: string | null;
 
       if (!googleCalendarActive) {
-        // Monta callAi encapsulando o provider configurado
-        const callAi: AiCaller = (system, messages, opts) =>
-          this.callAiWithFallback(
+        // Monta callAi encapsulando o provider configurado.
+        // Se o agent passar opts.model, cria um provider virtual com aquele modelo
+        // (útil para o IntentRouter rodar no modelo leve enquanto os agents usam o 70B).
+        const callAi: AiCaller = (system, messages, opts) => {
+          const providerToUse: ManagedAiProviderRuntime =
+            opts?.model && opts.model !== managedAiProvider.model
+              ? { ...managedAiProvider, model: opts.model }
+              : managedAiProvider;
+
+          return this.callAiWithFallback(
             tenantId,
-            managedAiProvider,
+            providerToUse,
             apiKey,
             { system, messages },
             opts?.temperature ?? config.ai.temperature,
             config
           );
+        };
 
         const agentCtx: AgentContext = {
           tenantId,

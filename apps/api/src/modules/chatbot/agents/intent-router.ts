@@ -1,6 +1,13 @@
 import { getAgendamentoAdminModuleConfig } from "../module-runtime.js";
 import type { AgentContext, ChatIntent, RouterResult } from "./types.js";
 
+/**
+ * Modelo leve usado exclusivamente para classificação de intenção.
+ * Alta disponibilidade (131.072 tokens/min no Groq free tier), latência ~80ms.
+ * Prompt pequeno + temperatura 0 → classificação binária confiável mesmo com modelo menor.
+ */
+const ROUTER_MODEL = "llama-3.1-8b-instant";
+
 const VALID_INTENTS: ChatIntent[] = ["GENERAL", "FAQ", "ESCALATE", "SCHEDULE", "HANDOFF"];
 
 /**
@@ -45,7 +52,7 @@ export class IntentRouter {
     const classifyMessages = ctx.history.slice(-4);
 
     try {
-      const response = await ctx.callAi(systemPrompt, classifyMessages, { temperature: 0.0 });
+      const response = await ctx.callAi(systemPrompt, classifyMessages, { temperature: 0.0, model: ROUTER_MODEL });
 
       if (response) {
         const match = /\{[\s\S]*?\}/.exec(response);

@@ -1,6 +1,9 @@
 import { getAgendamentoAdminModuleConfig } from "../module-runtime.js";
 import type { AgentContext } from "./types.js";
 
+/** Melhor modelo do Groq — segue instruções complexas e PT-BR com precisão. */
+const SPECIALIST_MODEL = "llama-3.3-70b-versatile";
+
 /**
  * Agent especializado em coletar informações de agendamento e emitir o marcador
  * [AGENDAR_ADMIN:{...}] quando tiver nome e assunto do cliente.
@@ -45,6 +48,6 @@ export class SchedulingAgent {
         : [])
     ].join("\n"));
 
-    return ctx.callAi(parts.join("\n\n"), ctx.history, { temperature: 0.4 });
+    return ctx.callAi(parts.join("\n\n"), ctx.history, { temperature: 0.4, model: SPECIALIST_MODEL });
   }
 }

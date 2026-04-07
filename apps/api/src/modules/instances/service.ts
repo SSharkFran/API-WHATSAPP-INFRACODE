@@ -2832,6 +2832,22 @@ if (event.status === "CONNECTED") {
         return;
       }
 
+      // ── Prefixo de comentário interno do admin ──────────────────────────────
+      // Mensagens que começam com ">>" ou "//" são tratadas como notas internas:
+      // não são processadas como aprendizado, agendamento ou resposta a escalação.
+      // Ex: ">> isso foi errado, não use essa resposta"
+      if (finalInputText && isAdminSender && /^\s*(>>|\/\/)/.test(finalInputText)) {
+        await this.sendAutomatedTextMessage(
+          tenantId,
+          instance.id,
+          remoteNumber,
+          event.remoteJid,
+          "💬 Comentário interno registrado. Nenhuma ação tomada.",
+          { action: "admin_internal_comment", kind: "chatbot" }
+        );
+        return;
+      }
+
       // Detecta correcao: admin respondendo (reply/quote) a confirmacao "Aprendi e respondi"
       // Este check e independente de pendingEscalations — pode ocorrer a qualquer momento
       if (finalInputText && isVerifiedAprendizadoContinuoAdminSender) {

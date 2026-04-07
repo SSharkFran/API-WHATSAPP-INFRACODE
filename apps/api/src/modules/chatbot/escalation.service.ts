@@ -591,31 +591,79 @@ export class EscalationService {
   }
 
   /**
+   * Gera variantes do número de telefone para lidar com o 9º dígito brasileiro.
+   * Alguns telefones são configurados sem o 9º dígito mas o JID real do WhatsApp tem.
+   * Ex: "558499999999" → também tenta "5584999999999" (com 9) e vice-versa.
+   */
+  private buildPhoneKeyVariants(phone: string): string[] {
+    const digits = phone.replace(/\D/g, "");
+    if (!digits) return [];
+
+    const variants = new Set<string>([digits]);
+
+    // Sem código de país (BR = 55)
+    const withoutCC = digits.startsWith("55") && digits.length > 11 ? digits.slice(2) : digits;
+    variants.add(withoutCC);
+
+    // Adiciona/remove 9º dígito para números BR (DDD + 9 + 8 dígitos = 11 sem CC)
+    if (withoutCC.length === 11 && withoutCC[2] === "9") {
+      // tem 9 → variante sem 9
+      const without9 = `${withoutCC.slice(0, 2)}${withoutCC.slice(3)}`;
+      variants.add(without9);
+      variants.add(`55${without9}`);
+    } else if (withoutCC.length === 10) {
+      // não tem 9 → variante com 9
+      const with9 = `${withoutCC.slice(0, 2)}9${withoutCC.slice(2)}`;
+      variants.add(with9);
+      variants.add(`55${with9}`);
+    }
+
+    // Garante variante com código de país
+    if (!digits.startsWith("55") && digits.length <= 11) {
+      variants.add(`55${digits}`);
+    }
+
+    return [...variants].filter(Boolean);
+  }
+
+  /**
    * Consome (remove) uma solicitacao de agendamento pendente para este admin.
    * Verifica mapa em memoria primeiro, depois Redis como fallback.
+   * Tenta múltiplas variantes do telefone para lidar com 9º dígito brasileiro.
    */
   public async consumePendingSchedulingReply(
     instanceId: string,
     adminPhone: string
   ): Promise<{ tenantId: string; instanceId: string; clientJid: string; clientName: string; assunto: string; dataPreferencia: string } | null> {
-    const key = `${instanceId}:${adminPhone}`;
-    const inMemory = this.pendingSchedulingMap.get(key);
-    if (inMemory) {
-      clearTimeout(inMemory.timer);
-      this.pendingSchedulingMap.delete(key);
-      void this.redis?.del(`scheduling:pending:${key}`).catch(() => null);
-      return inMemory;
+    const phoneVariants = this.buildPhoneKeyVariants(adminPhone);
+
+    // Tenta todas as variantes no mapa em memória primeiro
+    for (const variant of phoneVariants) {
+      const key = `${instanceId}:${variant}`;
+      const inMemory = this.pendingSchedulingMap.get(key);
+      if (inMemory) {
+        clearTimeout(inMemory.timer);
+        this.pendingSchedulingMap.delete(key);
+        void this.redis?.del(`scheduling:pending:${key}`).catch(() => null);
+        return inMemory;
+      }
     }
+
+    // Fallback Redis — tenta todas as variantes
     if (this.redis) {
-      const raw = await this.redis.getdel(`scheduling:pending:${key}`).catch(() => null);
-      if (raw) {
-        try {
-          return JSON.parse(raw) as { tenantId: string; instanceId: string; clientJid: string; clientName: string; assunto: string; dataPreferencia: string };
-        } catch {
-          return null;
+      for (const variant of phoneVariants) {
+        const key = `${instanceId}:${variant}`;
+        const raw = await this.redis.getdel(`scheduling:pending:${key}`).catch(() => null);
+        if (raw) {
+          try {
+            return JSON.parse(raw) as { tenantId: string; instanceId: string; clientJid: string; clientName: string; assunto: string; dataPreferencia: string };
+          } catch {
+            return null;
+          }
         }
       }
     }
+
     return null;
   }
 
@@ -656,26 +704,35 @@ export class EscalationService {
   /**
    * Consome a preferencia de horario pendente do cliente.
    * Verifica mapa em memoria primeiro, depois Redis como fallback.
+   * Tenta múltiplas variantes do telefone para lidar com 9º dígito brasileiro.
    */
   public async consumePendingSchedulingClientPreference(
     instanceId: string,
     clientPhone: string
   ): Promise<{ tenantId: string; instanceId: string; adminPhone: string; adminJid: string; clientName: string; assunto: string; adminAvailability: string } | null> {
-    const key = `${instanceId}:${clientPhone}`;
-    const inMemory = this.pendingSchedulingClientPreferenceMap.get(key);
-    if (inMemory) {
-      clearTimeout(inMemory.timer);
-      this.pendingSchedulingClientPreferenceMap.delete(key);
-      void this.redis?.del(`scheduling:client_pref:${key}`).catch(() => null);
-      return inMemory;
+    const phoneVariants = this.buildPhoneKeyVariants(clientPhone);
+
+    for (const variant of phoneVariants) {
+      const key = `${instanceId}:${variant}`;
+      const inMemory = this.pendingSchedulingClientPreferenceMap.get(key);
+      if (inMemory) {
+        clearTimeout(inMemory.timer);
+        this.pendingSchedulingClientPreferenceMap.delete(key);
+        void this.redis?.del(`scheduling:client_pref:${key}`).catch(() => null);
+        return inMemory;
+      }
     }
+
     if (this.redis) {
-      const raw = await this.redis.getdel(`scheduling:client_pref:${key}`).catch(() => null);
-      if (raw) {
-        try {
-          return JSON.parse(raw) as { tenantId: string; instanceId: string; adminPhone: string; adminJid: string; clientName: string; assunto: string; adminAvailability: string };
-        } catch {
-          return null;
+      for (const variant of phoneVariants) {
+        const key = `${instanceId}:${variant}`;
+        const raw = await this.redis.getdel(`scheduling:client_pref:${key}`).catch(() => null);
+        if (raw) {
+          try {
+            return JSON.parse(raw) as { tenantId: string; instanceId: string; adminPhone: string; adminJid: string; clientName: string; assunto: string; adminAvailability: string };
+          } catch {
+            return null;
+          }
         }
       }
     }

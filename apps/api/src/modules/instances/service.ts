@@ -3082,7 +3082,7 @@ if (event.status === "CONNECTED") {
       // Agendamento via Admin: independente do canProcessAprendizadoContinuoReply.
       // O admin pode responder disponibilidade mesmo sem ter o modulo de aprendizado verificado.
       // Guarda: só executa se o módulo AgendamentoAdmin estiver habilitado.
-      const agendamentoModuleForAdminReply = getAgendamentoAdminModuleConfig(chatbotConfig?.modules ?? undefined);
+      const agendamentoModuleForAdminReply = getAgendamentoAdminModuleConfig(sanitizedChatbotModules);
       if (finalInputText && resolvedContactNumber && isAdminSender && agendamentoModuleForAdminReply?.isEnabled) {
         const schedulingPending = await this.escalationService.consumePendingSchedulingReply(
           instance.id,

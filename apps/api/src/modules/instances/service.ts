@@ -3022,6 +3022,72 @@ if (event.status === "CONNECTED") {
 
       }
 
+      // ── Agendamento via Admin (prioridade máxima) ───────────────────────────
+      // Deve ser checado ANTES de handleCommand para que respostas de disponibilidade
+      // não sejam interceptadas pelo processador de comandos livres do admin.
+      // Independente de canProcessAprendizadoContinuoReply — basta ser isAdminSender.
+      const agendamentoModuleForAdminReply = getAgendamentoAdminModuleConfig(sanitizedChatbotModules);
+      if (finalInputText && resolvedContactNumber && isAdminSender && agendamentoModuleForAdminReply?.isEnabled) {
+        const schedulingPending = await this.escalationService.consumePendingSchedulingReply(
+          instance.id,
+          resolvedContactNumber
+        );
+        if (schedulingPending) {
+          const clientRemoteNumber =
+            (normalizeWhatsAppPhoneNumber(schedulingPending.clientJid) ??
+            normalizePhoneNumber(String(schedulingPending.clientJid).split("@")[0] ?? "")) ||
+            schedulingPending.clientJid;
+
+          if (clientRemoteNumber && clientRemoteNumber.trim()) {
+            const hasClientPreference =
+              schedulingPending.dataPreferencia &&
+              schedulingPending.dataPreferencia.trim().toLowerCase() !== "sem preferência" &&
+              schedulingPending.dataPreferencia.trim().toLowerCase() !== "sem preferencia" &&
+              schedulingPending.dataPreferencia.trim() !== "";
+
+            const questionContext = hasClientPreference
+              ? `O cliente ${schedulingPending.clientName} quer agendar: ${schedulingPending.assunto}. Preferência de horário do cliente: ${schedulingPending.dataPreferencia}. Resposta do administrador:`
+              : `O cliente ${schedulingPending.clientName} quer agendar: ${schedulingPending.assunto}. Resposta do administrador sobre disponibilidade:`;
+
+            const msgToClient = await this.chatbotService.formulateAdminAnswerForClient(
+              tenantId,
+              instance.id,
+              questionContext,
+              finalInputText
+            ).catch(() =>
+              hasClientPreference
+                ? `Olá! Temos uma atualização sobre o seu agendamento para *${schedulingPending.dataPreferencia}*.\n\n${finalInputText}`
+                : finalInputText
+            );
+
+            await this.sendAutomatedTextMessage(
+              tenantId,
+              instance.id,
+              clientRemoteNumber,
+              schedulingPending.clientJid,
+              msgToClient,
+              { action: "scheduling_admin_reply_to_client", kind: "chatbot" }
+            );
+
+            await this.sendAutomatedTextMessage(
+              tenantId,
+              instance.id,
+              remoteNumber,
+              event.remoteJid,
+              `✅ Resposta enviada para *${schedulingPending.clientName}*!\n\nAssunto: ${schedulingPending.assunto}${hasClientPreference ? `\nPreferência do cliente: ${schedulingPending.dataPreferencia}` : ""}`,
+              { action: "scheduling_admin_reply_ack", kind: "chatbot" }
+            );
+          } else {
+            console.warn("[scheduling] falha ao normalizar numero do cliente para agendamento", {
+              instanceId: instance.id,
+              clientJid: schedulingPending.clientJid,
+              clientRemoteNumber
+            });
+          }
+          return;
+        }
+      }
+
       // Comando livre do admin verificado — não é reply de aprendizado nem correção
       if (finalInputText && isVerifiedAprendizadoContinuoAdminSender) {
         const handled = await this.adminCommandService.handleCommand({
@@ -3077,75 +3143,6 @@ if (event.status === "CONNECTED") {
           }
         }
 
-      }
-
-      // Agendamento via Admin: independente do canProcessAprendizadoContinuoReply.
-      // O admin pode responder disponibilidade mesmo sem ter o modulo de aprendizado verificado.
-      // Guarda: só executa se o módulo AgendamentoAdmin estiver habilitado.
-      const agendamentoModuleForAdminReply = getAgendamentoAdminModuleConfig(sanitizedChatbotModules);
-      if (finalInputText && resolvedContactNumber && isAdminSender && agendamentoModuleForAdminReply?.isEnabled) {
-        const schedulingPending = await this.escalationService.consumePendingSchedulingReply(
-          instance.id,
-          resolvedContactNumber
-        );
-        if (schedulingPending) {
-          const clientRemoteNumber =
-            (normalizeWhatsAppPhoneNumber(schedulingPending.clientJid) ??
-            normalizePhoneNumber(String(schedulingPending.clientJid).split("@")[0] ?? "")) ||
-            schedulingPending.clientJid;
-
-          if (clientRemoteNumber && clientRemoteNumber.trim()) {
-            // O admin SEMPRE confirma — mesmo que o cliente tenha dado preferência de horário,
-            // pode não haver vaga naquele momento. O bot interpreta a resposta do admin
-            // (confirmou, propôs outro horário, não tem disponibilidade) e comunica ao cliente.
-            const hasClientPreference =
-              schedulingPending.dataPreferencia &&
-              schedulingPending.dataPreferencia.trim().toLowerCase() !== "sem preferência" &&
-              schedulingPending.dataPreferencia.trim().toLowerCase() !== "sem preferencia" &&
-              schedulingPending.dataPreferencia.trim() !== "";
-
-            // Contexto completo para a IA formular a mensagem ao cliente corretamente
-            const questionContext = hasClientPreference
-              ? `O cliente ${schedulingPending.clientName} quer agendar: ${schedulingPending.assunto}. Preferência de horário do cliente: ${schedulingPending.dataPreferencia}. Resposta do administrador:`
-              : `O cliente ${schedulingPending.clientName} quer agendar: ${schedulingPending.assunto}. Resposta do administrador sobre disponibilidade:`;
-
-            const msgToClient = await this.chatbotService.formulateAdminAnswerForClient(
-              tenantId,
-              instance.id,
-              questionContext,
-              finalInputText
-            ).catch(() =>
-              hasClientPreference
-                ? `Olá! Temos uma atualização sobre o seu agendamento para *${schedulingPending.dataPreferencia}*.\n\n${finalInputText}`
-                : finalInputText
-            );
-
-            await this.sendAutomatedTextMessage(
-              tenantId,
-              instance.id,
-              clientRemoteNumber,
-              schedulingPending.clientJid,
-              msgToClient,
-              { action: "scheduling_admin_reply_to_client", kind: "chatbot" }
-            );
-
-            await this.sendAutomatedTextMessage(
-              tenantId,
-              instance.id,
-              remoteNumber,
-              event.remoteJid,
-              `✅ Resposta enviada para *${schedulingPending.clientName}*!\n\nAssunto: ${schedulingPending.assunto}${hasClientPreference ? `\nPreferência do cliente: ${schedulingPending.dataPreferencia}` : ""}`,
-              { action: "scheduling_admin_reply_ack", kind: "chatbot" }
-            );
-          } else {
-            console.warn("[scheduling] falha ao normalizar numero do cliente para agendamento", {
-              instanceId: instance.id,
-              clientJid: schedulingPending.clientJid,
-              clientRemoteNumber
-            });
-          }
-          return;
-        }
       }
 
       if (finalInputText && activeConversation.awaitingAdminResponse && !canProcessAprendizadoContinuoReply) {

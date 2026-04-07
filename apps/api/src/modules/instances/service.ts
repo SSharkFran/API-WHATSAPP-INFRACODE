@@ -4242,11 +4242,15 @@ if (event.status === "CONNECTED") {
       });
 
       if (adminPhone) {
-        await this.sendMessage(params.tenantId, params.instance.id, {
-          type: "text",
-          to: adminPhone,
-          text: `Transbordo humano solicitado pelo cliente ${params.resolvedContactNumber}. O bot foi pausado para este contato.`
-        });
+        const adminJid = adminPhone.includes("@") ? adminPhone : `${adminPhone}@s.whatsapp.net`;
+        await this.sendAutomatedTextMessage(
+          params.tenantId,
+          params.instance.id,
+          adminPhone,
+          adminJid,
+          `Transbordo humano solicitado pelo cliente ${params.resolvedContactNumber}. O bot foi pausado para este contato.`,
+          { action: "human_handoff_alert", kind: "chatbot" }
+        ).catch((err) => console.warn("[handoff] falha ao notificar admin:", err));
       }
       return;
     }
@@ -4273,13 +4277,21 @@ if (event.status === "CONNECTED") {
           .replace(/\{\{data_preferencia\}\}/g, payload.dataPreferencia)
           .replace(/\{\{telefone\}\}/g, params.remoteNumber ?? "não informado");
 
-        // Envia mensagem ao admin
+        // Envia mensagem ao admin via sendAutomatedTextMessage para que o echo
+        // seja registrado em rememberAutomatedOutboundEcho e não seja reprocessado
+        // como mensagem inbound (o que causaria um ciclo de escalação falsa).
         try {
-          await this.sendMessage(params.tenantId, params.instance.id, {
-            type: "text",
-            to: resolvedAdminPhone,
-            text: adminMessage
-          });
+          const adminJid = resolvedAdminPhone.includes("@")
+            ? resolvedAdminPhone
+            : `${resolvedAdminPhone}@s.whatsapp.net`;
+          await this.sendAutomatedTextMessage(
+            params.tenantId,
+            params.instance.id,
+            resolvedAdminPhone,
+            adminJid,
+            adminMessage,
+            { action: "scheduling_admin_alert", kind: "chatbot" }
+          );
         } catch (err) {
           console.warn("[scheduling] falha ao notificar admin:", err);
         }

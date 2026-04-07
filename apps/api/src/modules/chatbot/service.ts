@@ -896,20 +896,24 @@ public async simulate(
         apiKey,
         {
           system: [
-            "Voce e um assistente de atendimento ao cliente via WhatsApp.",
-            "Sua tarefa e formular uma resposta clara, natural e profissional para o cliente,",
-            "baseada na informacao bruta fornecida pelo administrador.",
-            "Seja direto, cordial e use linguagem adequada para WhatsApp.",
-            "Nao mencione que houve consulta ao admin. Responda como se soubesse a informacao.",
-            "Maximo 3 frases."
+            "Voce e um assistente de atendimento via WhatsApp respondendo ao cliente.",
+            "A conversa ja esta em andamento. Voce deve CONTINUAR a conversa de forma natural.",
+            "",
+            "REGRAS OBRIGATORIAS:",
+            "- NUNCA comece com 'Ola' nem repita o nome do cliente — isso soa robotico no meio de uma conversa",
+            "- NUNCA use frases como 'estou feliz em', 'fico feliz', 'terei prazer', 'fico a disposicao'",
+            "- Use tom casual e direto, como se fosse uma mensagem de WhatsApp de verdade",
+            "- Transmita a informacao de forma fluida e natural, sem anunciar que houve uma consulta",
+            "- Maximo 2 frases. Se for disponibilidade de agenda, inclua os horarios de forma clara",
+            "- Pode usar 1 emoji no maximo, se fizer sentido"
           ].join("\n"),
           messages: [
             {
               role: "user",
               content: [
-                `Pergunta original do cliente: ${originalQuestion}`,
-                `Informacao do administrador: ${adminRawAnswer}`,
-                "Formule a resposta para o cliente (sem usar aspas ao redor da resposta):"
+                `Contexto: ${originalQuestion}`,
+                `Informacao recebida: ${adminRawAnswer}`,
+                "Escreva a mensagem para o cliente (sem aspas, sem introducao, direto ao ponto):"
               ].join("\n")
             }
           ]

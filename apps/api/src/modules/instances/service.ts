@@ -4647,29 +4647,42 @@ if (event.status === "CONNECTED") {
 
         if (!jaEnviado) {
           await this.redis.set(dedupeKey, "1", "EX", 86400);
+
+          // Normaliza o resumo antes de enviar: substitui {{numero}} pelo telefone real
+          // (o modelo às vezes gera {{numero}} como placeholder em vez do número diretamente)
+          const normalizedLeadNumber = normalizePhoneNumber(params.resolvedContactNumber) ?? params.resolvedContactNumber;
+          const normalizedResumeLead = resumoLead
+            .replace(/\{\{\s*numero\s*\}\}/gi, normalizedLeadNumber)
+            .replace(/^(Contato:\s*).*$/im, `$1${normalizedLeadNumber}`);
+
           const leadsJid = `${leadsPhone}@s.whatsapp.net`;
           await this.sendAutomatedTextMessage(
             params.tenantId,
             params.instance.id,
             leadsPhone,
             leadsJid,
-            `🔔 Novo lead agendado:\n\n${resumoLead}`,
+            `🔔 Novo lead agendado:\n\n${normalizedResumeLead}`,
             { action: "lead_summary", kind: "chatbot" }
           );
 
-          const summaryAlertSent =
-            (await this.platformAlertService?.alertNewLead(
+          // Marca como enviado imediatamente após o envio direto ao leadsPhone
+          await this.markConversationLeadSent(prisma, params.conversationId, params.session);
+
+          // Alerta de plataforma: disparar SOMENTE se o adminAlertPhone da plataforma for
+          // diferente do leadsPhone do tenant, para evitar duplicar a notificação para o
+          // mesmo número quando o admin do tenant e o admin da plataforma são a mesma pessoa.
+          const platformAdminPhone = platformConfig?.adminAlertPhone?.replace(/\D/g, "") ?? null;
+          const leadsPhoneDigits = leadsPhone.replace(/\D/g, "");
+          const isDifferentPhone = platformAdminPhone && platformAdminPhone !== leadsPhoneDigits;
+          if (isDifferentPhone) {
+            await this.platformAlertService?.alertNewLead(
               params.tenantId,
               params.instance.name,
-              resumoLead,
+              normalizedResumeLead,
               params.resolvedContactNumber
             ).catch((err) => {
               console.error("[orchestrator] erro ao alertar novo lead:", err);
-              return false;
-            })) ?? false;
-
-          if (summaryAlertSent) {
-            await this.markConversationLeadSent(prisma, params.conversationId, params.session);
+            });
           }
         } else {
           console.log("[leads] resumo duplicado ignorado");

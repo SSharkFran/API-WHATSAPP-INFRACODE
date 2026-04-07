@@ -3070,9 +3070,10 @@ if (event.status === "CONNECTED") {
           if (schedulingPending) {
             const clientRemoteNumber =
               normalizeWhatsAppPhoneNumber(schedulingPending.clientJid) ??
-              normalizePhoneNumber(String(schedulingPending.clientJid).split("@")[0] ?? "");
+              normalizePhoneNumber(String(schedulingPending.clientJid).split("@")[0] ?? "") ||
+              schedulingPending.clientJid; // Fallback: usa JID direto se normalização falhar
 
-            if (clientRemoteNumber) {
+            if (clientRemoteNumber && clientRemoteNumber.trim()) {
               // Reformula a disponibilidade informada pelo admin via IA
               const synthesized = await this.chatbotService.synthesizeKnowledgeEntry(
                 tenantId,
@@ -3100,6 +3101,12 @@ if (event.status === "CONNECTED") {
                 `✅ Disponibilidade enviada para *${schedulingPending.clientName}*!`,
                 { action: "scheduling_availability_ack", kind: "chatbot" }
               );
+            } else {
+              console.warn("[scheduling] falha ao normalizar número do cliente para agendamento", {
+                instanceId: instance.id,
+                clientJid: schedulingPending.clientJid,
+                clientRemoteNumber
+              });
             }
             return;
           }

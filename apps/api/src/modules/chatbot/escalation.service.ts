@@ -298,6 +298,38 @@ export class EscalationService {
     conversationId: string;
     savedKnowledgeId: string;
   } | null> {
+    // Lock distribuído via Redis para garantir processamento atômico.
+    // Evita duplicatas causadas por eventos duplicados do Baileys ou processamento paralelo.
+    const lockKey = `escalation:reply-lock:${instanceId}:${targetConversationId ?? "any"}`;
+    if (this.redis) {
+      const acquired = await this.redis.set(lockKey, "1", "EX", 10, "NX");
+      if (!acquired) {
+        console.warn(`[escalation] processAdminReply ignorado — lock ativo para ${lockKey}`);
+        return null;
+      }
+    }
+
+    try {
+      return await this._processAdminReplyInternal(tenantId, instanceId, adminRawAnswer, targetConversationId);
+    } finally {
+      if (this.redis) {
+        await this.redis.del(lockKey).catch(() => null);
+      }
+    }
+  }
+
+  private async _processAdminReplyInternal(
+    tenantId: string,
+    instanceId: string,
+    adminRawAnswer: string,
+    targetConversationId?: string | null
+  ): Promise<{
+    clientJid: string;
+    clientQuestion: string;
+    formulatedAnswer: string;
+    conversationId: string;
+    savedKnowledgeId: string;
+  } | null> {
     const prisma = await this.tenantPrismaRegistry.getClient(tenantId);
 
     const pausedConversation = await prisma.conversation.findFirst({

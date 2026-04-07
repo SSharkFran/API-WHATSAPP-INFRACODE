@@ -2351,6 +2351,18 @@ if (event.status === "CONNECTED") {
       return;
     }
 
+    // Deduplicação de mensagens inbound do admin via Redis.
+    // O Baileys pode entregar o mesmo evento duas vezes (reconexão, ack duplicado).
+    // Se já processamos este externalMessageId para este instanceId, ignoramos.
+    if (canProcessAprendizadoContinuoReply && event.externalMessageId) {
+      const dedupKey = `admin-msg-dedup:${instance.id}:${event.externalMessageId}`;
+      const alreadyProcessed = await this.redis.set(dedupKey, "1", "EX", 30, "NX");
+      if (!alreadyProcessed) {
+        console.warn(`[admin-dedup] mensagem ${event.externalMessageId} já processada, ignorando duplicata`);
+        return;
+      }
+    }
+
     const hasPendingEscalationsForAdminBypass = canProcessAprendizadoContinuoReply
       ? await this.escalationService.hasPendingEscalations(tenantId, instance.id)
       : false;

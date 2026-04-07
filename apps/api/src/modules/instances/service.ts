@@ -3025,13 +3025,41 @@ if (event.status === "CONNECTED") {
       // ── Agendamento via Admin (prioridade máxima) ───────────────────────────
       // Deve ser checado ANTES de handleCommand para que respostas de disponibilidade
       // não sejam interceptadas pelo processador de comandos livres do admin.
-      // Independente de canProcessAprendizadoContinuoReply — basta ser isAdminSender.
+      //
+      // RECONHECIMENTO: usa isAdminSender OU isVerifiedAprendizadoContinuoAdminSender.
+      // Admins com JID @lid (Linked Identity Device) não batem em comparações de telefone,
+      // mas são reconhecidos via verifiedRemoteJids/verifiedSenderJids do módulo de
+      // aprendizado contínuo — a "âncora" de identidade já existente no sistema.
       const agendamentoModuleForAdminReply = getAgendamentoAdminModuleConfig(sanitizedChatbotModules);
-      if (finalInputText && resolvedContactNumber && isAdminSender && agendamentoModuleForAdminReply?.isEnabled) {
-        const schedulingPending = await this.escalationService.consumePendingSchedulingReply(
-          instance.id,
-          resolvedContactNumber
-        );
+      const isRecognizedAdminSender = isAdminSender || isVerifiedAprendizadoContinuoAdminSender;
+      if (finalInputText && isRecognizedAdminSender && agendamentoModuleForAdminReply?.isEnabled) {
+        // Espelha EXATAMENTE os candidatos usados na gravação do pending map
+        // (ver handleChatbotSchedulingRequest → resolvedAdminPhone).
+        // Assim o lookup sempre encontra a chave certa, independente de JID @lid ou 9º dígito.
+        const adminPhoneLookupCandidates = (
+          [
+            agendamentoModuleForAdminReply.adminPhone,
+            aprendizadoContinuoModule?.verifiedPhone,
+            aprendizadoContinuoModule?.configuredAdminPhone,
+            ...(aprendizadoContinuoModule?.verifiedPhones ?? []),
+            ...(aprendizadoContinuoModule?.additionalAdminPhones ?? []),
+            chatbotConfig?.leadsPhoneNumber,
+            platformConfig?.adminAlertPhone,
+            matchedAdminPhone,
+            matchedVerifiedAdminPhone,
+            resolvedContactNumber,
+          ] as Array<string | null | undefined>
+        ).filter((p): p is string => typeof p === "string" && p.trim() !== "");
+        const uniqueAdminPhoneCandidates = [...new Set(adminPhoneLookupCandidates)];
+
+        let schedulingPending: { tenantId: string; instanceId: string; clientJid: string; clientName: string; assunto: string; dataPreferencia: string } | null = null;
+        for (const candidate of uniqueAdminPhoneCandidates) {
+          schedulingPending = await this.escalationService.consumePendingSchedulingReply(
+            instance.id,
+            candidate
+          );
+          if (schedulingPending) break;
+        }
         if (schedulingPending) {
           const clientRemoteNumber =
             (normalizeWhatsAppPhoneNumber(schedulingPending.clientJid) ??

@@ -35,7 +35,16 @@ export class IntentRouter {
 
     // Verifica se o assistente acabou de propor agendamento na ultima mensagem
     const lastAssistantMsg = [...ctx.history].reverse().find((m) => m.role === "assistant")?.content ?? "";
+
+    // Detecta se o assistente CONFIRMOU/CONCLUIU um agendamento — ou seja, já disse algo como
+    // "tudo certo", "agendado", "confirmado", "marcado", "especialista vai entrar em contato".
+    // Nesse caso, qualquer confirmação do cliente ("correto", "ok", "sim") é GENERAL, não SCHEDULE.
+    const assistantJustConfirmedSchedule = agendamento?.isEnabled &&
+      /\b(tudo certo|agendado|confirmado|marcado|registrad[oa]|entrar em contato|verificando a disponibilidade|Estou verificando)\b/i.test(lastAssistantMsg);
+
+    // Proposta de agendamento: bot OFERECEU agendar mas ainda NÃO confirmou
     const assistantJustProposedSchedule = agendamento?.isEnabled &&
+      !assistantJustConfirmedSchedule &&
       /\b(marcar|agendar|reunião|reuniao|conversa|horário|horario|disponibilidade|data e hora)\b/i.test(lastAssistantMsg);
 
     // Detecta se a última mensagem do assistente fez uma pergunta de confirmação (sim/não)
@@ -54,11 +63,18 @@ export class IntentRouter {
       "- ESCALATE exige: pergunta ESPECÍFICA sobre dado interno (ex: estoque exato, preço interno, prazo específico não documentado). Confidence mínimo: 0.85.",
       "- ESCALATE NUNCA deve ser usado para: confirmações (sim/não/exatamente), intenções de compra/contratação, pedidos genéricos de serviço, ou continuações de conversa.",
       "- Expressões de intenção ('quero contratar', 'quero fazer', 'sim quero') → SEMPRE GENERAL ou FAQ, NUNCA ESCALATE.",
+      "- Preferências de horário/data ('pode ser amanhã', 'às 15h', 'quinta-feira') → SEMPRE GENERAL, NUNCA ESCALATE.",
       "- SCHEDULE só se o módulo estiver disponível e o cliente demonstrar intenção clara de agendar.",
       ...(assistantJustProposedSchedule
         ? [
             "- IMPORTANTE: a última mensagem do assistente propôs um agendamento/reunião. Se o cliente CONFIRMOU (ex: 'sim', 'claro', 'com certeza', 'quero', 'pode ser', 'vamos', 'ok', 'combinado') → classifique como SCHEDULE.",
             "- Qualquer confirmação positiva após proposta de agendamento é SCHEDULE, não ESCALATE."
+          ]
+        : []),
+      ...(assistantJustConfirmedSchedule
+        ? [
+            "- IMPORTANTE: o assistente já CONFIRMOU/CONCLUIU um agendamento na última mensagem. O agendamento JÁ FOI FEITO. Qualquer resposta do cliente agora (ex: 'correto', 'ok', 'obrigado', 'perfeito', 'sim') é SEMPRE GENERAL, nunca SCHEDULE.",
+            "- NÃO re-classifique como SCHEDULE — o agendamento já está concluído."
           ]
         : []),
       ...(assistantJustAskedConfirmation
@@ -93,6 +109,7 @@ export class IntentRouter {
               intent === "ESCALATE" && !ctx.allowAdminEscalation ? "GENERAL"
               : intent === "ESCALATE" && confidence < 0.85 ? "GENERAL"
               : intent === "SCHEDULE" && !agendamento?.isEnabled ? "GENERAL"
+              : intent === "SCHEDULE" && assistantJustConfirmedSchedule ? "GENERAL"
               : intent;
 
             return { intent: resolvedIntent, confidence };

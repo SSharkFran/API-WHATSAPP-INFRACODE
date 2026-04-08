@@ -76,6 +76,25 @@ export const normalizeWhatsAppPhoneNumber = (
 };
 
 /**
+ * Verifica se uma string de dígitos parece ser um número de telefone real (E.164 brasileiro)
+ * versus um identificador LID do WhatsApp (que é um ID interno, não um número de telefone).
+ * Números BR válidos: 12-13 dígitos (55 + DDD 2 dígitos + 8-9 dígitos).
+ * LIDs tipicamente: >13 dígitos ou não começam com código de país válido.
+ */
+export const looksLikeRealPhone = (digits: string | null | undefined): boolean => {
+  if (!digits) return false;
+  const clean = digits.replace(/\D/g, "");
+  if (clean.length < 10 || clean.length > 13) return false;
+  // Números BR: começam com 55 + DDD (11-99)
+  if (clean.startsWith("55") && clean.length >= 12 && clean.length <= 13) return true;
+  // Números sem código de país (DDD + número): 10-11 dígitos
+  if (clean.length >= 10 && clean.length <= 11) return true;
+  // Números internacionais genéricos: 10-13 dígitos com código de país (1-9xx)
+  if (clean.length >= 10 && clean.length <= 13 && /^[1-9]/.test(clean)) return true;
+  return false;
+};
+
+/**
  * Converte um número para JID WhatsApp.
  */
 export const toJid = (value: string): string => `${normalizePhoneNumber(value)}@s.whatsapp.net`;

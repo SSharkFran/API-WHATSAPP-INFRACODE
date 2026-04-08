@@ -18,7 +18,7 @@ import type { AppConfig } from "../../config.js";
 import type { PlatformPrisma, TenantPrismaRegistry } from "../../lib/database.js";
 import { ApiError } from "../../lib/errors.js";
 import type { MetricsService } from "../../lib/metrics.js";
-import { normalizePhoneNumber, normalizeWhatsAppPhoneNumber, toJid } from "../../lib/phone.js";
+import { normalizePhoneNumber, normalizeWhatsAppPhoneNumber, toJid, looksLikeRealPhone } from "../../lib/phone.js";
 import { ConversationAgent } from "../chatbot/agents/conversation.agent.js";
 import { FiadoAgent } from "../chatbot/agents/fiado.agent.js";
 import { MemoryAgent } from "../chatbot/agents/memory.agent.js";
@@ -4391,7 +4391,10 @@ if (event.status === "CONNECTED") {
           .replace(/\{\{nome\}\}/g, payload.clientName)
           .replace(/\{\{assunto\}\}/g, payload.assunto)
           .replace(/\{\{data_preferencia\}\}/g, payload.dataPreferencia)
-          .replace(/\{\{telefone\}\}/g, params.remoteNumber ?? "não informado");
+          .replace(/\{\{telefone\}\}/g,
+            looksLikeRealPhone(params.resolvedContactNumber) ? params.resolvedContactNumber
+            : looksLikeRealPhone(params.remoteNumber) ? params.remoteNumber
+            : "não disponível (contato via WhatsApp)");
 
         // Envia mensagem ao admin via sendAutomatedTextMessage para que o echo
         // seja registrado em rememberAutomatedOutboundEcho e não seja reprocessado
@@ -4454,7 +4457,13 @@ if (event.status === "CONNECTED") {
         const leadsPhone = params.chatbotConfig?.leadsPhoneNumber;
         const leadsEnabled = params.chatbotConfig?.leadsEnabled ?? true;
         if (leadsPhone && leadsEnabled) {
-          const normalizedLeadNumber = normalizePhoneNumber(params.resolvedContactNumber) ?? params.resolvedContactNumber;
+          // Usa o número real do cliente; para @lid JIDs, usa conversationPhoneNumber como fallback
+          const bestClientPhone =
+            (looksLikeRealPhone(params.resolvedContactNumber) ? params.resolvedContactNumber : null) ??
+            (looksLikeRealPhone(params.conversationPhoneNumber) ? params.conversationPhoneNumber : null) ??
+            (looksLikeRealPhone(params.remoteNumber) ? params.remoteNumber : null) ??
+            params.resolvedContactNumber;
+          const normalizedLeadNumber = normalizePhoneNumber(bestClientPhone) ?? bestClientPhone;
           const normalizedResumeLead = resumoLeadInScheduling
             .replace(/\{\{\s*numero\s*\}\}/gi, normalizedLeadNumber)
             .replace(/^(Contato:\s*).*$/im, `$1${normalizedLeadNumber}`);
@@ -4711,9 +4720,14 @@ if (event.status === "CONNECTED") {
         if (!jaEnviado) {
           await this.redis.set(dedupeKey, "1", "EX", 86400);
 
-          // Normaliza o resumo antes de enviar: substitui {{numero}} pelo telefone real
-          // (o modelo às vezes gera {{numero}} como placeholder em vez do número diretamente)
-          const normalizedLeadNumber = normalizePhoneNumber(params.resolvedContactNumber) ?? params.resolvedContactNumber;
+          // Normaliza o resumo antes de enviar: substitui {{numero}} pelo telefone real.
+          // Para @lid JIDs, resolvedContactNumber pode ser dígitos do LID — usa fallbacks.
+          const bestClientPhone =
+            (looksLikeRealPhone(params.resolvedContactNumber) ? params.resolvedContactNumber : null) ??
+            (looksLikeRealPhone(params.conversationPhoneNumber) ? params.conversationPhoneNumber : null) ??
+            (looksLikeRealPhone(params.remoteNumber) ? params.remoteNumber : null) ??
+            params.resolvedContactNumber;
+          const normalizedLeadNumber = normalizePhoneNumber(bestClientPhone) ?? bestClientPhone;
           const normalizedResumeLead = resumoLead
             .replace(/\{\{\s*numero\s*\}\}/gi, normalizedLeadNumber)
             .replace(/^(Contato:\s*).*$/im, `$1${normalizedLeadNumber}`);

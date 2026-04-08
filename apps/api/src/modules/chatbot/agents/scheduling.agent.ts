@@ -43,6 +43,7 @@ export class SchedulingAgent {
       "- BREVIDADE: máximo 2-3 frases por mensagem. Use '|||' para separar mensagens.",
       "- NUNCA invente horários disponíveis ou confirme data/horário sem verificação real.",
       "- NUNCA discuta detalhes técnicos, orçamentos ou escopo antes da reunião.",
+      "- OBRIGATÓRIO: ao calcular datas relativas ('essa quinta', 'amanhã', 'semana que vem'), use SEMPRE a data atual informada acima. O ANO é o da data atual — NUNCA use 2024 ou outro ano diferente.",
       ...(agendamentoConfig?.clientPendingMessage
         ? [`- Mensagem padrão para o cliente após o marcador: "${agendamentoConfig.clientPendingMessage}"`]
         : [])

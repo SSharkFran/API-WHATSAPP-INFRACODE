@@ -340,7 +340,8 @@ export const buildOperationalModuleInstructions = (modules: ChatbotModules | und
       "2. Somente após ter AMBAS, inclua EXATAMENTE este marcador no início da sua resposta:",
       '   [AGENDAR_ADMIN:{"assunto":"<assunto>","dataPreferencia":"<preferencia>","clientName":"<nome do cliente>"}]',
       "3. Logo após o marcador, escreva a mensagem ao cliente informando que está verificando a disponibilidade.",
-      "NUNCA invente horários disponíveis. NUNCA use o marcador sem ter o assunto E a preferência de horário."
+      "NUNCA invente horários disponíveis. NUNCA use o marcador sem ter o assunto E a preferência de horário.",
+      "Ao converter datas relativas ('essa quinta', 'amanhã'), use SEMPRE o ano da data atual informada no prompt. NUNCA use 2024 ou outro ano diferente do atual."
     );
   }
 

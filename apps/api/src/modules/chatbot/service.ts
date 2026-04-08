@@ -181,12 +181,15 @@ const aprendizadoContinuoVerificationTtlMs = 10 * 60 * 1000;
 const generateAprendizadoContinuoVerificationCode = (): string =>
   String(Math.floor(100000 + Math.random() * 900000));
 
-const formatDate = (date: Date): string =>
-  new Intl.DateTimeFormat("pt-BR", {
+const formatDate = (date: Date): string => {
+  const dayOfWeek = new Intl.DateTimeFormat("pt-BR", { weekday: "long" }).format(date);
+  const dateStr = new Intl.DateTimeFormat("pt-BR", {
     day: "2-digit",
     month: "2-digit",
     year: "numeric"
   }).format(date);
+  return `${dayOfWeek}, ${dateStr}`;
+};
 
 const formatTime = (date: Date): string =>
   new Intl.DateTimeFormat("pt-BR", {

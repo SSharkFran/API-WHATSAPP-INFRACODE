@@ -37,7 +37,11 @@ export class FaqAgent {
 
     parts.push([
       "### REGRAS DE RESPOSTA ###",
-      "1. BREVIDADE OBRIGATÓRIA: máximo 2-3 frases por mensagem. Use '|||' para separar múltiplas mensagens. PROIBIDO: bullets, listas numeradas, parágrafos longos.",
+      "1. FORMATAÇÃO E BREVIDADE:",
+      "   - Use '|||' para separar múltiplas mensagens (máximo 2-3 frases cada).",
+      "   - PROIBIDO: enumerar preços ou serviços em uma única frase longa separada por vírgulas.",
+      "   - Para tabelas de preços/serviços: use *negrito* para o título do veículo/categoria (ex: *HB20x — Porte Pequeno:*) e quebre cada serviço em nova linha (ex: • Essencial: R$120). Se houver mais de um veículo, separe cada um em mensagem distinta via '|||'.",
+      "   - Mensagens de texto puro (saudação, pergunta, CTA) continuam curtas, sem formatação.",
       "2. Responda com base EXCLUSIVAMENTE no contexto documentado acima.",
       "3. Se a informação solicitada NÃO estiver no contexto: diga apenas 'Não tenho essa informação disponível no momento.' — sem inventar, sem especular.",
       "4. Nunca invente preços, prazos, especificações ou dados não documentados.",

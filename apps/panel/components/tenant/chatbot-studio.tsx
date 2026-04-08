@@ -43,6 +43,7 @@ interface ChatbotFormState {
   leadVehicleTable: string;
   leadPriceTable: string;
   leadSurchargeTable: string;
+  servicesAndPrices: string;
   rules: ChatbotRule[];
   ai: {
     isEnabled: boolean;
@@ -110,6 +111,7 @@ const buildDefaultFormState = (): ChatbotFormState => ({
   leadVehicleTable: "",
   leadPriceTable: "",
   leadSurchargeTable: "",
+  servicesAndPrices: "",
   rules: [],
   ai: {
     isEnabled: false,
@@ -187,6 +189,7 @@ const mapConfigToFormState = (config: ChatbotConfig): ChatbotFormState => ({
   leadVehicleTable: formatJsonTextarea(config.leadVehicleTable),
   leadPriceTable: formatJsonTextarea(config.leadPriceTable),
   leadSurchargeTable: formatJsonTextarea(config.leadSurchargeTable),
+  servicesAndPrices: config.servicesAndPrices ?? "",
   rules: config.rules,
   ai: {
     isEnabled: config.ai.isEnabled,
@@ -437,6 +440,7 @@ export const ChatbotStudio = ({ initialInstances }: ChatbotStudioProps) => {
           leadVehicleTable,
           leadPriceTable,
           leadSurchargeTable,
+          servicesAndPrices: formState.servicesAndPrices.trim() || null,
           rules: formState.rules.map((rule) => ({
             ...rule,
             matchValue: rule.triggerType === "FIRST_CONTACT" ? null : rule.matchValue?.trim() || null,
@@ -1121,6 +1125,24 @@ export const ChatbotStudio = ({ initialInstances }: ChatbotStudioProps) => {
                 <p className="text-xs leading-relaxed text-[var(--text-tertiary)]">
                   Este prompt e especifico desta instancia. Se a InfraCode definir um prompt global no super-admin,
                   ele sera aplicado junto e tera prioridade sobre regras conflitantes.
+                </p>
+              </div>
+
+              {/* Services and Prices */}
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-medium text-[var(--text-secondary)]">Tabela de servicos e precos</label>
+                  <span className="text-[10px] font-mono text-[var(--text-tertiary)]">{formState.servicesAndPrices.length} chars</span>
+                </div>
+                <textarea
+                  className={[textareaClass, "min-h-[180px]"].join(" ")}
+                  value={formState.servicesAndPrices}
+                  placeholder={"PORTE PEQUENO (HB20, Onix, Polo):\n  Essencial: R$120 | Completa: R$150\n\nPORTE MEDIO (Corolla, Civic):\n  Essencial: R$160 | Completa: R$180"}
+                  onChange={(e) => setFormState((c) => ({ ...c, servicesAndPrices: e.target.value }))}
+                />
+                <p className="text-xs leading-relaxed text-[var(--text-tertiary)]">
+                  Separe aqui os servicos oferecidos e a tabela de precos. A IA usa este bloco como documento de
+                  consulta independente, evitando confusao com as regras de atendimento do prompt acima.
                 </p>
               </div>
 

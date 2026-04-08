@@ -172,6 +172,7 @@ export const registerChatbotRoutes = async (app: FastifyInstance): Promise<void>
         leadVehicleTable: currentConfig.leadVehicleTable ?? {},
         leadPriceTable: currentConfig.leadPriceTable ?? {},
         leadSurchargeTable: currentConfig.leadSurchargeTable ?? {},
+        servicesAndPrices: currentConfig.servicesAndPrices ?? null,
         aiFallbackProvider: currentConfig.aiFallbackProvider ?? null,
         aiFallbackApiKey: currentConfig.aiFallbackApiKey ?? null,
         aiFallbackModel: currentConfig.aiFallbackModel ?? null,

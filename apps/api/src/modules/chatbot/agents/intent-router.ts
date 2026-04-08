@@ -39,8 +39,13 @@ export class IntentRouter {
     // Detecta se o assistente CONFIRMOU/CONCLUIU um agendamento — ou seja, já disse algo como
     // "tudo certo", "agendado", "confirmado", "marcado", "especialista vai entrar em contato".
     // Nesse caso, qualquer confirmação do cliente ("correto", "ok", "sim") é GENERAL, não SCHEDULE.
+    // NOTA: "verificando a disponibilidade" só conta como confirmação se faz parte de um fluxo de
+    // AGENDAMENTO real (contém "agend" ou "reuni" no contexto), não de aprendizado contínuo.
+    const hasSchedulingConfirmKeyword = /\b(tudo certo|agendado|confirmado|marcado|registrad[oa]|entrar em contato)\b/i.test(lastAssistantMsg);
+    const hasVerificandoInSchedulingContext = /\b(verificando a disponibilidade|Estou verificando)\b/i.test(lastAssistantMsg) &&
+      /\b(agend|reuni[aã]o|horário|horario|marca[r])\b/i.test(lastAssistantMsg);
     const assistantJustConfirmedSchedule = agendamento?.isEnabled &&
-      /\b(tudo certo|agendado|confirmado|marcado|registrad[oa]|entrar em contato|verificando a disponibilidade|Estou verificando)\b/i.test(lastAssistantMsg);
+      (hasSchedulingConfirmKeyword || hasVerificandoInSchedulingContext);
 
     // Proposta de agendamento: bot OFERECEU agendar mas ainda NÃO confirmou
     const assistantJustProposedSchedule = agendamento?.isEnabled &&
@@ -87,6 +92,22 @@ export class IntentRouter {
       'Retorne APENAS JSON válido: {"intent":"GENERAL","confidence":0.9}'
     ].join("\n");
 
+    // --- Hard override: mensagem do cliente com data/hora após proposta de agendamento → SCHEDULE ---
+    // O modelo 8B muitas vezes erra ao classificar respostas de data/hora como ESCALATE.
+    // Se o assistente acabou de propor agendamento E o cliente respondeu com padrão de data/hora
+    // ou confirmação positiva, forçamos SCHEDULE sem chamar o LLM.
+    const lastUserMsg = [...ctx.history].reverse().find((m) => m.role === "user")?.content ?? "";
+
+    if (agendamento?.isEnabled && assistantJustProposedSchedule && !assistantJustConfirmedSchedule) {
+      const dateTimePattern = /\b(amanh[aã]|hoje|segunda|terça|ter[cç]a|quarta|quinta|sexta|s[aá]bado|domingo|semana que vem|pr[oó]xim[ao]|(\d{1,2})\s*(h|hrs?|horas?|:\d{2})|(\d{1,2})[\/\-](\d{1,2})|[àa]s\s+\d{1,2}|tarde|manh[aã]|noite|meio[- ]?dia)\b/i;
+      const confirmationPattern = /^(sim|claro|pode ser|com certeza|quero|vamos|ok|combinado|bora|beleza|top|perfeito|certo|isso|pode|fechado|tá bom|ta bom|tudo bem|vamos lá|vamos la)\b/i;
+
+      if (dateTimePattern.test(lastUserMsg) || confirmationPattern.test(lastUserMsg.trim())) {
+        console.log(`[intent-router] hard override → SCHEDULE (assistantJustProposedSchedule + date/time or confirmation in user msg)`);
+        return { intent: "SCHEDULE", confidence: 0.95 };
+      }
+    }
+
     // Usa apenas as últimas 6 mensagens para classificação (garante contexto de proposta anterior)
     const classifyMessages = ctx.history.slice(-6);
 
@@ -111,6 +132,13 @@ export class IntentRouter {
               : intent === "SCHEDULE" && !agendamento?.isEnabled ? "GENERAL"
               : intent === "SCHEDULE" && assistantJustConfirmedSchedule ? "GENERAL"
               : intent;
+
+            // Post-LLM override: se o LLM classificou como ESCALATE mas o assistente propôs
+            // agendamento, reclassifica para SCHEDULE (evita que preferências de data escapem)
+            if (resolvedIntent === "ESCALATE" && assistantJustProposedSchedule && agendamento?.isEnabled) {
+              console.log(`[intent-router] post-LLM override: ESCALATE → SCHEDULE (assistantJustProposedSchedule=true)`);
+              return { intent: "SCHEDULE", confidence: Math.max(confidence, 0.85) };
+            }
 
             return { intent: resolvedIntent, confidence };
           }

@@ -565,6 +565,7 @@ export class ChatbotService {
       leadVehicleTable?: Record<string, unknown>;
       leadPriceTable?: Record<string, unknown>;
       leadSurchargeTable?: Record<string, unknown>;
+      servicesAndPrices?: string | null;
       aiFallbackProvider?: string | null;
       aiFallbackApiKey?: string | null;
       aiFallbackModel?: string | null;
@@ -600,6 +601,10 @@ export class ChatbotService {
       input.leadSurchargeTable !== undefined
         ? input.leadSurchargeTable
         : ((existingConfig?.leadSurchargeTable as Record<string, unknown> | null | undefined) ?? {});
+    const servicesAndPrices =
+      input.servicesAndPrices !== undefined
+        ? (input.servicesAndPrices?.trim() || null)
+        : (existingConfig?.servicesAndPrices as string | null | undefined) ?? null;
     const preparedModules = this.prepareModulesForPersist(
       input.modules,
       existingConfig?.modules,
@@ -635,6 +640,7 @@ export class ChatbotService {
         leadVehicleTable: leadVehicleTable as unknown as Prisma.InputJsonValue,
         leadPriceTable: leadPriceTable as unknown as Prisma.InputJsonValue,
         leadSurchargeTable: leadSurchargeTable as unknown as Prisma.InputJsonValue,
+        servicesAndPrices,
         aiFallbackProvider: input.aiFallbackProvider ?? null,
         aiFallbackApiKey: input.aiFallbackApiKey?.trim() || null,
         aiFallbackModel: input.aiFallbackModel?.trim() || null,
@@ -660,6 +666,7 @@ export class ChatbotService {
         leadVehicleTable: leadVehicleTable as unknown as Prisma.InputJsonValue,
         leadPriceTable: leadPriceTable as unknown as Prisma.InputJsonValue,
         leadSurchargeTable: leadSurchargeTable as unknown as Prisma.InputJsonValue,
+        servicesAndPrices,
         aiFallbackProvider: input.aiFallbackProvider ?? null,
         aiFallbackApiKey: input.aiFallbackApiKey?.trim() || null,
         aiFallbackModel: input.aiFallbackModel?.trim() || null,
@@ -1153,6 +1160,7 @@ public async simulate(
             leadVehicleTable: {},
             leadPriceTable: {},
             leadSurchargeTable: {},
+            servicesAndPrices: null,
             rules: [],
             ai: this.buildRuntimeAiConfig(defaultAiSettings, managedAiProvider),
             aiFallbackProvider: null,
@@ -1342,6 +1350,7 @@ private async evaluateConfig(
       leadVehicleTable?: unknown;
       leadPriceTable?: unknown;
       leadSurchargeTable?: unknown;
+      servicesAndPrices?: string | null;
       rules: unknown;
       aiSettings?: unknown;
       createdAt: Date;
@@ -1391,6 +1400,7 @@ private async evaluateConfig(
         record.leadSurchargeTable && typeof record.leadSurchargeTable === "object"
           ? (record.leadSurchargeTable as Record<string, unknown>)
           : {},
+      servicesAndPrices: record.servicesAndPrices ?? null,
       rules: chatbotRulesArraySchema.parse(record.rules),
       ai: this.buildRuntimeAiConfig(aiSettings, managedAiProvider),
       aiFallbackProvider: normalizeFallbackProvider(record.aiFallbackProvider),
@@ -2175,7 +2185,8 @@ private async evaluateConfig(
         config.ai.systemPrompt,
         config.ai.maxContextMessages,
         allowAdminEscalation,
-        config.modules
+        config.modules,
+        config.servicesAndPrices
       );
 
       if (
@@ -2428,7 +2439,8 @@ private async evaluateConfig(
     systemPrompt: string,
     maxContextMessages: number,
     allowAdminEscalation: boolean,
-    modules?: ChatbotModules
+    modules?: ChatbotModules,
+    servicesAndPrices?: string | null
   ): Promise<{
     system: string;
     messages: Array<{ role: "user" | "assistant"; content: string }>;
@@ -2503,6 +2515,19 @@ private async evaluateConfig(
         systemParts.push(knowledgeBlock);
         groundingSources.push(knowledgeBlock);
       }
+    }
+
+    // Bloco de serviços e preços — documento de referência separado do prompt comportamental.
+    // A IA deve consultar este bloco como tabela de consulta, não como instrução de atendimento.
+    let servicesAndPricesBlock = "";
+    if (servicesAndPrices?.trim()) {
+      servicesAndPricesBlock = [
+        "### TABELA DE SERVICOS E PRECOS (DOCUMENTO DE REFERENCIA) ###",
+        "ATENCAO: Use EXATAMENTE os valores abaixo. Ao identificar a categoria do cliente, consulte a linha correspondente e use o preco EXATO — nao misture categorias.",
+        servicesAndPrices.trim()
+      ].join("\n");
+      systemParts.push(servicesAndPricesBlock);
+      groundingSources.push(servicesAndPricesBlock);
     }
 
     const memoriaModule = getMemoriaPersonalizadaModuleConfig(modules);
@@ -2614,6 +2639,7 @@ private async evaluateConfig(
       memoryMd: memoryMdBlock,
       clientContext: clientContextBlock,
       knowledge: knowledgeBlockContent,
+      servicesAndPrices: servicesAndPricesBlock,
       persistentMemory: persistentMemoryBlockContent,
       phoneNumber: normalizedPhoneNumber,
       currentDateLine: `Data atual: ${formatDate(new Date())} ${formatTime(new Date())}.`

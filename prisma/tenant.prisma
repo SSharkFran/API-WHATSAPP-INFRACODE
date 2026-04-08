@@ -184,6 +184,7 @@ model ChatbotConfig {
   leadVehicleTable Json     @default("{}")
   leadPriceTable   Json     @default("{}")
   leadSurchargeTable Json   @default("{}")
+  servicesAndPrices String?
   modules          Json     @default("{}")
   knowledgeSynthesis String?
   knowledgeSynthesisUpdatedAt DateTime?

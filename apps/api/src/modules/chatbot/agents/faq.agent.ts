@@ -28,6 +28,9 @@ export class FaqAgent {
     if (blocks.knowledge) {
       parts.push(blocks.knowledge);
     }
+    if (blocks.servicesAndPrices) {
+      parts.push(blocks.servicesAndPrices);
+    }
     if (blocks.persistentMemory) {
       parts.push(blocks.persistentMemory);
     }

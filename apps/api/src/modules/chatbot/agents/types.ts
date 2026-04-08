@@ -35,6 +35,7 @@ export interface ContextBlocks {
   memoryMd: string;
   clientContext: string;
   knowledge: string;
+  servicesAndPrices: string;
   persistentMemory: string;
   phoneNumber: string;
   currentDateLine: string;

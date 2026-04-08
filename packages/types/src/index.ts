@@ -305,6 +305,7 @@ export interface ChatbotConfig {
   leadVehicleTable?: Record<string, unknown>;
   leadPriceTable?: Record<string, unknown>;
   leadSurchargeTable?: Record<string, unknown>;
+  servicesAndPrices?: string | null;
   modules?: ChatbotModules;
   rules: ChatbotRule[];
   ai: ChatbotAiConfig;

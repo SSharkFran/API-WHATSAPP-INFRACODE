@@ -106,7 +106,7 @@ const buildDefaultFormState = (): ChatbotFormState => ({
   audioEnabled: false,
   visionEnabled: false,
   visionPrompt: "",
-  responseDelaySeconds: 3,
+  responseDelaySeconds: 10,
   leadAutoExtract: false,
   leadVehicleTable: "",
   leadPriceTable: "",
@@ -184,7 +184,7 @@ const mapConfigToFormState = (config: ChatbotConfig): ChatbotFormState => ({
   audioEnabled: config.audioEnabled ?? false,
   visionEnabled: config.visionEnabled ?? false,
   visionPrompt: config.visionPrompt ?? "",
-  responseDelaySeconds: Math.round((config.responseDelayMs ?? 3_000) / 1000),
+  responseDelaySeconds: Math.round((config.responseDelayMs ?? 10_000) / 1000),
   leadAutoExtract: config.leadAutoExtract ?? false,
   leadVehicleTable: formatJsonTextarea(config.leadVehicleTable),
   leadPriceTable: formatJsonTextarea(config.leadPriceTable),
@@ -1730,7 +1730,7 @@ export const ChatbotStudio = ({ initialInstances }: ChatbotStudioProps) => {
                 { label: "Fiado", value: lastSavedConfig?.fiadoEnabled ? "Ativo" : "Inativo" },
                 { label: "Áudio", value: lastSavedConfig?.audioEnabled ? "Ativo" : "Inativo" },
                 { label: "Visão (imagem)", value: lastSavedConfig?.visionEnabled ? "Ativo" : "Inativo" },
-                { label: "Delay IA", value: `${Math.round((lastSavedConfig?.responseDelayMs ?? 3_000) / 1000)}s` },
+                { label: "Delay IA", value: `${Math.round((lastSavedConfig?.responseDelayMs ?? 10_000) / 1000)}s` },
                 {
                   label: "Módulos ativos",
                   value: String(

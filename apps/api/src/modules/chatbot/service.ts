@@ -587,7 +587,7 @@ export class ChatbotService {
     const audioEnabled = input.audioEnabled ?? existingConfig?.audioEnabled ?? false;
     const visionEnabled = input.visionEnabled ?? existingConfig?.visionEnabled ?? false;
     const visionPrompt = input.visionPrompt?.trim() ?? existingConfig?.visionPrompt ?? null;
-    const responseDelayMs = Math.min(60_000, Math.max(0, input.responseDelayMs ?? existingConfig?.responseDelayMs ?? 3_000));
+    const responseDelayMs = Math.min(60_000, Math.max(0, input.responseDelayMs ?? existingConfig?.responseDelayMs ?? 10_000));
     const leadAutoExtract = input.leadAutoExtract ?? existingConfig?.leadAutoExtract ?? false;
     const leadVehicleTable =
       input.leadVehicleTable !== undefined
@@ -1155,7 +1155,7 @@ public async simulate(
             audioEnabled: false,
             visionEnabled: false,
             visionPrompt: null,
-            responseDelayMs: 3_000,
+            responseDelayMs: 10_000,
             leadAutoExtract: false,
             leadVehicleTable: {},
             leadPriceTable: {},
@@ -1386,7 +1386,7 @@ private async evaluateConfig(
       audioEnabled: record.audioEnabled ?? false,
       visionEnabled: record.visionEnabled ?? false,
       visionPrompt: record.visionPrompt ?? null,
-      responseDelayMs: record.responseDelayMs ?? 3_000,
+      responseDelayMs: record.responseDelayMs ?? 10_000,
       leadAutoExtract: record.leadAutoExtract ?? false,
       leadVehicleTable:
         record.leadVehicleTable && typeof record.leadVehicleTable === "object"

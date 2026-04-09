@@ -167,7 +167,7 @@ export const registerChatbotRoutes = async (app: FastifyInstance): Promise<void>
         audioEnabled: currentConfig.audioEnabled ?? false,
         visionEnabled: currentConfig.visionEnabled ?? false,
         visionPrompt: currentConfig.visionPrompt ?? null,
-        responseDelayMs: currentConfig.responseDelayMs ?? 3_000,
+        responseDelayMs: currentConfig.responseDelayMs ?? 10_000,
         leadAutoExtract: currentConfig.leadAutoExtract ?? false,
         leadVehicleTable: currentConfig.leadVehicleTable ?? {},
         leadPriceTable: currentConfig.leadPriceTable ?? {},

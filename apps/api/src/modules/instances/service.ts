@@ -220,7 +220,7 @@ const splitBotResponse = (text: string): string[] => {
   return [text];
 };
 const leadExtractionAwaitingTimeoutMs = 120_000;
-const defaultChatbotResponseDelayMs = 3_000;
+const defaultChatbotResponseDelayMs = 10_000;
 const adminEscalationTimeoutMs = 30 * 60 * 1000;
 const formatCurrencyValue = (value: number): string =>
   new Intl.NumberFormat("pt-BR", {

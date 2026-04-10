@@ -87,7 +87,10 @@ export class MessageService {
     payload: SendMessagePayload,
     additionalDelayMs = 0
   ): Promise<MessageRecord> {
-    assertValidPhoneNumber(payload.to);
+    // Se targetJid é fornecido (ex: contato @lid), o 'to' é apenas referência — não valida
+    if (!payload.targetJid) {
+      assertValidPhoneNumber(payload.to);
+    }
     await this.planEnforcementService.assertCanSendMessage(tenantId);
 
     const prisma = await this.tenantPrismaRegistry.getClient(tenantId);

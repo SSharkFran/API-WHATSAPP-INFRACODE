@@ -14,8 +14,9 @@ import { requestClientApi } from "../../lib/client-api";
 interface CrmContact {
   conversationId: string;
   contactId: string;
+  jid: string;            // JID original armazenado (pode ser @lid)
   phoneNumber: string;
-  displayName: string;
+  displayName: string | null;
   isBlacklisted: boolean;
   conversationStatus: "OPEN" | "CLOSED";
   humanTakeover: boolean;
@@ -62,6 +63,8 @@ interface ConversationDetail {
 
 /** Garante que o número enviado tem só dígitos, sem JID e com DDI 55 para números BR. */
 const toPhone = (raw: string) => raw.replace(/@[^@]*$/, "").replace(/\D/g, "");
+
+const isLidJid = (jid: string) => jid.endsWith("@lid");
 
 const normalizePhoneForSend = (raw: string): string => {
   const digits = toPhone(raw);
@@ -142,6 +145,9 @@ function Toast({ msg, kind, onClose }: { msg: string; kind: "ok" | "err"; onClos
 // ─── Contact Card ─────────────────────────────────────────────────────────────
 
 function ContactCard({ c, selected, onClick }: { c: CrmContact; selected: boolean; onClick: () => void }) {
+  const lid = isLidJid(c.jid);
+  const name = c.displayName || (lid ? "Contato WhatsApp" : formatPhone(c.phoneNumber)) || "(sem nome)";
+  const sub  = lid ? "ID WhatsApp" : formatPhone(c.phoneNumber);
   return (
     <button onClick={onClick} className={[
       "w-full text-left px-4 py-3 border-b border-[var(--border-subtle)] transition-colors cursor-pointer",
@@ -149,8 +155,8 @@ function ContactCard({ c, selected, onClick }: { c: CrmContact; selected: boolea
     ].join(" ")}>
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
-          <p className="text-sm font-medium text-[var(--text-primary)] truncate">{c.displayName}</p>
-          <p className="text-xs text-[var(--text-tertiary)] truncate">{formatPhone(c.phoneNumber)}</p>
+          <p className="text-sm font-medium text-[var(--text-primary)] truncate">{name}</p>
+          <p className="text-xs text-[var(--text-tertiary)] truncate">{sub}</p>
         </div>
         <div className="flex-shrink-0 flex flex-col items-end gap-1">
           <span className="text-[10px] text-[var(--text-tertiary)] whitespace-nowrap">{formatTime(c.lastMessageAt)}</span>
@@ -390,7 +396,11 @@ export function CrmScreen({ initialInstances }: { initialInstances: InstanceSumm
     try {
       await requestClientApi(`/instances/${instanceId}/messages/send`, {
         method: "POST",
-        body: { type: "text", to: normalizePhoneForSend(selected.phoneNumber), text }
+        body: {
+          type: "text",
+          to: normalizePhoneForSend(selected.phoneNumber),
+          ...(selected.jid ? { targetJid: selected.jid } : {})
+        }
       });
       setInput("");
       await loadMessages(selected.contactId, instanceId, true);
@@ -414,6 +424,7 @@ export function CrmScreen({ initialInstances }: { initialInstances: InstanceSumm
         body: {
           type,
           to: normalizePhoneForSend(selected.phoneNumber),
+          ...(selected.jid ? { targetJid: selected.jid } : {}),
           media: { mimeType: file.type, fileName: file.name, base64 }
         }
       });
@@ -627,7 +638,8 @@ export function CrmScreen({ initialInstances }: { initialInstances: InstanceSumm
               {/* Sub-header: phone, interest, schedule, tags */}
               <div className="mt-1.5 flex flex-wrap items-center gap-3">
                 <span className="flex items-center gap-1 text-[11px] text-[var(--text-tertiary)]">
-                  <Phone className="h-3 w-3" />{formatPhone(selected.phoneNumber)}
+                  <Phone className="h-3 w-3" />
+                  {isLidJid(selected.jid) ? "ID WhatsApp" : formatPhone(selected.phoneNumber)}
                 </span>
                 {detail?.serviceInterest && (
                   <span className="flex items-center gap-1 text-[11px] text-[var(--text-tertiary)]">

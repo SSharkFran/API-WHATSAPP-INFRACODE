@@ -84,21 +84,25 @@ export const registerCrmRoutes = async (app: FastifyInstance): Promise<void> => 
       )
     );
 
-    const contacts = deduped.map((c, i) => ({
-      conversationId:    c.id,
-      contactId:         c.contact.id,
-      phoneNumber:       cleanPhone(c.contact.phoneNumber),
-      displayName:       c.contact.displayName ?? memories[i]?.name ?? cleanPhone(c.contact.phoneNumber),
-      isBlacklisted:     c.contact.isBlacklisted,
-      conversationStatus: c.status,
-      humanTakeover:     c.humanTakeover,
-      lastMessageAt:     c.lastMessageAt?.toISOString() ?? null,
-      tags:              c.tags,
-      leadStatus:        memories[i]?.status ?? null,
-      serviceInterest:   memories[i]?.serviceInterest ?? null,
-      scheduledAt:       memories[i]?.scheduledAt?.toISOString() ?? null,
-      notes:             memories[i]?.notes ?? null
-    }));
+    const contacts = deduped.map((c, i) => {
+      const cleaned = cleanPhone(c.contact.phoneNumber);
+      return {
+        conversationId:    c.id,
+        contactId:         c.contact.id,
+        jid:               c.contact.phoneNumber ?? "",     // JID original (pode ser @lid)
+        phoneNumber:       cleaned,
+        displayName:       (c.contact.displayName ?? memories[i]?.name ?? cleaned) || null,
+        isBlacklisted:     c.contact.isBlacklisted,
+        conversationStatus: c.status,
+        humanTakeover:     c.humanTakeover,
+        lastMessageAt:     c.lastMessageAt?.toISOString() ?? null,
+        tags:              c.tags,
+        leadStatus:        memories[i]?.status ?? null,
+        serviceInterest:   memories[i]?.serviceInterest ?? null,
+        scheduledAt:       memories[i]?.scheduledAt?.toISOString() ?? null,
+        notes:             memories[i]?.notes ?? null
+      };
+    });
 
     return { contacts, page, pageSize };
   });

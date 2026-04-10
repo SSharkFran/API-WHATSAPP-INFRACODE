@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 const baseMessageSchema = z.object({
-  to: z.string().min(10).max(20),
+  to: z.string().min(1).max(25),
   targetJid: z.string().min(3).optional(),
   replyToMessageId: z.string().optional(),
   mentionNumbers: z.array(z.string()).optional(),

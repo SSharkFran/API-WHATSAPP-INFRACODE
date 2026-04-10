@@ -14,7 +14,7 @@ import { requestClientApi } from "../../lib/client-api";
 interface CrmContact {
   conversationId: string;
   contactId: string;
-  jid: string;            // JID original armazenado (pode ser @lid)
+  jid?: string;           // JID original armazenado (pode ser @lid) — opcional por compatibilidade
   phoneNumber: string;
   displayName: string | null;
   isBlacklisted: boolean;
@@ -64,7 +64,7 @@ interface ConversationDetail {
 /** Garante que o número enviado tem só dígitos, sem JID e com DDI 55 para números BR. */
 const toPhone = (raw: string) => raw.replace(/@[^@]*$/, "").replace(/\D/g, "");
 
-const isLidJid = (jid: string) => jid.endsWith("@lid");
+const isLidJid = (jid?: string) => jid?.endsWith("@lid") ?? false;
 
 const normalizePhoneForSend = (raw: string): string => {
   const digits = toPhone(raw);
@@ -399,7 +399,8 @@ export function CrmScreen({ initialInstances }: { initialInstances: InstanceSumm
         body: {
           type: "text",
           to: normalizePhoneForSend(selected.phoneNumber),
-          ...(selected.jid ? { targetJid: selected.jid } : {})
+          ...(selected.jid ? { targetJid: selected.jid } : {}),
+          text
         }
       });
       setInput("");
@@ -639,7 +640,7 @@ export function CrmScreen({ initialInstances }: { initialInstances: InstanceSumm
               <div className="mt-1.5 flex flex-wrap items-center gap-3">
                 <span className="flex items-center gap-1 text-[11px] text-[var(--text-tertiary)]">
                   <Phone className="h-3 w-3" />
-                  {isLidJid(selected.jid) ? "ID WhatsApp" : formatPhone(selected.phoneNumber)}
+                  {isLidJid(selected.jid ?? "") ? "ID WhatsApp" : formatPhone(selected.phoneNumber)}
                 </span>
                 {detail?.serviceInterest && (
                   <span className="flex items-center gap-1 text-[11px] text-[var(--text-tertiary)]">

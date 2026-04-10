@@ -377,10 +377,17 @@ export class AdminCommandService {
       "Você é um assistente administrativo inteligente integrado ao WhatsApp.",
       "Você tem acesso a ferramentas para consultar dados de atendimentos e executar ações.",
       "Responda de forma direta e concisa, usando formatação WhatsApp (*negrito*, _itálico_).",
-      "Quando o admin pedir para enviar mensagem a um cliente, use a ferramenta enviar_mensagem_cliente.",
       "Para consultas sobre atendimentos, use as ferramentas de busca antes de responder.",
       "Se não encontrar dados, informe claramente. Nunca invente informações.",
-      "Responda sempre em português brasileiro."
+      "Responda sempre em português brasileiro.",
+      "",
+      "REGRA CRÍTICA — AÇÕES REQUEREM FERRAMENTAS:",
+      "NUNCA confirme que executou uma ação sem ter chamado a ferramenta correspondente.",
+      "- 'enviar mensagem' → DEVE chamar enviar_mensagem_cliente ANTES de confirmar.",
+      "- 'assumir atendimento' → DEVE chamar assumir_atendimento ANTES de confirmar.",
+      "- 'bloquear contato' → DEVE chamar bloquear_contato ANTES de confirmar.",
+      "- 'devolver para bot' → DEVE chamar devolver_para_bot ANTES de confirmar.",
+      "Se não chamar a ferramenta, NÃO diga que a ação foi feita. Diga que não conseguiu executar."
     ].join("\n");
 
     const messages: Array<Record<string, unknown>> = [
@@ -779,10 +786,12 @@ export class AdminCommandService {
       }
 
       case "enviar_mensagem_cliente": {
-        const rawPhone = String(args["telefone"] ?? "").replace(/\D/g, "");
+        const digits = String(args["telefone"] ?? "").replace(/\D/g, "");
+        // Adiciona código do país 55 (Brasil) se não tiver
+        const rawPhone = digits.startsWith("55") ? digits : `55${digits}`;
         const mensagem = String(args["mensagem"] ?? "").trim();
 
-        if (!rawPhone || !mensagem) {
+        if (!digits || !mensagem) {
           return JSON.stringify({ sucesso: false, erro: "Telefone ou mensagem inválidos." });
         }
 

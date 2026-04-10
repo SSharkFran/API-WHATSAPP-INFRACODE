@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Search, Send, Phone, Tag, Calendar, RefreshCw, UserCheck, Bot, User,
   Pencil, Check, X, Paperclip, FileText, Image as ImageIcon, ChevronDown,
-  MessageSquare, Clock, AlertCircle
+  MessageSquare, Clock, AlertCircle, CheckCheck, WifiOff
 } from "lucide-react";
 import type { InstanceSummary } from "@infracode/types";
 import { requestClientApi } from "../../lib/client-api";
@@ -60,8 +60,17 @@ interface ConversationDetail {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-/** Garante que o número enviado tem só dígitos e sem JID. */
+/** Garante que o número enviado tem só dígitos, sem JID e com DDI 55 para números BR. */
 const toPhone = (raw: string) => raw.replace(/@[^@]*$/, "").replace(/\D/g, "");
+
+const normalizePhoneForSend = (raw: string): string => {
+  const digits = toPhone(raw);
+  // Números BR sem código de país: 10 ou 11 dígitos → adiciona 55
+  if (!digits.startsWith("55") && (digits.length === 10 || digits.length === 11)) {
+    return `55${digits}`;
+  }
+  return digits;
+};
 
 /** Formata número BR para exibição: "556892549342" → "(68) 9254-9342" */
 const formatPhone = (raw: string): string => {
@@ -160,8 +169,27 @@ function ContactCard({ c, selected, onClick }: { c: CrmContact; selected: boolea
 
 // ─── Message Bubble ───────────────────────────────────────────────────────────
 
+function MsgStatusIcon({ status }: { status: string }) {
+  switch (status) {
+    case "QUEUED":
+    case "SCHEDULED":
+      return <Clock className="h-2.5 w-2.5 opacity-50" />;
+    case "SENT":
+      return <Check className="h-2.5 w-2.5 opacity-70" />;
+    case "DELIVERED":
+      return <CheckCheck className="h-2.5 w-2.5 opacity-70" />;
+    case "READ":
+      return <CheckCheck className="h-2.5 w-2.5 text-sky-300" />;
+    case "FAILED":
+      return <AlertCircle className="h-2.5 w-2.5 text-red-300" />;
+    default:
+      return null;
+  }
+}
+
 function Bubble({ msg }: { msg: CrmMessage }) {
   const out = msg.direction === "OUTBOUND";
+  const failed = out && msg.status === "FAILED";
   const hasText = !!msg.text;
   const isMedia = ["image","video","audio","document"].includes(msg.type) && !hasText;
 
@@ -172,7 +200,11 @@ function Bubble({ msg }: { msg: CrmMessage }) {
       </div>
       <div className={[
         "max-w-[72%] px-3 py-2 rounded-2xl text-sm break-words",
-        out ? "bg-[var(--accent-blue)] text-white rounded-br-sm" : "bg-[var(--bg-secondary)] text-[var(--text-primary)] rounded-bl-sm border border-[var(--border-subtle)]"
+        out
+          ? failed
+            ? "bg-red-700/80 text-white rounded-br-sm"
+            : "bg-[var(--accent-blue)] text-white rounded-br-sm"
+          : "bg-[var(--bg-secondary)] text-[var(--text-primary)] rounded-bl-sm border border-[var(--border-subtle)]"
       ].join(" ")}>
         {isMedia && msg.type === "image" && msg.mediaUrl && (
           // eslint-disable-next-line @next/next/no-img-element
@@ -186,7 +218,11 @@ function Bubble({ msg }: { msg: CrmMessage }) {
         )}
         {hasText && <p className="whitespace-pre-wrap">{msg.text}</p>}
         {!hasText && !isMedia && <p className="italic opacity-60 text-xs">[{msg.type}]</p>}
-        <p className={`text-[10px] mt-0.5 ${out ? "text-white/60 text-right" : "text-[var(--text-tertiary)]"}`}>{formatTime(msg.createdAt)}</p>
+        {failed && <p className="text-[10px] text-red-200 mt-0.5">Falha no envio</p>}
+        <p className={`text-[10px] mt-0.5 flex items-center gap-0.5 ${out ? "text-white/60 justify-end" : "text-[var(--text-tertiary)]"}`}>
+          {formatTime(msg.createdAt)}
+          {out && <MsgStatusIcon status={msg.status} />}
+        </p>
       </div>
     </div>
   );
@@ -245,6 +281,9 @@ function TagManager({ tags, onSave }: { tags: string[]; onSave: (tags: string[])
 
 export function CrmScreen({ initialInstances }: { initialInstances: InstanceSummary[] }) {
   const [instanceId, setInstanceId] = useState(initialInstances[0]?.id ?? "");
+  const [instanceStatuses, setInstanceStatuses] = useState<Record<string, string>>(
+    () => Object.fromEntries(initialInstances.map(i => [i.id, i.status]))
+  );
 
   // contacts
   const [contacts, setContacts]           = useState<CrmContact[]>([]);
@@ -281,6 +320,19 @@ export function CrmScreen({ initialInstances }: { initialInstances: InstanceSumm
   const fileRef        = useRef<HTMLInputElement>(null);
 
   const showToast = (msg: string, kind: "ok" | "err" = "ok") => setToast({ msg, kind });
+
+  // ── Poll instance statuses every 30s ─────────────────────────────────────
+  useEffect(() => {
+    const refresh = async () => {
+      try {
+        const list = await requestClientApi<InstanceSummary[]>("/instances");
+        setInstanceStatuses(Object.fromEntries(list.map(i => [i.id, i.status])));
+      } catch { /* ignore */ }
+    };
+    void refresh();
+    const t = setInterval(() => void refresh(), 30_000);
+    return () => clearInterval(t);
+  }, []);
 
   // ── Load contacts ──────────────────────────────────────────────────────────
 
@@ -338,7 +390,7 @@ export function CrmScreen({ initialInstances }: { initialInstances: InstanceSumm
     try {
       await requestClientApi(`/instances/${instanceId}/messages/send`, {
         method: "POST",
-        body: { type: "text", to: toPhone(selected.phoneNumber), text }
+        body: { type: "text", to: normalizePhoneForSend(selected.phoneNumber), text }
       });
       setInput("");
       await loadMessages(selected.contactId, instanceId, true);
@@ -361,7 +413,7 @@ export function CrmScreen({ initialInstances }: { initialInstances: InstanceSumm
         method: "POST",
         body: {
           type,
-          to: toPhone(selected.phoneNumber),
+          to: normalizePhoneForSend(selected.phoneNumber),
           media: { mimeType: file.type, fileName: file.name, base64 }
         }
       });
@@ -456,15 +508,33 @@ export function CrmScreen({ initialInstances }: { initialInstances: InstanceSumm
     <div className="flex flex-col gap-3 h-[calc(100vh-88px)]">
       {toast && <Toast msg={toast.msg} kind={toast.kind} onClose={() => setToast(null)} />}
 
-      {/* Instance selector */}
-      {initialInstances.length > 1 && (
-        <div className="flex-shrink-0">
+      {/* Instance selector + status */}
+      <div className="flex-shrink-0 flex items-center gap-3">
+        {initialInstances.length > 1 && (
           <select value={instanceId} onChange={e => { setInstanceId(e.target.value); setSelected(null); }}
             className="h-9 rounded-[var(--radius-md)] border border-[var(--border-default)] bg-[var(--bg-tertiary)] px-3 text-sm text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent-blue)]">
             {initialInstances.map(inst => <option key={inst.id} value={inst.id}>{inst.name}</option>)}
           </select>
-        </div>
-      )}
+        )}
+        {instanceId && (() => {
+          const st = instanceStatuses[instanceId];
+          if (st === "CONNECTED") return (
+            <span className="flex items-center gap-1 text-xs text-green-400">
+              <span className="h-2 w-2 rounded-full bg-green-400 animate-pulse" />Conectado
+            </span>
+          );
+          if (st === "QR_PENDING" || st === "INITIALIZING") return (
+            <span className="flex items-center gap-1 text-xs text-yellow-400">
+              <span className="h-2 w-2 rounded-full bg-yellow-400" />{st === "QR_PENDING" ? "Aguardando QR" : "Iniciando"}
+            </span>
+          );
+          return (
+            <span className="flex items-center gap-1 text-xs text-red-400">
+              <WifiOff className="h-3 w-3" />{st === "PAUSED" ? "Pausada" : st === "BANNED" ? "Banida" : "Desconectada"} — envios podem falhar
+            </span>
+          );
+        })()}
+      </div>
 
       <div className="flex-1 min-h-0 flex rounded-[var(--radius-lg)] border border-[var(--border-subtle)] overflow-hidden">
 

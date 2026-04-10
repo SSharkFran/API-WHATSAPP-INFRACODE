@@ -9,6 +9,7 @@ import {
   Bot,
   Key,
   Rocket,
+  Users,
   Menu,
   X
 } from "lucide-react";
@@ -20,6 +21,7 @@ const navItems = [
   { href: "/tenant",              label: "Dashboard",  icon: LayoutDashboard },
   { href: "/tenant/instances",   label: "Instâncias", icon: Server },
   { href: "/tenant/chatbot",     label: "Chatbot",    icon: Bot },
+  { href: "/tenant/crm",         label: "CRM",        icon: Users },
   { href: "/tenant/api-keys",    label: "API Keys",   icon: Key },
   { href: "/tenant/onboarding",  label: "Onboarding", icon: Rocket }
 ];

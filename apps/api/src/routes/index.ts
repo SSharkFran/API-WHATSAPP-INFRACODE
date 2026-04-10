@@ -9,6 +9,7 @@ import { registerInstanceRoutes } from "../modules/instances/routes.js";
 import { registerMessageRoutes } from "../modules/messages/routes.js";
 import { registerPrivacyRoutes } from "../modules/privacy/routes.js";
 import { registerTenantRoutes } from "../modules/tenant/routes.js";
+import { registerCrmRoutes } from "../modules/crm/routes.js";
 import { registerWebhookRoutes } from "../modules/webhooks/routes.js";
 
 /**
@@ -102,5 +103,6 @@ export const registerRoutes = async (app: FastifyInstance): Promise<void> => {
   await registerInstanceRoutes(app);
   await registerMessageRoutes(app);
   await registerPrivacyRoutes(app);
+  await registerCrmRoutes(app);
   await registerWebhookRoutes(app);
 };

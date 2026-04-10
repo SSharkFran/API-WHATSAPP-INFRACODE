@@ -1,13 +1,15 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Search, Send, Phone, Tag, Calendar, RefreshCw, UserCheck, Bot, User } from "lucide-react";
+import {
+  Search, Send, Phone, Tag, Calendar, RefreshCw, UserCheck, Bot, User,
+  Pencil, Check, X, Paperclip, FileText, Image as ImageIcon, ChevronDown,
+  MessageSquare, Clock, AlertCircle
+} from "lucide-react";
 import type { InstanceSummary } from "@infracode/types";
 import { requestClientApi } from "../../lib/client-api";
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
+// ─── Types ──────────────────────────────────────────────────────────────────
 
 interface CrmContact {
   conversationId: string;
@@ -30,6 +32,8 @@ interface CrmMessage {
   direction: "INBOUND" | "OUTBOUND";
   type: string;
   text: string;
+  mediaUrl?: string;
+  fileName?: string;
   status: string;
   createdAt: string;
 }
@@ -46,422 +50,597 @@ interface ContactDetail {
   isExistingClient: boolean;
 }
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
+interface ConversationDetail {
+  id: string;
+  status: "OPEN" | "CLOSED";
+  humanTakeover: boolean;
+  tags: string[];
+  lastMessageAt: string | null;
+}
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+/** Garante que o número enviado tem só dígitos e sem JID. */
+const toPhone = (raw: string) => raw.replace(/@[^@]*$/, "").replace(/\D/g, "");
+
+/** Formata número BR para exibição: "556892549342" → "(68) 9254-9342" */
+const formatPhone = (raw: string): string => {
+  const digits = toPhone(raw);
+  const local = digits.startsWith("55") ? digits.slice(2) : digits;
+  if (local.length === 11) return `(${local.slice(0,2)}) ${local.slice(2,7)}-${local.slice(7)}`;
+  if (local.length === 10) return `(${local.slice(0,2)}) ${local.slice(2,6)}-${local.slice(6)}`;
+  if (digits.length > 13) return digits; // LID / número estranho — exibe cru
+  return digits;
+};
 
 const formatTime = (iso: string | null): string => {
   if (!iso) return "";
   const d = new Date(iso);
   const now = new Date();
-  const isToday = d.toDateString() === now.toDateString();
-  if (isToday) return d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+  if (d.toDateString() === now.toDateString())
+    return d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
   const yesterday = new Date(now); yesterday.setDate(yesterday.getDate() - 1);
   if (d.toDateString() === yesterday.toDateString()) return "Ontem";
   return d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
 };
 
-const formatDateTime = (iso: string | null): string => {
-  if (!iso) return "";
-  return new Date(iso).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
-};
+const formatDateTime = (iso: string | null): string =>
+  iso ? new Date(iso).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "";
 
-const leadStatusLabel: Record<string, string> = {
-  lead_frio: "Lead Frio",
-  lead_quente: "Lead Quente",
-  cliente_ativo: "Cliente Ativo",
-  aguardando_retorno: "Aguardando",
-  closed: "Fechado",
-  client: "Cliente"
+const LEAD_LABEL: Record<string, string> = {
+  lead_frio: "Lead Frio", lead_quente: "Lead Quente", cliente_ativo: "Cliente",
+  aguardando_retorno: "Aguardando", closed: "Fechado", client: "Cliente"
 };
-
-const leadStatusColor: Record<string, string> = {
+const LEAD_COLOR: Record<string, string> = {
   lead_frio: "bg-blue-500/15 text-blue-400",
   lead_quente: "bg-orange-500/15 text-orange-400",
   cliente_ativo: "bg-green-500/15 text-green-400",
+  client: "bg-green-500/15 text-green-400",
   aguardando_retorno: "bg-yellow-500/15 text-yellow-400",
-  closed: "bg-[var(--bg-hover)] text-[var(--text-tertiary)]",
-  client: "bg-green-500/15 text-green-400"
+  closed: "bg-[var(--bg-hover)] text-[var(--text-tertiary)]"
 };
 
-// ---------------------------------------------------------------------------
-// Sub-components
-// ---------------------------------------------------------------------------
+const SUGGESTED_TAGS = ["follow_up", "vip", "urgente", "cliente_antigo", "sem_resposta", "proposta_enviada"];
 
-function ContactCard({
-  contact,
-  selected,
-  onClick
-}: {
-  contact: CrmContact;
-  selected: boolean;
-  onClick: () => void;
-}) {
-  const statusColor = contact.leadStatus ? (leadStatusColor[contact.leadStatus] ?? "bg-[var(--bg-hover)] text-[var(--text-tertiary)]") : "";
+const fileToBase64 = (file: File): Promise<string> =>
+  new Promise((res, rej) => {
+    const r = new FileReader();
+    r.onload = () => res((r.result as string).split(",")[1] ?? "");
+    r.onerror = rej;
+    r.readAsDataURL(file);
+  });
 
+const mediaMsgType = (mime: string): "image" | "video" | "audio" | "document" => {
+  if (mime.startsWith("image/")) return "image";
+  if (mime.startsWith("video/")) return "video";
+  if (mime.startsWith("audio/")) return "audio";
+  return "document";
+};
+
+// ─── Toast ───────────────────────────────────────────────────────────────────
+
+function Toast({ msg, kind, onClose }: { msg: string; kind: "ok" | "err"; onClose: () => void }) {
+  useEffect(() => { const t = setTimeout(onClose, 3500); return () => clearTimeout(t); }, [onClose]);
   return (
-    <button
-      onClick={onClick}
-      className={[
-        "w-full text-left px-4 py-3 border-b border-[var(--border-subtle)] transition-colors cursor-pointer",
-        selected
-          ? "bg-[var(--bg-active)] border-l-2 border-l-[var(--accent-blue)]"
-          : "hover:bg-[var(--bg-hover)]"
-      ].join(" ")}
-    >
+    <div className={`fixed bottom-6 right-6 z-50 flex items-center gap-2 px-4 py-2.5 rounded-[var(--radius-md)] shadow-lg text-sm font-medium animate-fade-in
+      ${kind === "ok" ? "bg-green-600 text-white" : "bg-red-600 text-white"}`}>
+      {kind === "ok" ? <Check className="h-4 w-4" /> : <AlertCircle className="h-4 w-4" />}
+      {msg}
+    </div>
+  );
+}
+
+// ─── Contact Card ─────────────────────────────────────────────────────────────
+
+function ContactCard({ c, selected, onClick }: { c: CrmContact; selected: boolean; onClick: () => void }) {
+  return (
+    <button onClick={onClick} className={[
+      "w-full text-left px-4 py-3 border-b border-[var(--border-subtle)] transition-colors cursor-pointer",
+      selected ? "bg-[var(--bg-active)] border-l-[3px] border-l-[var(--accent-blue)] pl-[13px]" : "hover:bg-[var(--bg-hover)]"
+    ].join(" ")}>
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
-          <p className="text-sm font-medium text-[var(--text-primary)] truncate">{contact.displayName}</p>
-          <p className="text-xs text-[var(--text-tertiary)] truncate">{contact.phoneNumber}</p>
+          <p className="text-sm font-medium text-[var(--text-primary)] truncate">{c.displayName}</p>
+          <p className="text-xs text-[var(--text-tertiary)] truncate">{formatPhone(c.phoneNumber)}</p>
         </div>
         <div className="flex-shrink-0 flex flex-col items-end gap-1">
-          <span className="text-[10px] text-[var(--text-tertiary)]">{formatTime(contact.lastMessageAt)}</span>
-          {contact.humanTakeover && (
-            <span className="text-[10px] bg-purple-500/15 text-purple-400 px-1.5 py-0.5 rounded-full">Humano</span>
-          )}
+          <span className="text-[10px] text-[var(--text-tertiary)] whitespace-nowrap">{formatTime(c.lastMessageAt)}</span>
+          {c.humanTakeover && <span className="text-[10px] bg-purple-500/15 text-purple-400 px-1.5 py-0.5 rounded-full">Humano</span>}
+          {c.conversationStatus === "CLOSED" && <span className="text-[10px] bg-[var(--bg-hover)] text-[var(--text-tertiary)] px-1.5 py-0.5 rounded-full">Fechado</span>}
         </div>
       </div>
-      <div className="mt-1 flex flex-wrap gap-1">
-        {contact.leadStatus && (
-          <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${statusColor}`}>
-            {leadStatusLabel[contact.leadStatus] ?? contact.leadStatus}
-          </span>
-        )}
-        {contact.serviceInterest && (
-          <span className="text-[10px] bg-[var(--bg-hover)] text-[var(--text-secondary)] px-1.5 py-0.5 rounded-full truncate max-w-[120px]">
-            {contact.serviceInterest}
-          </span>
-        )}
+      <div className="mt-1.5 flex flex-wrap gap-1">
+        {c.leadStatus && <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${LEAD_COLOR[c.leadStatus] ?? "bg-[var(--bg-hover)] text-[var(--text-tertiary)]"}`}>{LEAD_LABEL[c.leadStatus] ?? c.leadStatus}</span>}
+        {c.serviceInterest && <span className="text-[10px] bg-[var(--bg-hover)] text-[var(--text-secondary)] px-1.5 py-0.5 rounded-full truncate max-w-[130px]">{c.serviceInterest}</span>}
+        {c.tags.slice(0, 2).map(t => <span key={t} className="text-[10px] bg-[var(--bg-hover)] text-[var(--text-secondary)] px-1.5 py-0.5 rounded-full">{t}</span>)}
       </div>
     </button>
   );
 }
 
-function MessageBubble({ msg }: { msg: CrmMessage }) {
-  const isOut = msg.direction === "OUTBOUND";
-  if (!msg.text && msg.type !== "text") {
-    return (
-      <div className={`flex ${isOut ? "justify-end" : "justify-start"} mb-1`}>
-        <div className={`max-w-[75%] px-3 py-2 rounded-2xl text-xs italic text-[var(--text-tertiary)] bg-[var(--bg-hover)]`}>
-          [{msg.type}]
-        </div>
-      </div>
-    );
-  }
+// ─── Message Bubble ───────────────────────────────────────────────────────────
+
+function Bubble({ msg }: { msg: CrmMessage }) {
+  const out = msg.direction === "OUTBOUND";
+  const hasText = !!msg.text;
+  const isMedia = ["image","video","audio","document"].includes(msg.type) && !hasText;
+
   return (
-    <div className={`flex items-end gap-1.5 mb-1 ${isOut ? "flex-row-reverse" : "flex-row"}`}>
-      <div className={`h-5 w-5 rounded-full flex-shrink-0 flex items-center justify-center ${isOut ? "bg-[var(--accent-blue)]/20" : "bg-[var(--bg-hover)]"}`}>
-        {isOut
-          ? <Bot className="h-3 w-3 text-[var(--accent-blue)]" />
-          : <User className="h-3 w-3 text-[var(--text-tertiary)]" />}
+    <div className={`flex items-end gap-1.5 mb-2 ${out ? "flex-row-reverse" : "flex-row"}`}>
+      <div className={`h-5 w-5 rounded-full flex-shrink-0 flex items-center justify-center ${out ? "bg-[var(--accent-blue)]/20" : "bg-[var(--bg-hover)]"}`}>
+        {out ? <Bot className="h-3 w-3 text-[var(--accent-blue)]" /> : <User className="h-3 w-3 text-[var(--text-tertiary)]" />}
       </div>
-      <div
-        className={[
-          "max-w-[75%] px-3 py-2 rounded-2xl text-sm whitespace-pre-wrap break-words",
-          isOut
-            ? "bg-[var(--accent-blue)] text-white rounded-br-sm"
-            : "bg-[var(--bg-secondary)] text-[var(--text-primary)] rounded-bl-sm border border-[var(--border-subtle)]"
-        ].join(" ")}
-      >
-        <p>{msg.text}</p>
-        <p className={`text-[10px] mt-0.5 ${isOut ? "text-white/60 text-right" : "text-[var(--text-tertiary)]"}`}>
-          {formatTime(msg.createdAt)}
-        </p>
+      <div className={[
+        "max-w-[72%] px-3 py-2 rounded-2xl text-sm break-words",
+        out ? "bg-[var(--accent-blue)] text-white rounded-br-sm" : "bg-[var(--bg-secondary)] text-[var(--text-primary)] rounded-bl-sm border border-[var(--border-subtle)]"
+      ].join(" ")}>
+        {isMedia && msg.type === "image" && msg.mediaUrl && (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={msg.mediaUrl} alt="imagem" className="rounded-lg max-w-full mb-1 max-h-48 object-contain" />
+        )}
+        {isMedia && msg.type !== "image" && (
+          <div className="flex items-center gap-2">
+            {msg.type === "document" ? <FileText className="h-4 w-4 opacity-70" /> : <ImageIcon className="h-4 w-4 opacity-70" />}
+            <span className="text-xs opacity-80">{msg.fileName ?? msg.type}</span>
+          </div>
+        )}
+        {hasText && <p className="whitespace-pre-wrap">{msg.text}</p>}
+        {!hasText && !isMedia && <p className="italic opacity-60 text-xs">[{msg.type}]</p>}
+        <p className={`text-[10px] mt-0.5 ${out ? "text-white/60 text-right" : "text-[var(--text-tertiary)]"}`}>{formatTime(msg.createdAt)}</p>
       </div>
     </div>
   );
 }
 
-// ---------------------------------------------------------------------------
-// Main Component
-// ---------------------------------------------------------------------------
+// ─── Tag Manager ──────────────────────────────────────────────────────────────
+
+function TagManager({ tags, onSave }: { tags: string[]; onSave: (tags: string[]) => void }) {
+  const [open, setOpen] = useState(false);
+  const [custom, setCustom] = useState("");
+  const current = new Set(tags);
+
+  const toggle = (t: string) => {
+    const next = current.has(t) ? tags.filter(x => x !== t) : [...tags, t];
+    onSave(next);
+  };
+  const addCustom = () => {
+    const t = custom.trim().toLowerCase().replace(/\s+/g, "_");
+    if (t && !current.has(t)) { onSave([...tags, t]); }
+    setCustom(""); setOpen(false);
+  };
+
+  return (
+    <div className="relative">
+      <button onClick={() => setOpen(v => !v)}
+        className="flex items-center gap-1 text-[11px] text-[var(--text-tertiary)] hover:text-[var(--text-primary)] transition-colors cursor-pointer">
+        <Tag className="h-3 w-3" /> Tags <ChevronDown className={`h-3 w-3 transition-transform ${open ? "rotate-180" : ""}`} />
+      </button>
+      {open && (
+        <div className="absolute top-6 left-0 z-20 w-56 rounded-[var(--radius-md)] border border-[var(--border-default)] bg-[var(--bg-primary)] shadow-lg p-2">
+          <div className="flex flex-wrap gap-1 mb-2">
+            {SUGGESTED_TAGS.map(t => (
+              <button key={t} onClick={() => toggle(t)}
+                className={`text-[10px] px-2 py-0.5 rounded-full border cursor-pointer transition-colors
+                  ${current.has(t) ? "bg-[var(--accent-blue)] text-white border-[var(--accent-blue)]" : "border-[var(--border-default)] text-[var(--text-secondary)] hover:border-[var(--accent-blue)]"}`}>
+                {t}
+              </button>
+            ))}
+          </div>
+          <div className="flex gap-1">
+            <input value={custom} onChange={e => setCustom(e.target.value)}
+              onKeyDown={e => e.key === "Enter" && addCustom()}
+              placeholder="tag personalizada..."
+              className="flex-1 h-7 px-2 text-xs rounded-[var(--radius-md)] border border-[var(--border-default)] bg-[var(--bg-tertiary)] text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)] focus:outline-none focus:border-[var(--accent-blue)]" />
+            <button onClick={addCustom} className="h-7 w-7 flex items-center justify-center rounded-[var(--radius-md)] bg-[var(--accent-blue)] text-white cursor-pointer hover:opacity-90">
+              <Check className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Main Component ───────────────────────────────────────────────────────────
 
 export function CrmScreen({ initialInstances }: { initialInstances: InstanceSummary[] }) {
   const [instanceId, setInstanceId] = useState(initialInstances[0]?.id ?? "");
-  const [contacts, setContacts] = useState<CrmContact[]>([]);
+
+  // contacts
+  const [contacts, setContacts]           = useState<CrmContact[]>([]);
   const [loadingContacts, setLoadingContacts] = useState(false);
-  const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState<"all" | "OPEN" | "CLOSED">("all");
+  const [search, setSearch]               = useState("");
+  const [statusFilter, setStatusFilter]   = useState<"all" | "OPEN" | "CLOSED">("all");
 
-  const [selectedContact, setSelectedContact] = useState<CrmContact | null>(null);
-  const [contactDetail, setContactDetail] = useState<ContactDetail | null>(null);
-  const [messages, setMessages] = useState<CrmMessage[]>([]);
-  const [loadingMessages, setLoadingMessages] = useState(false);
+  // conversation
+  const [selected, setSelected]           = useState<CrmContact | null>(null);
+  const [detail, setDetail]               = useState<ContactDetail | null>(null);
+  const [conv, setConv]                   = useState<ConversationDetail | null>(null);
+  const [messages, setMessages]           = useState<CrmMessage[]>([]);
+  const [loadingMsgs, setLoadingMsgs]     = useState(false);
 
-  const [input, setInput] = useState("");
-  const [sending, setSending] = useState(false);
-  const [sendError, setSendError] = useState<string | null>(null);
+  // editing name
+  const [editingName, setEditingName]     = useState(false);
+  const [nameInput, setNameInput]         = useState("");
+
+  // editing notes
+  const [editingNotes, setEditingNotes]   = useState(false);
+  const [notesInput, setNotesInput]       = useState("");
+
+  // send
+  const [input, setInput]                 = useState("");
+  const [sending, setSending]             = useState(false);
+  const [uploadingFile, setUploadingFile] = useState(false);
+
+  // toast
+  const [toast, setToast]                 = useState<{ msg: string; kind: "ok" | "err" } | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const searchDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pollRef        = useRef<ReturnType<typeof setInterval> | null>(null);
+  const searchTimer    = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const fileRef        = useRef<HTMLInputElement>(null);
 
-  // ---------------------------------------------------------------------------
-  // Load contacts
-  // ---------------------------------------------------------------------------
+  const showToast = (msg: string, kind: "ok" | "err" = "ok") => setToast({ msg, kind });
 
-  const loadContacts = useCallback(async (q: string, status: string, iid: string) => {
+  // ── Load contacts ──────────────────────────────────────────────────────────
+
+  const loadContacts = useCallback(async (q: string, st: string, iid: string) => {
     if (!iid) return;
     setLoadingContacts(true);
     try {
-      const params = new URLSearchParams({ pageSize: "50", status });
-      if (q) params.set("search", q);
-      const res = await requestClientApi<{ contacts: CrmContact[] }>(
-        `/instances/${iid}/crm/contacts?${params.toString()}`
-      );
+      const p = new URLSearchParams({ pageSize: "50", status: st });
+      if (q) p.set("search", q);
+      const res = await requestClientApi<{ contacts: CrmContact[] }>(`/instances/${iid}/crm/contacts?${p}`);
       setContacts(res.contacts);
-    } catch {
-      // silently ignore
-    } finally {
-      setLoadingContacts(false);
-    }
+    } catch { /* silent */ } finally { setLoadingContacts(false); }
   }, []);
 
   useEffect(() => {
-    if (searchDebounce.current) clearTimeout(searchDebounce.current);
-    searchDebounce.current = setTimeout(() => {
-      void loadContacts(search, statusFilter, instanceId);
-    }, 300);
+    if (searchTimer.current) clearTimeout(searchTimer.current);
+    searchTimer.current = setTimeout(() => void loadContacts(search, statusFilter, instanceId), 300);
   }, [search, statusFilter, instanceId, loadContacts]);
 
-  // ---------------------------------------------------------------------------
-  // Load messages for selected contact
-  // ---------------------------------------------------------------------------
+  // ── Load messages ──────────────────────────────────────────────────────────
 
-  const loadMessages = useCallback(async (contactId: string, iid: string) => {
-    setLoadingMessages(true);
+  const loadMessages = useCallback(async (contactId: string, iid: string, silent = false) => {
+    if (!silent) setLoadingMsgs(true);
     try {
-      const res = await requestClientApi<{ contact: ContactDetail; messages: CrmMessage[] }>(
+      const res = await requestClientApi<{ contact: ContactDetail; conversation: ConversationDetail | null; messages: CrmMessage[] }>(
         `/instances/${iid}/crm/contacts/${contactId}/messages`
       );
-      setContactDetail(res.contact);
+      setDetail(res.contact);
+      setConv(res.conversation);
       setMessages(res.messages);
-    } catch {
-      // silently ignore
-    } finally {
-      setLoadingMessages(false);
-    }
+    } catch { /* silent */ } finally { if (!silent) setLoadingMsgs(false); }
   }, []);
 
   useEffect(() => {
-    if (!selectedContact) return;
-    void loadMessages(selectedContact.contactId, instanceId);
-  }, [selectedContact, instanceId, loadMessages]);
+    if (!selected) return;
+    void loadMessages(selected.contactId, instanceId);
+  }, [selected, instanceId, loadMessages]);
 
-  // Scroll to bottom when messages change
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+  useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages]);
 
-  // Polling: atualiza mensagens a cada 5s enquanto um contato está selecionado
+  // Poll every 5s
   useEffect(() => {
     if (pollRef.current) clearInterval(pollRef.current);
-    if (!selectedContact) return;
-    pollRef.current = setInterval(() => {
-      void loadMessages(selectedContact.contactId, instanceId);
-    }, 5000);
+    if (!selected) return;
+    pollRef.current = setInterval(() => void loadMessages(selected.contactId, instanceId, true), 5000);
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
-  }, [selectedContact, instanceId, loadMessages]);
+  }, [selected, instanceId, loadMessages]);
 
-  // ---------------------------------------------------------------------------
-  // Send message
-  // ---------------------------------------------------------------------------
+  // ── Send text ─────────────────────────────────────────────────────────────
 
   const handleSend = async () => {
     const text = input.trim();
-    if (!text || !selectedContact || sending) return;
+    if (!text || !selected || sending) return;
     setSending(true);
-    setSendError(null);
     try {
       await requestClientApi(`/instances/${instanceId}/messages/send`, {
         method: "POST",
-        body: { type: "text", to: selectedContact.phoneNumber, text }
+        body: { type: "text", to: toPhone(selected.phoneNumber), text }
       });
       setInput("");
-      // Recarrega mensagens após envio
-      await loadMessages(selectedContact.contactId, instanceId);
+      await loadMessages(selected.contactId, instanceId, true);
     } catch (e) {
-      setSendError(e instanceof Error ? e.message : "Falha ao enviar.");
-    } finally {
-      setSending(false);
-    }
+      showToast(e instanceof Error ? e.message : "Falha ao enviar.", "err");
+    } finally { setSending(false); }
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      void handleSend();
-    }
+  // ── Send file ──────────────────────────────────────────────────────────────
+
+  const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !selected) return;
+    e.target.value = "";
+    setUploadingFile(true);
+    try {
+      const base64 = await fileToBase64(file);
+      const type   = mediaMsgType(file.type);
+      await requestClientApi(`/instances/${instanceId}/messages/send`, {
+        method: "POST",
+        body: {
+          type,
+          to: toPhone(selected.phoneNumber),
+          media: { mimeType: file.type, fileName: file.name, base64 }
+        }
+      });
+      showToast("Arquivo enviado!");
+      await loadMessages(selected.contactId, instanceId, true);
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : "Falha ao enviar arquivo.", "err");
+    } finally { setUploadingFile(false); }
   };
 
-  // ---------------------------------------------------------------------------
-  // Render
-  // ---------------------------------------------------------------------------
+  // ── Rename contact ────────────────────────────────────────────────────────
+
+  const startRename = () => { setNameInput(detail?.displayName ?? ""); setEditingName(true); };
+  const saveName = async () => {
+    if (!selected || !detail) return;
+    const name = nameInput.trim();
+    if (!name) { setEditingName(false); return; }
+    try {
+      await requestClientApi(`/instances/${instanceId}/crm/contacts/${selected.contactId}`, {
+        method: "PATCH", body: { displayName: name }
+      });
+      setDetail(d => d ? { ...d, displayName: name } : d);
+      setContacts(cs => cs.map(c => c.contactId === selected.contactId ? { ...c, displayName: name } : c));
+      showToast("Nome atualizado!");
+    } catch { showToast("Falha ao salvar.", "err"); }
+    setEditingName(false);
+  };
+
+  // ── Save notes ────────────────────────────────────────────────────────────
+
+  const saveNotes = async () => {
+    if (!selected) return;
+    try {
+      await requestClientApi(`/instances/${instanceId}/crm/contacts/${selected.contactId}`, {
+        method: "PATCH", body: { notes: notesInput.trim() || null }
+      });
+      setDetail(d => d ? { ...d, notes: notesInput.trim() || null } : d);
+      showToast("Anotação salva!");
+    } catch { showToast("Falha ao salvar.", "err"); }
+    setEditingNotes(false);
+  };
+
+  // ── Save tags ──────────────────────────────────────────────────────────────
+
+  const saveTags = async (tags: string[]) => {
+    if (!conv) return;
+    try {
+      const updated = await requestClientApi<ConversationDetail>(
+        `/instances/${instanceId}/crm/conversations/${conv.id}`,
+        { method: "PATCH", body: { tags } }
+      );
+      setConv(updated);
+      setContacts(cs => cs.map(c => c.conversationId === conv.id ? { ...c, tags } : c));
+    } catch { showToast("Falha ao salvar tags.", "err"); }
+  };
+
+  // ── Toggle human takeover ─────────────────────────────────────────────────
+
+  const toggleHumanTakeover = async () => {
+    if (!conv) return;
+    const next = !conv.humanTakeover;
+    try {
+      const updated = await requestClientApi<ConversationDetail>(
+        `/instances/${instanceId}/crm/conversations/${conv.id}`,
+        { method: "PATCH", body: { humanTakeover: next } }
+      );
+      setConv(updated);
+      setContacts(cs => cs.map(c => c.conversationId === conv.id ? { ...c, humanTakeover: next } : c));
+      showToast(next ? "Bot pausado — você assume o atendimento." : "Bot reativado.");
+    } catch { showToast("Falha.", "err"); }
+  };
+
+  // ── Toggle conversation status ─────────────────────────────────────────────
+
+  const toggleStatus = async () => {
+    if (!conv) return;
+    const next = conv.status === "OPEN" ? "CLOSED" : "OPEN";
+    try {
+      const updated = await requestClientApi<ConversationDetail>(
+        `/instances/${instanceId}/crm/conversations/${conv.id}`,
+        { method: "PATCH", body: { status: next } }
+      );
+      setConv(updated);
+      setContacts(cs => cs.map(c => c.conversationId === conv.id ? { ...c, conversationStatus: next } : c));
+      showToast(next === "CLOSED" ? "Conversa encerrada." : "Conversa reaberta.");
+    } catch { showToast("Falha.", "err"); }
+  };
+
+  // ─────────────────────────────────────────────────────────────────────────
 
   return (
-    <div className="flex flex-col gap-4 h-[calc(100vh-88px)]">
+    <div className="flex flex-col gap-3 h-[calc(100vh-88px)]">
+      {toast && <Toast msg={toast.msg} kind={toast.kind} onClose={() => setToast(null)} />}
+
       {/* Instance selector */}
       {initialInstances.length > 1 && (
         <div className="flex-shrink-0">
-          <select
-            value={instanceId}
-            onChange={(e) => { setInstanceId(e.target.value); setSelectedContact(null); }}
-            className="h-9 rounded-[var(--radius-md)] border border-[var(--border-default)] bg-[var(--bg-tertiary)] px-3 text-sm text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent-blue)]"
-          >
-            {initialInstances.map((inst) => (
-              <option key={inst.id} value={inst.id}>{inst.name}</option>
-            ))}
+          <select value={instanceId} onChange={e => { setInstanceId(e.target.value); setSelected(null); }}
+            className="h-9 rounded-[var(--radius-md)] border border-[var(--border-default)] bg-[var(--bg-tertiary)] px-3 text-sm text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent-blue)]">
+            {initialInstances.map(inst => <option key={inst.id} value={inst.id}>{inst.name}</option>)}
           </select>
         </div>
       )}
 
-      {/* Main CRM layout */}
       <div className="flex-1 min-h-0 flex rounded-[var(--radius-lg)] border border-[var(--border-subtle)] overflow-hidden">
 
-        {/* ---- Left: contact list ---- */}
-        <div className="w-72 flex-shrink-0 flex flex-col border-r border-[var(--border-subtle)] bg-[var(--bg-secondary)]">
-          {/* Search */}
-          <div className="flex-shrink-0 p-3 border-b border-[var(--border-subtle)]">
+        {/* ── Left: contacts ─────────────────────────────────────────────── */}
+        <div className="w-[280px] flex-shrink-0 flex flex-col border-r border-[var(--border-subtle)] bg-[var(--bg-secondary)]">
+          <div className="flex-shrink-0 p-3 border-b border-[var(--border-subtle)] space-y-2">
             <div className="relative">
               <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-[var(--text-tertiary)]" />
-              <input
-                type="text"
-                placeholder="Buscar por nome ou número..."
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                className="w-full h-8 pl-8 pr-3 rounded-[var(--radius-md)] border border-[var(--border-default)] bg-[var(--bg-tertiary)] text-xs text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)] focus:outline-none focus:border-[var(--accent-blue)]"
-              />
+              <input type="text" placeholder="Buscar..." value={search} onChange={e => setSearch(e.target.value)}
+                className="w-full h-8 pl-8 pr-3 rounded-[var(--radius-md)] border border-[var(--border-default)] bg-[var(--bg-tertiary)] text-xs text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)] focus:outline-none focus:border-[var(--accent-blue)]" />
             </div>
-            {/* Status filter */}
-            <div className="flex gap-1 mt-2">
-              {(["all", "OPEN", "CLOSED"] as const).map((s) => (
-                <button
-                  key={s}
-                  onClick={() => setStatusFilter(s)}
-                  className={[
-                    "flex-1 text-[10px] py-1 rounded-[var(--radius-md)] font-medium transition-colors cursor-pointer",
-                    statusFilter === s
-                      ? "bg-[var(--accent-blue)] text-white"
-                      : "bg-[var(--bg-hover)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
-                  ].join(" ")}
-                >
+            <div className="flex gap-1">
+              {(["all","OPEN","CLOSED"] as const).map(s => (
+                <button key={s} onClick={() => setStatusFilter(s)}
+                  className={`flex-1 text-[10px] py-1 rounded-[var(--radius-md)] font-medium transition-colors cursor-pointer
+                    ${statusFilter === s ? "bg-[var(--accent-blue)] text-white" : "bg-[var(--bg-hover)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"}`}>
                   {s === "all" ? "Todos" : s === "OPEN" ? "Abertos" : "Fechados"}
                 </button>
               ))}
             </div>
           </div>
 
-          {/* Contacts */}
           <div className="flex-1 overflow-y-auto">
-            {loadingContacts && contacts.length === 0 ? (
-              <div className="p-4 text-center text-xs text-[var(--text-tertiary)]">Carregando...</div>
-            ) : contacts.length === 0 ? (
-              <div className="p-4 text-center text-xs text-[var(--text-tertiary)]">Nenhum contato encontrado.</div>
-            ) : (
-              contacts.map((c) => (
-                <ContactCard
-                  key={c.contactId}
-                  contact={c}
-                  selected={selectedContact?.contactId === c.contactId}
-                  onClick={() => setSelectedContact(c)}
-                />
-              ))
-            )}
+            {loadingContacts && contacts.length === 0
+              ? <p className="p-4 text-center text-xs text-[var(--text-tertiary)]">Carregando...</p>
+              : contacts.length === 0
+              ? <p className="p-4 text-center text-xs text-[var(--text-tertiary)]">Nenhum contato.</p>
+              : contacts.map(c => (
+                  <ContactCard key={c.contactId} c={c} selected={selected?.contactId === c.contactId}
+                    onClick={() => { setSelected(c); setEditingName(false); setEditingNotes(false); }} />
+                ))}
           </div>
         </div>
 
-        {/* ---- Right: conversation ---- */}
-        {!selectedContact ? (
-          <div className="flex-1 flex items-center justify-center text-[var(--text-tertiary)] text-sm">
-            Selecione um contato para ver a conversa
+        {/* ── Right: conversation ────────────────────────────────────────── */}
+        {!selected ? (
+          <div className="flex-1 flex flex-col items-center justify-center gap-3 text-[var(--text-tertiary)]">
+            <MessageSquare className="h-10 w-10 opacity-20" />
+            <p className="text-sm">Selecione um contato para abrir a conversa</p>
           </div>
         ) : (
           <div className="flex-1 flex flex-col min-w-0">
 
             {/* Header */}
-            <div className="flex-shrink-0 px-5 py-3 border-b border-[var(--border-subtle)] bg-[var(--bg-secondary)] flex items-center gap-4">
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                  <p className="text-sm font-semibold text-[var(--text-primary)] truncate">
-                    {contactDetail?.displayName ?? selectedContact.displayName}
-                  </p>
-                  {contactDetail?.isExistingClient && (
-                    <span className="text-[10px] bg-green-500/15 text-green-400 px-1.5 py-0.5 rounded-full flex-shrink-0">Cliente</span>
-                  )}
-                  {selectedContact.humanTakeover && (
-                    <span className="text-[10px] bg-purple-500/15 text-purple-400 px-1.5 py-0.5 rounded-full flex-shrink-0 flex items-center gap-1">
-                      <UserCheck className="h-2.5 w-2.5" /> Humano
-                    </span>
+            <div className="flex-shrink-0 px-4 py-2.5 border-b border-[var(--border-subtle)] bg-[var(--bg-secondary)]">
+              <div className="flex items-center justify-between gap-3">
+                {/* Name */}
+                <div className="flex items-center gap-2 min-w-0">
+                  {editingName ? (
+                    <div className="flex items-center gap-1">
+                      <input autoFocus value={nameInput} onChange={e => setNameInput(e.target.value)}
+                        onKeyDown={e => { if (e.key === "Enter") void saveName(); if (e.key === "Escape") setEditingName(false); }}
+                        className="h-7 px-2 text-sm rounded-[var(--radius-md)] border border-[var(--accent-blue)] bg-[var(--bg-tertiary)] text-[var(--text-primary)] focus:outline-none w-48" />
+                      <button onClick={() => void saveName()} className="h-7 w-7 flex items-center justify-center rounded-[var(--radius-md)] bg-[var(--accent-blue)] text-white cursor-pointer hover:opacity-90"><Check className="h-3.5 w-3.5" /></button>
+                      <button onClick={() => setEditingName(false)} className="h-7 w-7 flex items-center justify-center rounded-[var(--radius-md)] hover:bg-[var(--bg-hover)] text-[var(--text-tertiary)] cursor-pointer"><X className="h-3.5 w-3.5" /></button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <p className="text-sm font-semibold text-[var(--text-primary)] truncate">{detail?.displayName ?? selected.displayName}</p>
+                      <button onClick={startRename} className="text-[var(--text-tertiary)] hover:text-[var(--text-primary)] cursor-pointer flex-shrink-0"><Pencil className="h-3 w-3" /></button>
+                      {detail?.isExistingClient && <span className="text-[10px] bg-green-500/15 text-green-400 px-1.5 py-0.5 rounded-full flex-shrink-0">Cliente</span>}
+                    </div>
                   )}
                 </div>
-                <div className="flex items-center gap-3 mt-0.5 flex-wrap">
-                  <span className="flex items-center gap-1 text-[11px] text-[var(--text-tertiary)]">
-                    <Phone className="h-3 w-3" />
-                    {selectedContact.phoneNumber}
-                  </span>
-                  {contactDetail?.serviceInterest && (
-                    <span className="flex items-center gap-1 text-[11px] text-[var(--text-tertiary)]">
-                      <Tag className="h-3 w-3" />
-                      {contactDetail.serviceInterest}
-                    </span>
+
+                {/* Actions */}
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  {conv && (
+                    <>
+                      <button onClick={() => void toggleHumanTakeover()}
+                        className={`flex items-center gap-1 text-[10px] px-2 py-1 rounded-full cursor-pointer transition-colors
+                          ${conv.humanTakeover ? "bg-purple-500/20 text-purple-400 hover:bg-purple-500/30" : "bg-[var(--bg-hover)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"}`}>
+                        <UserCheck className="h-3 w-3" />
+                        {conv.humanTakeover ? "Pausar bot" : "Assumir"}
+                      </button>
+                      <button onClick={() => void toggleStatus()}
+                        className={`flex items-center gap-1 text-[10px] px-2 py-1 rounded-full cursor-pointer transition-colors
+                          ${conv.status === "OPEN" ? "bg-[var(--bg-hover)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]" : "bg-green-500/15 text-green-400 hover:bg-green-500/25"}`}>
+                        {conv.status === "OPEN" ? "Encerrar" : "Reabrir"}
+                      </button>
+                    </>
                   )}
-                  {contactDetail?.scheduledAt && (
-                    <span className="flex items-center gap-1 text-[11px] text-amber-400">
-                      <Calendar className="h-3 w-3" />
-                      {formatDateTime(contactDetail.scheduledAt)}
-                    </span>
-                  )}
+                  <button onClick={() => void loadMessages(selected.contactId, instanceId)}
+                    className="h-7 w-7 flex items-center justify-center rounded-[var(--radius-md)] text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] cursor-pointer">
+                    <RefreshCw className={`h-3.5 w-3.5 ${loadingMsgs ? "animate-spin" : ""}`} />
+                  </button>
                 </div>
               </div>
-              <button
-                onClick={() => void loadMessages(selectedContact.contactId, instanceId)}
-                className="h-7 w-7 flex items-center justify-center rounded-[var(--radius-md)] text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors cursor-pointer"
-                title="Atualizar"
-              >
-                <RefreshCw className={`h-3.5 w-3.5 ${loadingMessages ? "animate-spin" : ""}`} />
-              </button>
+
+              {/* Sub-header: phone, interest, schedule, tags */}
+              <div className="mt-1.5 flex flex-wrap items-center gap-3">
+                <span className="flex items-center gap-1 text-[11px] text-[var(--text-tertiary)]">
+                  <Phone className="h-3 w-3" />{formatPhone(selected.phoneNumber)}
+                </span>
+                {detail?.serviceInterest && (
+                  <span className="flex items-center gap-1 text-[11px] text-[var(--text-tertiary)]">
+                    <Tag className="h-3 w-3" />{detail.serviceInterest}
+                  </span>
+                )}
+                {detail?.scheduledAt && (
+                  <span className="flex items-center gap-1 text-[11px] text-amber-400">
+                    <Calendar className="h-3 w-3" />{formatDateTime(detail.scheduledAt)}
+                  </span>
+                )}
+                {detail?.leadStatus && (
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${LEAD_COLOR[detail.leadStatus] ?? ""}`}>
+                    {LEAD_LABEL[detail.leadStatus] ?? detail.leadStatus}
+                  </span>
+                )}
+                {/* Tag manager */}
+                {conv && <TagManager tags={conv.tags} onSave={tags => void saveTags(tags)} />}
+                {/* Current tags */}
+                {conv && conv.tags.map(t => (
+                  <span key={t} className="flex items-center gap-0.5 text-[10px] bg-[var(--bg-hover)] text-[var(--text-secondary)] px-1.5 py-0.5 rounded-full">
+                    {t}
+                    <button onClick={() => void saveTags(conv.tags.filter(x => x !== t))} className="cursor-pointer hover:text-red-400 ml-0.5"><X className="h-2.5 w-2.5" /></button>
+                  </span>
+                ))}
+              </div>
+
+              {/* Notes */}
+              <div className="mt-1.5">
+                {editingNotes ? (
+                  <div className="flex gap-1">
+                    <textarea rows={2} autoFocus value={notesInput} onChange={e => setNotesInput(e.target.value)}
+                      placeholder="Anotação sobre este contato..."
+                      className="flex-1 resize-none text-xs px-2 py-1 rounded-[var(--radius-md)] border border-[var(--accent-blue)] bg-[var(--bg-tertiary)] text-[var(--text-primary)] focus:outline-none" />
+                    <div className="flex flex-col gap-1">
+                      <button onClick={() => void saveNotes()} className="h-6 px-2 text-[10px] rounded-[var(--radius-md)] bg-[var(--accent-blue)] text-white cursor-pointer">Salvar</button>
+                      <button onClick={() => setEditingNotes(false)} className="h-6 px-2 text-[10px] rounded-[var(--radius-md)] bg-[var(--bg-hover)] text-[var(--text-secondary)] cursor-pointer">Cancelar</button>
+                    </div>
+                  </div>
+                ) : (
+                  <button onClick={() => { setNotesInput(detail?.notes ?? ""); setEditingNotes(true); }}
+                    className="text-[11px] text-[var(--text-tertiary)] hover:text-[var(--text-primary)] flex items-center gap-1 cursor-pointer">
+                    <Clock className="h-3 w-3" />
+                    {detail?.notes ? <span className="truncate max-w-[300px]">{detail.notes}</span> : "Adicionar anotação..."}
+                  </button>
+                )}
+              </div>
             </div>
 
             {/* Messages */}
-            <div className="flex-1 overflow-y-auto px-5 py-4 space-y-0.5">
-              {loadingMessages && messages.length === 0 ? (
-                <div className="text-center text-xs text-[var(--text-tertiary)] pt-8">Carregando mensagens...</div>
-              ) : messages.length === 0 ? (
-                <div className="text-center text-xs text-[var(--text-tertiary)] pt-8">Nenhuma mensagem encontrada.</div>
-              ) : (
-                messages.map((msg) => <MessageBubble key={msg.id} msg={msg} />)
-              )}
+            <div className="flex-1 overflow-y-auto px-4 py-3">
+              {loadingMsgs && messages.length === 0
+                ? <p className="text-center text-xs text-[var(--text-tertiary)] pt-10">Carregando mensagens...</p>
+                : messages.length === 0
+                ? <p className="text-center text-xs text-[var(--text-tertiary)] pt-10">Nenhuma mensagem encontrada.</p>
+                : messages.map(m => <Bubble key={m.id} msg={m} />)}
               <div ref={messagesEndRef} />
             </div>
 
-            {/* Send input */}
+            {/* Send area */}
             <div className="flex-shrink-0 p-3 border-t border-[var(--border-subtle)] bg-[var(--bg-secondary)]">
-              {sendError && (
-                <p className="text-xs text-red-400 mb-1.5">{sendError}</p>
-              )}
+              <input ref={fileRef} type="file" className="hidden"
+                accept="image/*,video/*,audio/*,application/pdf,.doc,.docx,.xls,.xlsx,.csv,.zip"
+                onChange={e => void handleFile(e)} />
               <div className="flex gap-2 items-end">
-                <textarea
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  onKeyDown={handleKeyDown}
-                  placeholder="Digite uma mensagem... (Enter para enviar, Shift+Enter para nova linha)"
+                <button onClick={() => fileRef.current?.click()} disabled={uploadingFile}
+                  title="Enviar arquivo ou imagem"
+                  className="h-[58px] w-9 flex-shrink-0 flex items-center justify-center rounded-[var(--radius-md)] text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors cursor-pointer">
+                  {uploadingFile ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Paperclip className="h-4 w-4" />}
+                </button>
+                <textarea value={input} onChange={e => setInput(e.target.value)}
+                  onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void handleSend(); } }}
+                  placeholder="Digite uma mensagem... (Enter envia · Shift+Enter = nova linha)"
                   rows={2}
-                  className="flex-1 resize-none rounded-[var(--radius-md)] border border-[var(--border-default)] bg-[var(--bg-tertiary)] px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)] focus:outline-none focus:border-[var(--accent-blue)]"
-                />
-                <button
-                  onClick={() => void handleSend()}
-                  disabled={!input.trim() || sending}
-                  className={[
-                    "h-[58px] w-10 flex-shrink-0 flex items-center justify-center rounded-[var(--radius-md)] transition-colors cursor-pointer",
-                    input.trim() && !sending
-                      ? "bg-[var(--accent-blue)] text-white hover:opacity-90"
-                      : "bg-[var(--bg-hover)] text-[var(--text-tertiary)] cursor-not-allowed"
-                  ].join(" ")}
-                >
-                  <Send className="h-4 w-4" />
+                  className="flex-1 resize-none rounded-[var(--radius-md)] border border-[var(--border-default)] bg-[var(--bg-tertiary)] px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)] focus:outline-none focus:border-[var(--accent-blue)]" />
+                <button onClick={() => void handleSend()} disabled={!input.trim() || sending}
+                  className={`h-[58px] w-10 flex-shrink-0 flex items-center justify-center rounded-[var(--radius-md)] transition-colors cursor-pointer
+                    ${input.trim() && !sending ? "bg-[var(--accent-blue)] text-white hover:opacity-90" : "bg-[var(--bg-hover)] text-[var(--text-tertiary)] cursor-not-allowed"}`}>
+                  {sending ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
                 </button>
               </div>
             </div>
+
           </div>
         )}
       </div>

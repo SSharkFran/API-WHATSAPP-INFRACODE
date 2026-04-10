@@ -282,6 +282,104 @@ const TOOLS = [
   {
     type: "function",
     function: {
+      name: "resumo_cliente",
+      description: "Retorna resumo completo de um cliente: dados, memória, interesse, agendamento E histórico de mensagens recentes. Use quando precisar de contexto completo para continuar ou retomar um atendimento.",
+      parameters: {
+        type: "object",
+        required: ["telefone"],
+        properties: {
+          telefone: {
+            type: "string",
+            description: "Número de telefone do cliente"
+          },
+          limite_mensagens: {
+            type: "number",
+            description: "Quantas mensagens recentes incluir (padrão: 15)"
+          }
+        }
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "enviar_para_grupo",
+      description: "Envia uma mensagem para o grupo de leads/admin configurado na instância.",
+      parameters: {
+        type: "object",
+        required: ["mensagem"],
+        properties: {
+          mensagem: {
+            type: "string",
+            description: "Texto a enviar para o grupo"
+          }
+        }
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "agendar_para_cliente",
+      description: "Cria ou atualiza o agendamento de um cliente. Use quando o admin quiser marcar uma data/hora para um serviço. Envie data_hora sempre em formato ISO (ex: '2026-04-15T10:00:00').",
+      parameters: {
+        type: "object",
+        required: ["telefone", "data_hora"],
+        properties: {
+          telefone: {
+            type: "string",
+            description: "Número de telefone do cliente"
+          },
+          data_hora: {
+            type: "string",
+            description: "Data e hora do agendamento em formato ISO (ex: '2026-04-15T10:00:00')"
+          },
+          servico: {
+            type: "string",
+            description: "Nome do serviço agendado (opcional)"
+          },
+          observacao: {
+            type: "string",
+            description: "Observação adicional sobre o agendamento (opcional)"
+          }
+        }
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "broadcast",
+      description: "Envia uma mensagem para múltiplos clientes de uma vez. Use para lembretes em massa. ATENÇÃO: confirme com o admin o critério e limite antes de disparar.",
+      parameters: {
+        type: "object",
+        required: ["mensagem", "criterio"],
+        properties: {
+          mensagem: {
+            type: "string",
+            description: "Texto da mensagem a enviar para cada cliente"
+          },
+          criterio: {
+            type: "string",
+            enum: ["agendamentos_amanha", "agendamentos_semana", "interesse_pendente", "lista"],
+            description: "Critério para selecionar clientes: 'agendamentos_amanha' (agendados para amanhã), 'agendamentos_semana' (próximos 7 dias), 'interesse_pendente' (demonstraram interesse mas não agendaram), 'lista' (usar campo telefones)"
+          },
+          telefones: {
+            type: "array",
+            items: { type: "string" },
+            description: "Lista de telefones — obrigatório quando criterio='lista'"
+          },
+          limite: {
+            type: "number",
+            description: "Máximo de clientes a atingir (padrão: 20, máx: 50)"
+          }
+        }
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
       name: "deletar_conhecimento",
       description: "Deleta uma ou mais entradas incorretas do knowledge base. Use quando o admin quiser remover respostas erradas que o bot aprendeu. Pode deletar por ID ou por trecho da pergunta.",
       parameters: {
@@ -317,7 +415,11 @@ type ToolName =
   | "desbloquear_contato"
   | "buscar_mensagens_cliente"
   | "listar_conhecimento"
-  | "deletar_conhecimento";
+  | "deletar_conhecimento"
+  | "resumo_cliente"
+  | "enviar_para_grupo"
+  | "agendar_para_cliente"
+  | "broadcast";
 
 interface AiCompletionResponse {
   choices?: Array<{
@@ -476,6 +578,42 @@ export class AdminCommandService {
           return `✅ Mensagem enviada${phone ? ` para *${phone}*` : ""}.${preview}`;
         }
         return `⚠️ Falha ao enviar mensagem: ${String(parsed["erro"] ?? "erro desconhecido")}`;
+      } catch { /* segue */ }
+    }
+
+    // Grupo
+    const groupResult = toolResults.find((t) => t.name === "enviar_para_grupo");
+    if (groupResult) {
+      try {
+        const parsed = JSON.parse(groupResult.result) as Record<string, unknown>;
+        if (parsed["sucesso"] === true) {
+          return `✅ Mensagem enviada para o grupo *${parsed["grupo"] ?? "leads"}*.`;
+        }
+        return `⚠️ ${String(parsed["erro"] ?? "Falha ao enviar para o grupo.")}`;
+      } catch { /* segue */ }
+    }
+
+    // Agendamento
+    const agendResult = toolResults.find((t) => t.name === "agendar_para_cliente");
+    if (agendResult) {
+      try {
+        const parsed = JSON.parse(agendResult.result) as Record<string, unknown>;
+        if (parsed["sucesso"] === true) {
+          return `✅ Agendamento salvo para *${parsed["telefone"]}* em *${parsed["agendado_para"]}*.`;
+        }
+        return `⚠️ ${String(parsed["erro"] ?? "Falha ao agendar.")}`;
+      } catch { /* segue */ }
+    }
+
+    // Broadcast
+    const broadcastResult = toolResults.find((t) => t.name === "broadcast");
+    if (broadcastResult) {
+      try {
+        const parsed = JSON.parse(broadcastResult.result) as Record<string, unknown>;
+        if (parsed["sucesso"] === true) {
+          return `✅ Broadcast concluído: *${parsed["enviados"]}* mensagens enviadas de *${parsed["total_selecionados"]}* clientes.${parsed["falhas"] ? `\n⚠️ ${parsed["falhas"]} falhas.` : ""}`;
+        }
+        return `⚠️ ${String(parsed["erro"] ?? "Falha no broadcast.")}`;
       } catch { /* segue */ }
     }
 
@@ -1074,6 +1212,211 @@ export class AdminCommandService {
         return JSON.stringify({
           deletado: matches.length,
           perguntas_removidas: matches.map((e) => e.question)
+        });
+      }
+
+      case "resumo_cliente": {
+        const rawPhone = String(args["telefone"] ?? "").replace(/\D/g, "");
+        const msgLimit = typeof args["limite_mensagens"] === "number" ? Math.min(args["limite_mensagens"], 30) : 15;
+        if (!rawPhone) return JSON.stringify({ erro: "Telefone inválido." });
+
+        const [contact, memory] = await Promise.all([
+          prisma.contact.findFirst({
+            where: { instanceId: ctx.instanceId, phoneNumber: { contains: rawPhone.slice(-8) } },
+            select: {
+              displayName: true, phoneNumber: true, notes: true, isBlacklisted: true,
+              conversations: {
+                orderBy: { lastMessageAt: "desc" }, take: 1,
+                select: { status: true, humanTakeover: true, tags: true, lastMessageAt: true }
+              }
+            }
+          }),
+          prisma.clientMemory.findFirst({
+            where: { phoneNumber: { contains: rawPhone.slice(-8) } },
+            select: { name: true, serviceInterest: true, status: true, scheduledAt: true, notes: true, isExistingClient: true, lastContactAt: true }
+          })
+        ]);
+
+        if (!contact && !memory) {
+          return JSON.stringify({ erro: `Cliente ${rawPhone} não encontrado.` });
+        }
+
+        const messages = contact
+          ? await prisma.message.findMany({
+              where: { instanceId: ctx.instanceId, remoteJid: { contains: contact.phoneNumber.slice(-8) } },
+              orderBy: { createdAt: "desc" },
+              take: msgLimit,
+              select: { direction: true, payload: true, createdAt: true }
+            })
+          : [];
+
+        const historico = messages.reverse().map((m) => {
+          const payload = m.payload as Record<string, unknown> | null;
+          const texto = (payload?.["text"] ?? payload?.["caption"] ?? "") as string;
+          return {
+            de: m.direction === "outbound" ? "bot" : "cliente",
+            texto: texto.slice(0, 300),
+            horario: m.createdAt.toISOString().slice(0, 16).replace("T", " ")
+          };
+        });
+
+        return JSON.stringify({
+          nome: contact?.displayName ?? memory?.name ?? "Desconhecido",
+          telefone: contact?.phoneNumber ?? rawPhone,
+          cliente_existente: memory?.isExistingClient ?? false,
+          interesse: memory?.serviceInterest,
+          status_lead: memory?.status,
+          agendamento: memory?.scheduledAt?.toISOString().slice(0, 16).replace("T", " "),
+          notas: memory?.notes ?? contact?.notes,
+          blacklist: contact?.isBlacklisted ?? false,
+          ultima_conversa: contact?.conversations?.[0] ?? null,
+          historico_mensagens: historico
+        });
+      }
+
+      case "enviar_para_grupo": {
+        const mensagem = String(args["mensagem"] ?? "").trim();
+        if (!mensagem) return JSON.stringify({ sucesso: false, erro: "Mensagem vazia." });
+
+        const config = await prisma.chatbotConfig.findUnique({
+          where: { instanceId: ctx.instanceId },
+          select: { leadsGroupJid: true, leadsGroupName: true }
+        });
+
+        const groupJid = (config as Record<string, unknown> | null)?.["leadsGroupJid"] as string | null | undefined;
+        if (!groupJid) {
+          return JSON.stringify({ sucesso: false, erro: "Nenhum grupo de leads configurado para esta instância." });
+        }
+
+        const ok = await ctx.sendMessageToClient(groupJid, groupJid, mensagem);
+        return JSON.stringify({
+          sucesso: ok,
+          grupo: (config as Record<string, unknown> | null)?.["leadsGroupName"] ?? groupJid,
+          mensagem_enviada: ok ? mensagem : undefined,
+          erro: ok ? undefined : "Falha ao enviar para o grupo."
+        });
+      }
+
+      case "agendar_para_cliente": {
+        const rawPhone = String(args["telefone"] ?? "").replace(/\D/g, "");
+        const dataHoraStr = String(args["data_hora"] ?? "").trim();
+        const servico = typeof args["servico"] === "string" ? args["servico"].trim() : null;
+        const observacao = typeof args["observacao"] === "string" ? args["observacao"].trim() : null;
+
+        if (!rawPhone || !dataHoraStr) {
+          return JSON.stringify({ sucesso: false, erro: "Telefone e data_hora são obrigatórios." });
+        }
+
+        const scheduledAt = new Date(dataHoraStr);
+        if (isNaN(scheduledAt.getTime())) {
+          return JSON.stringify({ sucesso: false, erro: `Data inválida: "${dataHoraStr}". Use formato ISO (ex: 2026-04-15T10:00:00).` });
+        }
+
+        const existing = await prisma.clientMemory.findFirst({
+          where: { phoneNumber: { contains: rawPhone.slice(-8) } },
+          select: { id: true, notes: true }
+        });
+
+        const notesUpdate = [
+          existing?.notes,
+          servico ? `Serviço: ${servico}` : null,
+          observacao
+        ].filter(Boolean).join(" | ") || null;
+
+        if (existing) {
+          await prisma.clientMemory.update({
+            where: { id: existing.id },
+            data: {
+              scheduledAt,
+              ...(servico ? { serviceInterest: servico } : {}),
+              ...(notesUpdate ? { notes: notesUpdate } : {})
+            }
+          });
+        } else {
+          const digits = rawPhone.startsWith("55") ? rawPhone : `55${rawPhone}`;
+          await prisma.clientMemory.create({
+            data: {
+              phoneNumber: digits,
+              scheduledAt,
+              ...(servico ? { serviceInterest: servico } : {}),
+              ...(notesUpdate ? { notes: notesUpdate } : {}),
+              lastContactAt: new Date()
+            }
+          });
+        }
+
+        return JSON.stringify({
+          sucesso: true,
+          telefone: rawPhone,
+          agendado_para: scheduledAt.toISOString().slice(0, 16).replace("T", " "),
+          servico: servico ?? null
+        });
+      }
+
+      case "broadcast": {
+        const mensagem = String(args["mensagem"] ?? "").trim();
+        const criterio = String(args["criterio"] ?? "");
+        const limite = typeof args["limite"] === "number" ? Math.min(args["limite"], 50) : 20;
+
+        if (!mensagem) return JSON.stringify({ sucesso: false, erro: "Mensagem vazia." });
+
+        let phones: string[] = [];
+
+        if (criterio === "lista") {
+          const lista = Array.isArray(args["telefones"]) ? args["telefones"] as unknown[] : [];
+          phones = lista
+            .map((p) => String(p).replace(/\D/g, ""))
+            .filter((p) => p.length >= 8)
+            .map((p) => (p.startsWith("55") ? p : `55${p}`));
+        } else {
+          const agora = new Date();
+          let where: Record<string, unknown> = {};
+
+          if (criterio === "agendamentos_amanha") {
+            const amanha = new Date(agora); amanha.setDate(amanha.getDate() + 1); amanha.setHours(0, 0, 0, 0);
+            const fimAmanha = new Date(amanha); fimAmanha.setHours(23, 59, 59, 999);
+            where = { scheduledAt: { gte: amanha, lte: fimAmanha } };
+          } else if (criterio === "agendamentos_semana") {
+            const fimSemana = new Date(agora); fimSemana.setDate(fimSemana.getDate() + 7);
+            where = { scheduledAt: { gte: agora, lte: fimSemana } };
+          } else if (criterio === "interesse_pendente") {
+            where = { serviceInterest: { not: null }, scheduledAt: null, status: { notIn: ["closed", "client"] } };
+          } else {
+            return JSON.stringify({ sucesso: false, erro: `Critério inválido: "${criterio}".` });
+          }
+
+          const records = await prisma.clientMemory.findMany({
+            where,
+            take: limite,
+            select: { phoneNumber: true }
+          });
+          phones = records
+            .map((r) => r.phoneNumber.replace(/\D/g, ""))
+            .filter((p) => p.length >= 8)
+            .map((p) => (p.startsWith("55") ? p : `55${p}`));
+        }
+
+        if (phones.length === 0) {
+          return JSON.stringify({ sucesso: false, erro: "Nenhum cliente encontrado com o critério informado." });
+        }
+
+        let enviados = 0;
+        const falhas: string[] = [];
+
+        for (const phone of phones.slice(0, limite)) {
+          const jid = `${phone}@s.whatsapp.net`;
+          const ok = await ctx.sendMessageToClient(jid, phone, mensagem);
+          if (ok) { enviados++; } else { falhas.push(phone); }
+          // Aguarda 1.5s entre envios para não ser bloqueado pelo WhatsApp
+          await new Promise((r) => setTimeout(r, 1500));
+        }
+
+        return JSON.stringify({
+          sucesso: enviados > 0,
+          total_selecionados: phones.length,
+          enviados,
+          falhas: falhas.length,
+          numeros_com_falha: falhas.length > 0 ? falhas : undefined
         });
       }
 

@@ -30,7 +30,12 @@
 
 **Requirements**: SEC-01, SEC-02, SEC-03, SEC-04
 
-**Plans**:
+**Plans**: 4 plans
+
+- [ ] 01-01-PLAN.md — Wave 0: Test scaffolds for all 9 security behaviors (SEC-01..SEC-04)
+- [ ] 01-02-PLAN.md — Wave 1: CORS allowlist + auth bypass guard (SEC-01, SEC-02)
+- [ ] 01-03-PLAN.md — Wave 1: aiFallbackApiKey encryption + migration (SEC-03)
+- [ ] 01-04-PLAN.md — Wave 1: Session files assertion + query-string token removal (SEC-04)
 
 #### Plan 1.1 — CORS Allowlist Enforcement
 Replace `origin: true` in `apps/api/src/app.ts` (line 191) with `origin: process.env.ALLOWED_ORIGINS?.split(',').map(s => s.trim()) ?? false`. Add `ALLOWED_ORIGINS` as a required, non-defaulting Zod env var in `config.ts`. Validate that cross-origin requests from unlisted origins are rejected. Set `http://localhost:3000` for development.

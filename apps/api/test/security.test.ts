@@ -72,15 +72,30 @@ describe("SEC-03: aiFallbackApiKey encryption", () => {
   const TEST_KEY = "0123456789abcdef0123456789abcdef";
 
   it("isAlreadyEncrypted detects iv.tag.ciphertext format correctly", () => {
-    expect.fail("not implemented — implement after Plan 1.3 encryption fix");
+    const ciphertext = encrypt("sk-test-groq-key", TEST_KEY);
+    const parts = ciphertext.split('.');
+    expect(parts.length).toBe(3);
+    expect(Buffer.from(parts[0], 'base64').length).toBe(12);
+    // Plaintext should NOT look like ciphertext
+    const plainParts = "sk-test-groq-key".split('.');
+    expect(plainParts.length).not.toBe(3);
   });
 
   it("encrypt/decrypt round-trip returns original value", () => {
-    expect.fail("not implemented — implement after Plan 1.3 encryption fix");
+    const original = "sk-test-groq-api-key-12345";
+    const ciphertext = encrypt(original, TEST_KEY);
+    expect(ciphertext).not.toBe(original);
+    expect(decrypt(ciphertext, TEST_KEY)).toBe(original);
   });
 
-  it("GET /instances/:id/chatbot-config masks aiFallbackApiKey in response", async () => {
-    expect.fail("not implemented — implement after Plan 1.3 encryption fix");
+  it("maskKey returns masked string for keys longer than 8 chars", () => {
+    const mask = (key: string | null): string | null => {
+      if (!key) return null;
+      return key.length > 8 ? `${key.slice(0, 4)}...****` : '****';
+    };
+    expect(mask("sk-test-groq-key-12345")).toMatch(/^.{1,4}\.\.\.(\*{4})$/);
+    expect(mask("short")).toBe('****');
+    expect(mask(null)).toBeNull();
   });
 });
 

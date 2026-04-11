@@ -42,7 +42,7 @@ export const authPlugin: FastifyPluginAsync = fp(async (app) => {
       return;
     }
 
-    if (!app.config.ENABLE_AUTH) {
+    if (!app.config.ENABLE_AUTH && app.config.NODE_ENV === 'development') {
       // Em ambiente de desenvolvimento, o bypass de auth tambem pula o rate limit por tenant,
       // porque a execucao retorna antes de qualquer validacao/autorizacao tenant-scoped.
       request.auth = {

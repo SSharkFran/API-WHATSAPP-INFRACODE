@@ -3,6 +3,22 @@ import { getBrowserSession } from "./session";
 const publicApiBaseUrl = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "").replace(/\/$/, "");
 const defaultTenantSlug = process.env.NEXT_PUBLIC_DEFAULT_TENANT ?? "demo";
 
+const resolveConfiguredApiBaseUrl = (): string | undefined => {
+  if (!publicApiBaseUrl) {
+    return undefined;
+  }
+
+  if (publicApiBaseUrl.startsWith("/")) {
+    if (typeof window === "undefined") {
+      return publicApiBaseUrl;
+    }
+
+    return `${window.location.origin}${publicApiBaseUrl}`;
+  }
+
+  return publicApiBaseUrl;
+};
+
 const inferBrowserApiBaseUrl = (): string | undefined => {
   if (typeof window === "undefined") {
     return undefined;
@@ -24,17 +40,19 @@ const inferBrowserApiBaseUrl = (): string | undefined => {
 };
 
 const resolveBrowserApiBaseUrl = (): string => {
+  const configuredApiBaseUrl = resolveConfiguredApiBaseUrl();
+
+  if (configuredApiBaseUrl) {
+    return configuredApiBaseUrl;
+  }
+
   const inferredApiBaseUrl = inferBrowserApiBaseUrl();
 
   if (inferredApiBaseUrl) {
     return inferredApiBaseUrl;
   }
 
-  if (publicApiBaseUrl.startsWith("/") && typeof window !== "undefined") {
-    return `${window.location.origin}${publicApiBaseUrl}`;
-  }
-
-  return publicApiBaseUrl || "http://localhost:3333";
+  return "http://localhost:3333";
 };
 
 /**

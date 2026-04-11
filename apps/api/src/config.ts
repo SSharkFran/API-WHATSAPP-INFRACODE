@@ -43,6 +43,7 @@ const envSchema = z.object({
     .string()
     .optional()
     .transform((value) => value === "true"),
+  ALLOWED_ORIGINS: z.string().min(1).default("http://localhost:3000"),
   DATA_DIR: z.string().default(defaultDataDir),
   PUBLIC_API_BASE_URL: z.string().url().default(defaultPublicApiBaseUrl),
   SMTP_FROM: z.string().email().default("noreply@infracode.local"),
@@ -60,10 +61,10 @@ export type AppConfig = z.infer<typeof envSchema>;
 export const loadConfig = (): AppConfig => {
   const parsed = envSchema.parse(process.env);
 
-  if (parsed.NODE_ENV === "production" && !parsed.ENABLE_AUTH) {
+  if (!parsed.ENABLE_AUTH && parsed.NODE_ENV !== "development") {
     throw new Error(
-      "ENABLE_AUTH must be set to true in production. " +
-      "Running with authentication disabled in production is not allowed."
+      `ENABLE_AUTH must be 'true' in all non-development environments (NODE_ENV=${parsed.NODE_ENV}). ` +
+      "Set ENABLE_AUTH=true in staging, preview, and production deployments."
     );
   }
 

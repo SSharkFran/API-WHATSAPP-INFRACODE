@@ -188,7 +188,7 @@ export const buildApp = async () => {
 
   await app.register(sensible);
   await app.register(cors, {
-    origin: true,
+    origin: app.config.ALLOWED_ORIGINS.split(',').map(s => s.trim()),
     credentials: true,
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allowedHeaders: ["Authorization", "Content-Type", "X-Api-Key"],

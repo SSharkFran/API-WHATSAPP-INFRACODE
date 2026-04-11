@@ -6,7 +6,7 @@ import { z } from "zod";
 import type { Prisma } from "../../../../../prisma/generated/tenant-client/index.js";
 import type { AppConfig } from "../../config.js";
 import type { PlatformPrisma, TenantPrismaRegistry } from "../../lib/database.js";
-import { decrypt } from "../../lib/crypto.js";
+import { decrypt, encrypt } from "../../lib/crypto.js";
 import { ApiError } from "../../lib/errors.js";
 import {
   assertValidPhoneNumber,
@@ -642,7 +642,9 @@ export class ChatbotService {
         leadSurchargeTable: leadSurchargeTable as unknown as Prisma.InputJsonValue,
         servicesAndPrices,
         aiFallbackProvider: input.aiFallbackProvider ?? null,
-        aiFallbackApiKey: input.aiFallbackApiKey?.trim() || null,
+        aiFallbackApiKey: input.aiFallbackApiKey?.trim()
+          ? encrypt(input.aiFallbackApiKey.trim(), this.config.API_ENCRYPTION_KEY)
+          : null,
         aiFallbackModel: input.aiFallbackModel?.trim() || null,
         modules: preparedModules.modules as unknown as Prisma.InputJsonValue
       } as Prisma.ChatbotConfigUncheckedCreateInput,
@@ -668,7 +670,9 @@ export class ChatbotService {
         leadSurchargeTable: leadSurchargeTable as unknown as Prisma.InputJsonValue,
         servicesAndPrices,
         aiFallbackProvider: input.aiFallbackProvider ?? null,
-        aiFallbackApiKey: input.aiFallbackApiKey?.trim() || null,
+        aiFallbackApiKey: input.aiFallbackApiKey?.trim()
+          ? encrypt(input.aiFallbackApiKey.trim(), this.config.API_ENCRYPTION_KEY)
+          : undefined,
         aiFallbackModel: input.aiFallbackModel?.trim() || null,
         modules: preparedModules.modules as unknown as Prisma.InputJsonValue
       } as Prisma.ChatbotConfigUncheckedUpdateInput
@@ -1328,6 +1332,11 @@ private async evaluateConfig(
     });
   }
 
+  private static maskKey(key: string | null): string | null {
+    if (!key) return null;
+    return key.length > 8 ? `${key.slice(0, 4)}...****` : '****';
+  }
+
   private mapConfig(
     record: {
       id: string;
@@ -1404,7 +1413,9 @@ private async evaluateConfig(
       rules: chatbotRulesArraySchema.parse(record.rules),
       ai: this.buildRuntimeAiConfig(aiSettings, managedAiProvider),
       aiFallbackProvider: normalizeFallbackProvider(record.aiFallbackProvider),
-      aiFallbackApiKey: record.aiFallbackApiKey ?? null,
+      aiFallbackApiKey: record.aiFallbackApiKey
+        ? decrypt(record.aiFallbackApiKey, this.config.API_ENCRYPTION_KEY)
+        : null,
       aiFallbackModel: record.aiFallbackModel ?? null,
       modules: sanitizedModules,
       createdAt: record.createdAt.toISOString(),

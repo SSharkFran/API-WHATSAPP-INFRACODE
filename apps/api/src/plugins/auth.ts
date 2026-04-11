@@ -67,8 +67,9 @@ export const authPlugin: FastifyPluginAsync = fp(async (app) => {
     }
 
     const authorization = request.headers.authorization?.toString();
-    const bearerToken = readBearerToken(authorization) ?? query?.accessToken;
-    const apiKey = request.headers["x-api-key"]?.toString() ?? query?.apiKey;
+    const isWebSocketUpgrade = request.headers.upgrade?.toLowerCase() === 'websocket';
+    const bearerToken = readBearerToken(authorization) ?? (isWebSocketUpgrade ? query?.accessToken : undefined);
+    const apiKey = request.headers["x-api-key"]?.toString() ?? (isWebSocketUpgrade ? query?.apiKey : undefined);
 
     if (bearerToken) {
       request.auth = await authenticateJwt(app, bearerToken);

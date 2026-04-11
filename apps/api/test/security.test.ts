@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { buildApp } from "../src/app.js";
 import { encrypt, decrypt } from "../src/lib/crypto.js";
 import { loadConfig } from "../src/config.js";
@@ -101,11 +101,33 @@ describe("SEC-03: aiFallbackApiKey encryption", () => {
 
 // SEC-04: Session Files and Query-String Tokens
 describe("SEC-04: DATA_DIR assertion and query-string token removal", () => {
-  it("startup fails fatally when DATA_DIR resolves inside project root", () => {
-    expect.fail("not implemented — implement after Plan 1.4 startup assertion");
+  it("startup fails fatally when DATA_DIR resolves inside project root", async () => {
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => {
+      throw new Error('process.exit called');
+    }) as never);
+
+    const originalDataDir = process.env.DATA_DIR;
+    process.env.DATA_DIR = "./apps/api/data"; // This resolves inside project root
+
+    try {
+      await expect(buildApp()).rejects.toThrow('process.exit called');
+    } finally {
+      process.env.DATA_DIR = originalDataDir;
+      exitSpy.mockRestore();
+    }
   });
 
   it("HTTP request with ?accessToken= query param is rejected with 401", async () => {
-    expect.fail("not implemented — implement after Plan 1.4 query-string removal");
+    const app = await buildApp();
+    try {
+      const response = await app.inject({
+        method: "GET",
+        url: "/debug/group-jids?accessToken=fake-token-12345",
+        // No Authorization header — query-string token must be ignored for HTTP
+      });
+      expect(response.statusCode).toBe(401);
+    } finally {
+      await app.close();
+    }
   });
 });

@@ -32,10 +32,10 @@
 
 **Plans**: 4 plans
 
-- [ ] 01-01-PLAN.md — Wave 0: Test scaffolds for all 9 security behaviors (SEC-01..SEC-04)
-- [ ] 01-02-PLAN.md — Wave 1: CORS allowlist + auth bypass guard (SEC-01, SEC-02)
-- [ ] 01-03-PLAN.md — Wave 1: aiFallbackApiKey encryption + migration (SEC-03)
-- [ ] 01-04-PLAN.md — Wave 1: Session files assertion + query-string token removal (SEC-04)
+- [x] 01-01-PLAN.md — Wave 0: Test scaffolds for all 9 security behaviors (SEC-01..SEC-04)
+- [x] 01-02-PLAN.md — Wave 1: CORS allowlist + auth bypass guard (SEC-01, SEC-02)
+- [x] 01-03-PLAN.md — Wave 1: aiFallbackApiKey encryption + migration (SEC-03)
+- [x] 01-04-PLAN.md — Wave 1: Session files assertion + query-string token removal (SEC-04)
 
 #### Plan 1.1 — CORS Allowlist Enforcement
 Replace `origin: true` in `apps/api/src/app.ts` (line 191) with `origin: process.env.ALLOWED_ORIGINS?.split(',').map(s => s.trim()) ?? false`. Add `ALLOWED_ORIGINS` as a required, non-defaulting Zod env var in `config.ts`. Validate that cross-origin requests from unlisted origins are rejected. Set `http://localhost:3000` for development.
@@ -81,7 +81,13 @@ Add `apps/api/data/` to `.gitignore`. Run `git rm -r --cached apps/api/data/` if
 
 **Requirements**: CRM-01, CRM-02, CRM-03, CRM-04, CRM-05, CRM-06, CRM-07
 
-**Plans**:
+**Plans**: 5 plans
+
+- [ ] 02-00-PLAN.md — Wave 0: Test scaffolds for all automated behaviors (CRM-01..CRM-06)
+- [ ] 02-04-PLAN.md — Wave 1: Tenant schema migration tracking + runMigrations() infrastructure
+- [ ] 02-01-PLAN.md — Wave 1: LID/JID normalization at ingestion — rawJid column, Prisma schema change, BullMQ reconciliation (CRM-01)
+- [ ] 02-02-PLAN.md — Wave 2: formatPhone() utility + display normalization across all CRM surfaces (CRM-02, CRM-06, CRM-07)
+- [ ] 02-03-PLAN.md — Wave 2: Custom fields UI surface, tags filter, N+1 fix, message history (CRM-03, CRM-04, CRM-05, CRM-06)
 
 #### Plan 2.1 — LID/JID Normalization at Ingestion
 At the point where a contact record is created or updated from a Baileys inbound message, call `signalRepository.getPNForLID(lid)` before storing the JID as the contact's phone number. Store the resolved E.164 number in `phoneNumber`; store the raw JID in a separate `rawJid` field only. If LID resolution fails (mapping not yet populated), store the raw JID in `rawJid` and leave `phoneNumber` null — never write a `@lid` string into `phoneNumber`. Implement a background reconciliation job (BullMQ) that periodically retries resolution for contacts with null `phoneNumber` and non-null `rawJid`.

@@ -4,6 +4,7 @@ import rateLimit from "@fastify/rate-limit";
 import sensible from "@fastify/sensible";
 import websocket from "@fastify/websocket";
 import { randomUUID } from "node:crypto";
+import { resolve, sep } from "node:path";
 import type { Queue } from "bullmq";
 import Fastify from "fastify";
 import { ZodTypeProvider } from "fastify-type-provider-zod";
@@ -48,6 +49,29 @@ const createNoopQueue = (): Queue =>
  */
 export const buildApp = async () => {
   const config = loadConfig();
+
+  // DATA_DIR safety assertion — refuse to start if session files would land inside the repo
+  const dataDir = resolve(config.DATA_DIR);
+  const projectRoot = resolve(process.cwd());
+
+  if (dataDir.startsWith(projectRoot + sep) || dataDir === projectRoot) {
+    // Use console.error here — createLogger requires a full app context
+    // which hasn't been constructed yet at this point in startup.
+    console.error(
+      JSON.stringify({
+        level: 'fatal',
+        dataDir,
+        projectRoot,
+        msg:
+          'SECURITY: DATA_DIR resolves inside the project root. ' +
+          'WhatsApp session files would be accessible via git. ' +
+          `Set DATA_DIR to an absolute path outside the repository. ` +
+          `Current: ${dataDir} | Project root: ${projectRoot}`
+      })
+    );
+    process.exit(1);
+  }
+
   const logger = createLogger(config);
   const app = Fastify({
     logger: false,

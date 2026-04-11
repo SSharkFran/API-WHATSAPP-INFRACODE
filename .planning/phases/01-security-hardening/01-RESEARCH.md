@@ -318,17 +318,19 @@ if (dataDir.startsWith(projectRoot)) {
 
 ---
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **WebSocket endpoints**
    - What we know: `auth.ts:70` falls back `query.accessToken` for bearer; the plan calls to keep this only for WS upgrade.
    - What's unclear: Whether any current WS clients actually use query-string tokens in practice, or if all use header-based auth.
    - Recommendation: Grep for WebSocket route registrations; if none use query tokens, remove unconditionally.
+   - **RESOLVED:** Plan 01-04 preserves query-string tokens only for WebSocket upgrade paths via `request.headers.upgrade === 'websocket'` guard — a conservative default that does not break existing WS clients while closing the HTTP log-leakage hole.
 
 2. **Staging NODE_ENV value**
    - What we know: Railway sets `NODE_ENV=production` for production deployments.
    - What's unclear: What `NODE_ENV` the staging/preview deployment uses.
    - Recommendation: Check Railway staging environment config; ensure `ENABLE_AUTH=true` is set in the Railway staging service regardless, so the guard is belt-and-suspenders.
+   - **RESOLVED:** The `NODE_ENV !== 'development'` allowlist approach (Plan 01-02) handles all unknown NODE_ENV values defensively — staging, preview, test, and any custom value all require `ENABLE_AUTH=true`. Only `NODE_ENV=development` is exempt. This is correct regardless of what value Railway staging uses.
 
 ---
 

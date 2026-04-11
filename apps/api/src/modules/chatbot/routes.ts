@@ -15,6 +15,11 @@ import {
   upsertLeadsPhoneBodySchema
 } from "./schemas.js";
 
+const maskKey = (key: string | null | undefined): string | null => {
+  if (!key) return null;
+  return key.length > 8 ? `${key.slice(0, 4)}...****` : '****';
+};
+
 /**
  * Registra as rotas do chatbot nativo por instancia.
  */
@@ -39,7 +44,8 @@ export const registerChatbotRoutes = async (app: FastifyInstance): Promise<void>
     async (request) => {
       const tenantId = requireTenantId(request);
       const params = instanceParamsSchema.parse(request.params);
-      return app.chatbotService.getConfig(tenantId, params.id);
+      const config = await app.chatbotService.getConfig(tenantId, params.id);
+      return { ...config, aiFallbackApiKey: maskKey(config.aiFallbackApiKey) };
     }
   );
 
@@ -71,7 +77,7 @@ export const registerChatbotRoutes = async (app: FastifyInstance): Promise<void>
       await recordPlatformAuditLog(app.platformPrisma, request, "chatbot.upsert", "Instance", params.id, body, app.config.JWT_SECRET);
       await recordTenantAuditLog(tenantPrisma, request, "chatbot.upsert", "Instance", params.id, body, app.config.JWT_SECRET);
 
-      return config;
+      return { ...config, aiFallbackApiKey: maskKey(config.aiFallbackApiKey) };
     }
   );
 
@@ -198,7 +204,7 @@ export const registerChatbotRoutes = async (app: FastifyInstance): Promise<void>
         app.config.JWT_SECRET
       );
 
-      return config;
+      return { ...config, aiFallbackApiKey: maskKey(config.aiFallbackApiKey) };
     }
   );
 

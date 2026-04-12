@@ -31,15 +31,8 @@ const resolveBrowserApiBaseUrl = (): string => {
     return "http://localhost:3333";
   }
 
-  // 2. Producao: inferir api.{rootDomain}
+  // 2. Producao: prefixar api. ao hostname atual
   //    wa.infracode.pro -> api.wa.infracode.pro
-  const parts = hostname.split(".");
-  if (parts.length >= 3) {
-    // Remove o primeiro subdominio (ex: "zelo" ou "admin") e prefixa com "api"
-    return `${protocol}//api.${parts.slice(1).join(".")}`;
-  }
-
-  // Fallback: api.{domain} ex: infracode.pro -> api.infracode.pro
   return `${protocol}//api.${hostname}`;
 };
 

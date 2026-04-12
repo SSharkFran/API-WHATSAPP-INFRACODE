@@ -1,21 +1,18 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import Link from "next/link";
 import { Button } from "@infracode/ui";
-import { clearBrowserSession, persistBrowserSession, resolveTenantSlugFromBrowserHost } from "../../lib/session";
+import { clearBrowserSession, persistBrowserSession } from "../../lib/session";
 import { getClientPanelConfig } from "../../lib/client-panel-config";
-
-type LoginMode = "admin" | "tenant";
-
-interface LoginFormProps {
-  initialIsAdminDomain: boolean;
-}
 
 interface AuthTokensResponse {
   accessToken: string;
   expiresInSeconds: number;
   refreshToken: string;
+  tenantSlug: string | null;
+  role: string | null;
+  redirectTo: "/admin" | "/tenant";
 }
 
 const getNetworkErrorMessage = (): string => {
@@ -27,7 +24,7 @@ const getNetworkErrorMessage = (): string => {
 
   if (hostname === "127.0.0.1" || hostname === "localhost") {
     return protocol === "https:"
-      ? "Falha de rede ao conectar com a API. Em ambiente local, prefira http://127.0.0.1/login ou configure admin.infracode.local no arquivo hosts."
+      ? "Falha de rede ao conectar com a API. Em ambiente local, prefira http://127.0.0.1/login."
       : "Falha de rede ao conectar com a API local. Verifique se a stack Docker da InfraCode esta ativa.";
   }
 
@@ -36,49 +33,39 @@ const getNetworkErrorMessage = (): string => {
 
 const parseErrorMessage = async (response: Response): Promise<string> => {
   try {
-    const payload = (await response.json()) as { message?: string };
+    const payload = (await response.json()) as { message?: string; code?: string };
     return payload.message ?? `HTTP ${response.status}`;
   } catch {
     return `HTTP ${response.status}`;
   }
 };
 
+const parseErrorCode = async (response: Response): Promise<string | undefined> => {
+  try {
+    const payload = (await response.json()) as { code?: string };
+    return payload.code;
+  } catch {
+    return undefined;
+  }
+};
+
 const baseInputClassName =
   "h-12 w-full rounded-md border border-[#2a2a2a] bg-[#1a1a1a] px-4 text-sm text-white outline-none transition-colors placeholder:text-[#444444] focus:border-[#60a5fa] focus:ring-2 focus:ring-[#60a5fa]/20";
 
-export const LoginForm = ({ initialIsAdminDomain }: LoginFormProps) => {
-  const [isAdminDomain, setIsAdminDomain] = useState(initialIsAdminDomain);
-  const [email, setEmail] = useState("owner@infracode.local");
-  const [password, setPassword] = useState("ChangeMe123!");
-  const [tenantSlug, setTenantSlug] = useState(() => getClientPanelConfig().tenantSlug);
+export const LoginForm = () => {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [totpCode, setTotpCode] = useState("");
   const [backupCode, setBackupCode] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const [pendingMode, setPendingMode] = useState<LoginMode | null>(null);
+  const [pending, setPending] = useState(false);
+  const [showSecondFactor, setShowSecondFactor] = useState(false);
 
-  useEffect(() => {
-    const hostname = window.location.hostname.toLowerCase();
-    setIsAdminDomain(hostname.startsWith("admin."));
-
-    const slugFromHost = resolveTenantSlugFromBrowserHost();
-    if (slugFromHost) {
-      setTenantSlug(slugFromHost);
-    }
-  }, []);
-
-  const primaryMode: LoginMode = isAdminDomain ? "admin" : "tenant";
-
-  const submit = async (mode: LoginMode) => {
+  const submit = async () => {
     const apiBaseUrl = getClientPanelConfig().apiBaseUrl;
-    const resolvedTenantSlug = tenantSlug.trim() || resolveTenantSlugFromBrowserHost();
-
-    if (mode === "tenant" && !resolvedTenantSlug) {
-      setError("Nao foi possivel identificar o slug do tenant para este dominio.");
-      return;
-    }
 
     setError(null);
-    setPendingMode(mode);
+    setPending(true);
 
     try {
       const response = await fetch(`${apiBaseUrl}/auth/login`, {
@@ -89,13 +76,22 @@ export const LoginForm = ({ initialIsAdminDomain }: LoginFormProps) => {
         body: JSON.stringify({
           email,
           password,
-          ...(mode === "tenant" ? { tenantSlug: resolvedTenantSlug } : {}),
-          ...(mode === "admin" && totpCode.trim() ? { totpCode: totpCode.trim() } : {}),
-          ...(mode === "admin" && backupCode.trim() ? { backupCode: backupCode.trim() } : {})
+          ...(totpCode.trim() ? { totpCode: totpCode.trim() } : {}),
+          ...(backupCode.trim() ? { backupCode: backupCode.trim() } : {})
         })
       });
 
       if (!response.ok) {
+        // Clone response before reading it twice
+        const cloned = response.clone();
+        const errorCode = await parseErrorCode(cloned);
+
+        if (errorCode === "SECOND_FACTOR_REQUIRED") {
+          setShowSecondFactor(true);
+          setError("Informe o codigo TOTP ou backup code para continuar.");
+          return;
+        }
+
         throw new Error(await parseErrorMessage(response));
       }
 
@@ -104,10 +100,10 @@ export const LoginForm = ({ initialIsAdminDomain }: LoginFormProps) => {
       persistBrowserSession({
         accessToken: tokens.accessToken,
         refreshToken: tokens.refreshToken,
-        tenantSlug: mode === "tenant" ? resolvedTenantSlug : undefined
+        tenantSlug: tokens.tenantSlug ?? undefined
       });
 
-      window.location.assign(mode === "admin" ? "/admin" : "/tenant");
+      window.location.assign(tokens.redirectTo);
     } catch (caught) {
       if (caught instanceof TypeError) {
         setError(getNetworkErrorMessage());
@@ -116,7 +112,7 @@ export const LoginForm = ({ initialIsAdminDomain }: LoginFormProps) => {
 
       setError(caught instanceof Error ? caught.message : "Falha ao autenticar");
     } finally {
-      setPendingMode(null);
+      setPending(false);
     }
   };
 
@@ -126,7 +122,7 @@ export const LoginForm = ({ initialIsAdminDomain }: LoginFormProps) => {
         className="space-y-8"
         onSubmit={(event) => {
           event.preventDefault();
-          void submit(primaryMode);
+          void submit();
         }}
       >
         <div className="space-y-5">
@@ -145,7 +141,7 @@ export const LoginForm = ({ initialIsAdminDomain }: LoginFormProps) => {
           <label className="block space-y-2">
             <span className="text-[11px] font-medium uppercase tracking-[0.22em] text-[#888888]">Senha</span>
             <input
-              autoComplete={isAdminDomain ? "current-password" : "password"}
+              autoComplete="current-password"
               className={baseInputClassName}
               onChange={(event) => setPassword(event.target.value)}
               placeholder="Sua chave de acesso"
@@ -154,47 +150,33 @@ export const LoginForm = ({ initialIsAdminDomain }: LoginFormProps) => {
             />
           </label>
 
-          {isAdminDomain ? (
-            <>
+          {showSecondFactor ? (
+            <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
               <label className="block space-y-2">
                 <span className="text-[11px] font-medium uppercase tracking-[0.22em] text-[#888888]">
-                  Slug do tenant
+                  TOTP (2FA)
                 </span>
                 <input
                   className={baseInputClassName}
-                  onChange={(event) => setTenantSlug(event.target.value)}
-                  placeholder="Ex: demo"
-                  value={tenantSlug}
+                  inputMode="numeric"
+                  onChange={(event) => setTotpCode(event.target.value)}
+                  placeholder="000 000"
+                  value={totpCode}
                 />
               </label>
 
-              <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
-                <label className="block space-y-2">
-                  <span className="text-[11px] font-medium uppercase tracking-[0.22em] text-[#888888]">
-                    TOTP (2FA)
-                  </span>
-                  <input
-                    className={baseInputClassName}
-                    inputMode="numeric"
-                    onChange={(event) => setTotpCode(event.target.value)}
-                    placeholder="000 000"
-                    value={totpCode}
-                  />
-                </label>
-
-                <label className="block space-y-2">
-                  <span className="text-[11px] font-medium uppercase tracking-[0.22em] text-[#888888]">
-                    Backup
-                  </span>
-                  <input
-                    className={baseInputClassName}
-                    onChange={(event) => setBackupCode(event.target.value)}
-                    placeholder="Code"
-                    value={backupCode}
-                  />
-                </label>
-              </div>
-            </>
+              <label className="block space-y-2">
+                <span className="text-[11px] font-medium uppercase tracking-[0.22em] text-[#888888]">
+                  Backup
+                </span>
+                <input
+                  className={baseInputClassName}
+                  onChange={(event) => setBackupCode(event.target.value)}
+                  placeholder="Code"
+                  value={backupCode}
+                />
+              </label>
+            </div>
           ) : null}
         </div>
 
@@ -210,28 +192,11 @@ export const LoginForm = ({ initialIsAdminDomain }: LoginFormProps) => {
         <div className="space-y-3">
           <Button
             className="h-12 w-full rounded-md border border-[#2563eb] bg-[#2563eb] text-sm font-medium text-white hover:border-[#3b82f6] hover:bg-[#3b82f6] hover:opacity-100 focus-visible:ring-[#60a5fa]"
-            disabled={pendingMode !== null}
+            disabled={pending}
             type="submit"
           >
-            {pendingMode === primaryMode
-              ? isAdminDomain
-                ? "Autenticando..."
-                : "Entrando..."
-              : isAdminDomain
-                ? "Acessar Super Admin"
-                : "Entrar"}
+            {pending ? "Autenticando..." : "Entrar"}
           </Button>
-
-          {isAdminDomain ? (
-            <button
-              className="w-full rounded-md px-3 py-2 text-sm font-medium text-[#93c5fd] transition-colors hover:text-[#bfdbfe]"
-              disabled={pendingMode !== null}
-              onClick={() => void submit("tenant")}
-              type="button"
-            >
-              {pendingMode === "tenant" ? "Aguarde..." : "Acessar Painel do Cliente"}
-            </button>
-          ) : null}
         </div>
       </form>
 
@@ -242,7 +207,7 @@ export const LoginForm = ({ initialIsAdminDomain }: LoginFormProps) => {
         >
           Esqueceu seu acesso?
         </Link>
-        <div className="text-[11px] font-medium uppercase tracking-[0.24em] text-white/18">v2.4.1</div>
+        <div className="text-[11px] font-medium uppercase tracking-[0.24em] text-white/18">v2.5.0</div>
       </div>
     </div>
   );

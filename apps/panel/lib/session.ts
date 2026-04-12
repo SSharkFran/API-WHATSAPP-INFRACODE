@@ -97,26 +97,3 @@ export const clearBrowserSession = (): void => {
     document.cookie = `${name}=; Max-Age=0; Path=/; SameSite=Lax${secureFlag}`;
   }
 };
-
-/**
- * Resolve o slug do tenant a partir do hostname do navegador quando o painel roda por subdominio.
- */
-export const resolveTenantSlugFromBrowserHost = (): string | undefined => {
-  if (typeof window === "undefined") {
-    return undefined;
-  }
-
-  const hostname = window.location.hostname.toLowerCase();
-
-  if (hostname === "localhost" || hostname === "127.0.0.1") {
-    return undefined;
-  }
-
-  const parts = hostname.split(".");
-
-  if (parts.length < 3 || parts[0] === "admin") {
-    return undefined;
-  }
-
-  return parts[0];
-};

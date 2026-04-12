@@ -17,7 +17,10 @@ export const logoutBodySchema = refreshBodySchema;
 export const authTokenResponseSchema = z.object({
   accessToken: z.string(),
   refreshToken: z.string(),
-  expiresInSeconds: z.number().int().positive()
+  expiresInSeconds: z.number().int().positive(),
+  tenantSlug: z.string().nullable(),
+  role: z.string().nullable(),
+  redirectTo: z.enum(["/admin", "/tenant"])
 });
 
 export const acceptInvitationBodySchema = z.object({

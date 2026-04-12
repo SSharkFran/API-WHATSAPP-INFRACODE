@@ -89,22 +89,41 @@ export class AuthService {
       return this.createSession({
         requestMeta,
         tenantId: tenant.id,
+        tenantSlug: tenant.slug,
         tenantRole: membership.role,
         userId: user.id
       });
     }
 
-    if (!isPlatformRole(user.platformRole)) {
-      throw new ApiError(
-        400,
-        "TENANT_SLUG_REQUIRED",
-        "Informe o tenant ou utilize o subdominio do cliente para login no painel do tenant"
-      );
+    if (isPlatformRole(user.platformRole)) {
+      return this.createSession({
+        platformRole: user.platformRole,
+        requestMeta,
+        userId: user.id
+      });
+    }
+
+    // Auto-resolve: buscar primeiro tenant ativo do usuario
+    const membership = await this.platformPrisma.tenantMembership.findFirst({
+      where: { userId: user.id },
+      include: { tenant: true },
+      orderBy: { tenant: { createdAt: "desc" } }
+    });
+
+    if (!membership || !isTenantRole(membership.role)) {
+      throw new ApiError(403, "NO_TENANT_ACCESS", "Usuario sem acesso a nenhum tenant");
+    }
+
+    const autoTenant = membership.tenant;
+    if (autoTenant.status !== "ACTIVE" || autoTenant.suspendedAt) {
+      throw new ApiError(403, "TENANT_SUSPENDED", "Tenant suspenso ou indisponivel");
     }
 
     return this.createSession({
-      platformRole: user.platformRole,
       requestMeta,
+      tenantId: autoTenant.id,
+      tenantSlug: autoTenant.slug,
+      tenantRole: membership.role,
       userId: user.id
     });
   }
@@ -190,6 +209,7 @@ export class AuthService {
     const session = await this.createSession({
       requestMeta,
       tenantId: invitation.tenantId,
+      tenantSlug: invitation.tenant.slug,
       tenantRole: invitation.role,
       userId: user.id
     });
@@ -236,8 +256,11 @@ export class AuthService {
     let tenantRole: TenantRole | undefined;
     let platformRole: PlatformRole | undefined;
 
+    let tenantSlug: string | undefined;
+
     if (session.tenantId) {
       const tenant = await this.requireActiveTenant(session.tenantId);
+      tenantSlug = tenant.slug;
 
       if (session.impersonatedByUserId) {
         tenantRole = "ADMIN";
@@ -277,6 +300,7 @@ export class AuthService {
       platformRole,
       requestMeta,
       tenantId: session.tenantId ?? undefined,
+      tenantSlug,
       tenantRole,
       userId: user.id
     });
@@ -536,7 +560,7 @@ export class AuthService {
       throw new ApiError(403, "PLATFORM_ACCESS_DENIED", "Somente usuarios da InfraCode podem impersonar tenants");
     }
 
-    await this.requireActiveTenant(tenantId);
+    const tenant = await this.requireActiveTenant(tenantId);
     const expiresAt = new Date(Date.now() + this.config.REFRESH_TOKEN_TTL_DAYS * 24 * 60 * 60 * 1000);
     const opaque = createRefreshToken();
 
@@ -555,6 +579,7 @@ export class AuthService {
       platformRole: user.platformRole,
       requestMeta,
       tenantId,
+      tenantSlug: tenant.slug,
       tenantRole: "ADMIN",
       userId: user.id
     });
@@ -563,6 +588,7 @@ export class AuthService {
   private async createSession(input: {
     userId: string;
     tenantId?: string;
+    tenantSlug?: string;
     tenantRole?: TenantRole;
     platformRole?: PlatformRole;
     requestMeta: RequestMeta;
@@ -601,14 +627,19 @@ export class AuthService {
       }
     });
 
+    const role = input.tenantRole ?? input.platformRole ?? null;
+
     return {
       accessToken,
       expiresInSeconds: this.config.ACCESS_TOKEN_TTL_MINUTES * 60,
+      redirectTo: (input.tenantId ? "/tenant" : "/admin") as "/tenant" | "/admin",
       refreshToken: refreshToken.value,
+      role,
       scopes: dedupeScopes([
         ...(input.platformRole ? getScopesForPlatformRole(input.platformRole) : []),
         ...(input.tenantRole ? getScopesForTenantRole(input.tenantRole) : [])
-      ])
+      ]),
+      tenantSlug: input.tenantSlug ?? null
     };
   }
 

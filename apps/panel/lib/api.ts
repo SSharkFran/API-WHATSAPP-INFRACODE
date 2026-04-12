@@ -4,8 +4,22 @@ import { redirect } from "next/navigation";
 import { isRedirectError } from "next/dist/client/components/redirect";
 import { getServerPanelSession } from "./server-session";
 
-const publicApiBaseUrl = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3333").replace(/\/$/, "");
-const internalApiBaseUrl = (process.env.API_INTERNAL_BASE_URL ?? publicApiBaseUrl).replace(/\/$/, "");
+const resolveInternalApiBaseUrl = (): string => {
+  // API_INTERNAL_BASE_URL is a server-only runtime env (not NEXT_PUBLIC_), so it works at runtime
+  if (process.env.API_INTERNAL_BASE_URL) {
+    return process.env.API_INTERNAL_BASE_URL.replace(/\/$/, "");
+  }
+
+  if (process.env.NEXT_PUBLIC_API_BASE_URL) {
+    return process.env.NEXT_PUBLIC_API_BASE_URL.replace(/\/$/, "");
+  }
+
+  console.warn("[api.ts] Nenhuma URL de API configurada. Usando http://localhost:3333. Configure API_INTERNAL_BASE_URL no Railway.");
+  return "http://localhost:3333";
+};
+
+const internalApiBaseUrl = resolveInternalApiBaseUrl();
+const publicApiBaseUrl = (process.env.NEXT_PUBLIC_API_BASE_URL ?? internalApiBaseUrl).replace(/\/$/, "");
 const defaultTenantSlug = process.env.NEXT_PUBLIC_DEFAULT_TENANT ?? "tenant-demo";
 
 export interface TenantDashboardSnapshot {

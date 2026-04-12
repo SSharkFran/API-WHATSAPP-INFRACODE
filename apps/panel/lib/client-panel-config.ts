@@ -25,6 +25,7 @@ const resolveBrowserApiBaseUrl = (): string => {
     return configuredApiBaseUrl;
   }
 
+  // Sempre usar /api no mesmo dominio — o Next.js faz proxy para a API interna
   if (typeof window !== "undefined") {
     return `${window.location.origin}/api`;
   }

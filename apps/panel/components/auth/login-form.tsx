@@ -15,20 +15,22 @@ interface AuthTokensResponse {
   redirectTo: "/admin" | "/tenant";
 }
 
-const getNetworkErrorMessage = (): string => {
+const getNetworkErrorMessage = (apiUrl?: string): string => {
+  const suffix = apiUrl ? ` (tentou: ${apiUrl})` : "";
+
   if (typeof window === "undefined") {
-    return "Falha de rede ao conectar com a API.";
+    return `Falha de rede ao conectar com a API.${suffix}`;
   }
 
   const { hostname, protocol } = window.location;
 
   if (hostname === "127.0.0.1" || hostname === "localhost") {
     return protocol === "https:"
-      ? "Falha de rede ao conectar com a API. Em ambiente local, prefira http://127.0.0.1/login."
-      : "Falha de rede ao conectar com a API local. Verifique se a stack Docker da InfraCode esta ativa.";
+      ? `Falha de rede ao conectar com a API. Em ambiente local, prefira http://127.0.0.1/login.${suffix}`
+      : `Falha de rede ao conectar com a API local. Verifique se a stack Docker da InfraCode esta ativa.${suffix}`;
   }
 
-  return "Falha de rede ao conectar com a API.";
+  return `Falha de rede ao conectar com a API.${suffix}`;
 };
 
 const parseErrorMessage = async (response: Response): Promise<string> => {
@@ -63,12 +65,13 @@ export const LoginForm = () => {
 
   const submit = async () => {
     const apiBaseUrl = getClientPanelConfig().apiBaseUrl;
+    const loginUrl = `${apiBaseUrl}/auth/login`;
 
     setError(null);
     setPending(true);
 
     try {
-      const response = await fetch(`${apiBaseUrl}/auth/login`, {
+      const response = await fetch(loginUrl, {
         method: "POST",
         headers: {
           "content-type": "application/json"
@@ -106,7 +109,7 @@ export const LoginForm = () => {
       window.location.assign(tokens.redirectTo);
     } catch (caught) {
       if (caught instanceof TypeError) {
-        setError(getNetworkErrorMessage());
+        setError(getNetworkErrorMessage(loginUrl));
         return;
       }
 

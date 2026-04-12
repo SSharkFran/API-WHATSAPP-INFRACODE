@@ -2,32 +2,19 @@ import { getBrowserSession } from "./session";
 
 const publicApiBaseUrl = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "").replace(/\/$/, "");
 
-const resolveConfiguredApiBaseUrl = (): string | undefined => {
-  if (!publicApiBaseUrl) {
-    return undefined;
-  }
-
-  if (publicApiBaseUrl.startsWith("/")) {
-    if (typeof window === "undefined") {
-      return publicApiBaseUrl;
-    }
-
-    return `${window.location.origin}${publicApiBaseUrl}`;
-  }
-
-  return publicApiBaseUrl;
-};
-
+/**
+ * Resolve a URL base da API.
+ *
+ * Prioridade:
+ * 1. NEXT_PUBLIC_API_BASE_URL (variavel de ambiente)
+ * 2. Fallback para http://localhost:3333 (desenvolvimento local)
+ */
 const resolveBrowserApiBaseUrl = (): string => {
-  const configuredApiBaseUrl = resolveConfiguredApiBaseUrl();
-
-  if (configuredApiBaseUrl) {
-    return configuredApiBaseUrl;
-  }
-
-  // Sempre usar /api no mesmo dominio — o Next.js faz proxy para a API interna
-  if (typeof window !== "undefined") {
-    return `${window.location.origin}/api`;
+  if (publicApiBaseUrl) {
+    if (publicApiBaseUrl.startsWith("/") && typeof window !== "undefined") {
+      return `${window.location.origin}${publicApiBaseUrl}`;
+    }
+    return publicApiBaseUrl;
   }
 
   return "http://localhost:3333";

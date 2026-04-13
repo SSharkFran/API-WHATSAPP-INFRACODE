@@ -99,15 +99,20 @@ export const buildTenantSchemaSql = (schemaName: string): string[] => {
     `CREATE TABLE IF NOT EXISTS ${schema}."Contact" (
       "id" TEXT PRIMARY KEY,
       "instanceId" TEXT NOT NULL REFERENCES ${schema}."Instance"("id") ON DELETE CASCADE,
-      "phoneNumber" TEXT NOT NULL,
+      "phoneNumber" TEXT,
+      "rawJid" TEXT,
       "displayName" TEXT,
       "fields" JSONB,
       "notes" TEXT,
       "isBlacklisted" BOOLEAN NOT NULL DEFAULT FALSE,
       "createdAt" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       "updatedAt" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      CONSTRAINT "uniq_${schemaName}_instance_phone" UNIQUE ("instanceId", "phoneNumber")
+      CONSTRAINT "uniq_${schemaName}_instance_phone" UNIQUE ("instanceId", "phoneNumber"),
+      CONSTRAINT "uniq_${schemaName}_instance_rawjid" UNIQUE ("instanceId", "rawJid")
     );`,
+    `ALTER TABLE ${schema}."Contact" ADD COLUMN IF NOT EXISTS "rawJid" TEXT;`,
+    `ALTER TABLE ${schema}."Contact" ALTER COLUMN "phoneNumber" DROP NOT NULL;`,
+    `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'uniq_${schemaName}_instance_rawjid' AND conrelid = (SELECT oid FROM pg_class WHERE relname = 'Contact' AND relnamespace = (SELECT oid FROM pg_namespace WHERE nspname = '${schemaName}'))) THEN ALTER TABLE ${schema}."Contact" ADD CONSTRAINT "uniq_${schemaName}_instance_rawjid" UNIQUE ("instanceId", "rawJid"); END IF; END $$;`,
     `CREATE TABLE IF NOT EXISTS ${schema}."Conversation" (
       "id" TEXT PRIMARY KEY,
       "instanceId" TEXT NOT NULL REFERENCES ${schema}."Instance"("id") ON DELETE CASCADE,

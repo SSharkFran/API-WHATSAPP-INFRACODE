@@ -39,6 +39,14 @@ interface CrmMessage {
   createdAt: string;
 }
 
+interface ContactMemory {
+  name: string | null;
+  serviceInterest: string | null;
+  status: string | null;
+  scheduledAt: string | null;
+  notes: string | null;
+}
+
 interface ContactDetail {
   id: string;
   phoneNumber: string;
@@ -49,6 +57,8 @@ interface ContactDetail {
   serviceInterest: string | null;
   scheduledAt: string | null;
   isExistingClient: boolean;
+  /** AI-extracted persistent memory fields (ContactPersistentMemory) */
+  memory?: ContactMemory | null;
 }
 
 interface ConversationDetail {
@@ -279,6 +289,83 @@ function TagManager({ tags, onSave }: { tags: string[]; onSave: (tags: string[])
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// ─── Memory Panel (CRM-03) ────────────────────────────────────────────────────
+
+/**
+ * Renders ContactPersistentMemory fields (AI-extracted data) in the contact detail panel.
+ * Fields sourced from detail.memory.name, detail.memory.serviceInterest, etc.
+ * Falls back to flat API fields (detail.serviceInterest, detail.leadStatus, …) when memory is absent.
+ */
+function MemoryPanel({ detail, leadLabel }: { detail: ContactDetail | null; leadLabel: Record<string, string> }) {
+  if (!detail) return null;
+
+  // memory.name and siblings — prefer nested ContactPersistentMemory object when present
+  const mem = detail.memory ?? null;
+  const memName         = mem ? mem.name         : null; // memory.name
+  const memInterest     = mem ? mem.serviceInterest : null;
+  const memStatus       = mem ? mem.status        : null;
+  const memScheduledAt  = mem ? mem.scheduledAt   : null;
+  const memNotes        = mem ? mem.notes         : null;
+
+  const displayName    = memName         ?? detail.displayName      ?? null;
+  const interest       = memInterest     ?? detail.serviceInterest  ?? null;
+  const status         = memStatus       ?? detail.leadStatus       ?? null;
+  const scheduledAt    = memScheduledAt  ?? detail.scheduledAt      ?? null;
+  const notes          = memNotes        ?? detail.notes            ?? null;
+
+  const hasData = displayName || interest || status || scheduledAt || notes;
+
+  if (!hasData) {
+    return (
+      <div className="flex-shrink-0 px-4 py-2 border-t border-[var(--border-subtle)] bg-[var(--bg-secondary)]">
+        <p className="text-xs text-[var(--text-tertiary)] italic">Nenhum dado capturado ainda</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex-shrink-0 px-4 py-3 border-t border-[var(--border-subtle)] bg-[var(--bg-secondary)]">
+      <p className="text-xs font-semibold text-[var(--text-secondary)] uppercase tracking-wide mb-2">
+        Dados capturados
+      </p>
+      <div className="space-y-1.5">
+        {displayName && (
+          <div>
+            <span className="text-[10px] text-[var(--text-tertiary)]">Nome</span>
+            <p className="text-xs text-[var(--text-primary)]">{displayName}</p>
+          </div>
+        )}
+        {interest && (
+          <div>
+            <span className="text-[10px] text-[var(--text-tertiary)]">Interesse</span>
+            <p className="text-xs text-[var(--text-primary)]">{interest}</p>
+          </div>
+        )}
+        {status && (
+          <div>
+            <span className="text-[10px] text-[var(--text-tertiary)]">Status</span>
+            <p className="text-xs text-[var(--text-primary)]">{leadLabel[status] ?? status}</p>
+          </div>
+        )}
+        {scheduledAt && (
+          <div>
+            <span className="text-[10px] text-[var(--text-tertiary)]">Agendamento</span>
+            <p className="text-xs text-[var(--text-primary)]">
+              {new Date(scheduledAt).toLocaleString("pt-BR")}
+            </p>
+          </div>
+        )}
+        {notes && (
+          <div>
+            <span className="text-[10px] text-[var(--text-tertiary)]">Observações</span>
+            <p className="text-xs text-[var(--text-primary)]">{notes}</p>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -699,6 +786,9 @@ export function CrmScreen({ initialInstances }: { initialInstances: InstanceSumm
                 : messages.map(m => <Bubble key={m.id} msg={m} />)}
               <div ref={messagesEndRef} />
             </div>
+
+            {/* AI-captured client data — read-only display (CRM-03, ContactPersistentMemory) */}
+            <MemoryPanel detail={detail} leadLabel={LEAD_LABEL} />
 
             {/* Send area */}
             <div className="flex-shrink-0 p-3 border-t border-[var(--border-subtle)] bg-[var(--bg-secondary)]">

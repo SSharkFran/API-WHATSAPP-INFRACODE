@@ -67,7 +67,7 @@ export const registerCrmRoutes = async (app: FastifyInstance): Promise<void> => 
       take: Math.min((pageSize + skip) * 2, 500),
       select: {
         id: true, status: true, humanTakeover: true, lastMessageAt: true, tags: true,
-        contact: { select: { id: true, phoneNumber: true, displayName: true, isBlacklisted: true } }
+        contact: { select: { id: true, phoneNumber: true, rawJid: true, displayName: true, isBlacklisted: true } }
       }
     });
 
@@ -99,9 +99,10 @@ export const registerCrmRoutes = async (app: FastifyInstance): Promise<void> => 
       return {
         conversationId:    c.id,
         contactId:         c.contact.id,
-        jid:               c.contact.phoneNumber ?? "",     // JID original (pode ser @lid)
-        phoneNumber:       cleaned,
-        displayName:       (c.contact.displayName ?? memory?.name ?? cleaned) || null,
+        jid:               c.contact.rawJid ?? c.contact.phoneNumber ?? "",
+        rawJid:            c.contact.rawJid ?? null,
+        phoneNumber:       c.contact.phoneNumber ?? null,
+        displayName:       (c.contact.displayName ?? memory?.name ?? (cleaned || null)) || null,
         isBlacklisted:     c.contact.isBlacklisted,
         conversationStatus: c.status,
         humanTakeover:     c.humanTakeover,
@@ -129,23 +130,34 @@ export const registerCrmRoutes = async (app: FastifyInstance): Promise<void> => 
 
     const contact = await prisma.contact.findFirst({
       where: { id: contactId, instanceId },
-      select: { id: true, phoneNumber: true, displayName: true, isBlacklisted: true, notes: true }
+      select: { id: true, phoneNumber: true, rawJid: true, displayName: true, isBlacklisted: true, notes: true }
     });
     if (!contact) return reply.status(404).send({ message: "Contato não encontrado." });
 
-    const phone8 = cleanPhone(contact.phoneNumber).slice(-8);
+    // Fallback to rawJid when phoneNumber is null (LID contacts per Plan 2.1)
+    let messageWhere: Record<string, unknown>;
+    if (contact.phoneNumber) {
+      const phone8 = cleanPhone(contact.phoneNumber).slice(-8);
+      messageWhere = { instanceId, remoteJid: { contains: phone8 } };
+    } else if (contact.rawJid) {
+      messageWhere = { instanceId, remoteJid: { equals: contact.rawJid } };
+    } else {
+      messageWhere = { instanceId, id: { in: [] } };
+    }
 
     const [messages, memory, conversation] = await Promise.all([
       prisma.message.findMany({
-        where: { instanceId, remoteJid: { contains: phone8 } },
+        where: messageWhere,
         orderBy: { createdAt: "asc" },
         take: 500, // Show up to 500 messages — sufficient for cross-session history
         select: { id: true, direction: true, type: true, payload: true, status: true, createdAt: true }
       }),
-      prisma.clientMemory.findFirst({
-        where: { phoneNumber: { contains: phone8 } },
-        select: { name: true, serviceInterest: true, status: true, scheduledAt: true, notes: true, isExistingClient: true }
-      }).catch(() => null),
+      (contact.phoneNumber
+        ? prisma.clientMemory.findFirst({
+            where: { phoneNumber: { contains: cleanPhone(contact.phoneNumber).slice(-8) } },
+            select: { name: true, serviceInterest: true, status: true, scheduledAt: true, notes: true, isExistingClient: true }
+          }).catch(() => null)
+        : Promise.resolve(null)),
       prisma.conversation.findFirst({
         where: { instanceId, contact: { id: contactId } },
         orderBy: { lastMessageAt: "desc" },
@@ -156,8 +168,9 @@ export const registerCrmRoutes = async (app: FastifyInstance): Promise<void> => 
     return {
       contact: {
         id:              contact.id,
-        phoneNumber:     cleanPhone(contact.phoneNumber),
-        displayName:     contact.displayName ?? memory?.name ?? cleanPhone(contact.phoneNumber),
+        rawJid:          contact.rawJid ?? null,
+        phoneNumber:     contact.phoneNumber ?? null,
+        displayName:     contact.displayName ?? memory?.name ?? (contact.phoneNumber ? cleanPhone(contact.phoneNumber) : null),
         isBlacklisted:   contact.isBlacklisted,
         notes:           contact.notes ?? memory?.notes ?? null,
         leadStatus:      memory?.status ?? null,

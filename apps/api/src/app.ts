@@ -10,6 +10,7 @@ import Fastify from "fastify";
 import { ZodTypeProvider } from "fastify-type-provider-zod";
 import { loadConfig } from "./config.js";
 import { createPlatformPrisma, TenantPrismaRegistry } from "./lib/database.js";
+import { runMigrations } from "./lib/run-migrations.js";
 import { createLogger } from "./lib/logger.js";
 import { MetricsService } from "./lib/metrics.js";
 import { EmailService } from "./lib/mail.js";
@@ -83,7 +84,7 @@ export const buildApp = async () => {
   const redis = createRedis(config);
   const platformPrisma = createPlatformPrisma(config);
   const metricsService = new MetricsService();
-  const tenantPrismaRegistry = new TenantPrismaRegistry(config, metricsService);
+  const tenantPrismaRegistry = new TenantPrismaRegistry(config, metricsService, logger);
   const emailService = new EmailService(config);
   const authService = new AuthService({
     config,
@@ -269,6 +270,42 @@ export const buildApp = async () => {
       message: normalized.message
     });
   });
+
+  // Run versioned schema migrations for all registered tenants at startup.
+  // Per D-MIGRATION-FAIL: failing tenants are logged and skipped — API startup continues.
+  if (config.NODE_ENV !== "test") {
+    try {
+      const tenants = await platformPrisma.tenant.findMany({ select: { id: true } });
+      const migrationResults: Array<{ tenantId: string; status: "success" | "skipped" | "failed" }> = [];
+
+      for (const tenant of tenants) {
+        const status = await runMigrations(platformPrisma, tenant.id, logger).catch((err) => {
+          logger.error({ tenantId: tenant.id, err }, "runMigrations threw unexpectedly");
+          return "failed" as const;
+        });
+        migrationResults.push({ tenantId: tenant.id, status });
+      }
+
+      // Log startup summary per D-MIGRATION-FAIL
+      logger.info(
+        { migrations: migrationResults },
+        `Schema migrations complete: ${migrationResults.filter((r) => r.status === "success").length} applied, ` +
+        `${migrationResults.filter((r) => r.status === "skipped").length} skipped, ` +
+        `${migrationResults.filter((r) => r.status === "failed").length} failed`
+      );
+
+      const failedTenants = migrationResults.filter((r) => r.status === "failed");
+      if (failedTenants.length > 0) {
+        logger.warn(
+          { failedTenants: failedTenants.map((r) => r.tenantId) },
+          "Some tenants have pending schema migrations — they may lack new columns"
+        );
+        // Do NOT exit — per D-MIGRATION-FAIL: startup continues
+      }
+    } catch (err) {
+      logger.error({ err }, "Failed to enumerate tenants for migration startup — continuing without migrations");
+    }
+  }
 
   app.addHook("onClose", async () => {
     await instanceOrchestrator.close();

@@ -8,16 +8,14 @@ import {
 } from "lucide-react";
 import type { InstanceSummary } from "@infracode/types";
 import { requestClientApi } from "../../lib/client-api";
-import { formatPhone } from "../../lib/format-phone";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
 interface CrmContact {
   conversationId: string;
   contactId: string;
-  jid?: string;
-  rawJid: string | null;
-  phoneNumber: string | null;
+  jid?: string;           // JID original armazenado (pode ser @lid) — opcional por compatibilidade
+  phoneNumber: string;
   displayName: string | null;
   isBlacklisted: boolean;
   conversationStatus: "OPEN" | "CLOSED";
@@ -43,9 +41,8 @@ interface CrmMessage {
 
 interface ContactDetail {
   id: string;
-  rawJid: string | null;
-  phoneNumber: string | null;
-  displayName: string | null;
+  phoneNumber: string;
+  displayName: string;
   isBlacklisted: boolean;
   notes: string | null;
   leadStatus: string | null;
@@ -78,6 +75,15 @@ const normalizePhoneForSend = (raw: string): string => {
   return digits;
 };
 
+/** Formata número BR para exibição: "556892549342" → "(68) 9254-9342" */
+const formatPhone = (raw: string): string => {
+  const digits = toPhone(raw);
+  const local = digits.startsWith("55") ? digits.slice(2) : digits;
+  if (local.length === 11) return `(${local.slice(0,2)}) ${local.slice(2,7)}-${local.slice(7)}`;
+  if (local.length === 10) return `(${local.slice(0,2)}) ${local.slice(2,6)}-${local.slice(6)}`;
+  if (digits.length > 13) return digits; // LID / número estranho — exibe cru
+  return digits;
+};
 
 const formatTime = (iso: string | null): string => {
   if (!iso) return "";
@@ -139,7 +145,9 @@ function Toast({ msg, kind, onClose }: { msg: string; kind: "ok" | "err"; onClos
 // ─── Contact Card ─────────────────────────────────────────────────────────────
 
 function ContactCard({ c, selected, onClick }: { c: CrmContact; selected: boolean; onClick: () => void }) {
-  const name = c.displayName || (c.phoneNumber != null ? formatPhone(c.phoneNumber) : "Aguardando número") || "(sem nome)";
+  const lid = isLidJid(c.jid);
+  const name = c.displayName || (lid ? "Contato WhatsApp" : formatPhone(c.phoneNumber)) || "(sem nome)";
+  const sub  = lid ? "ID WhatsApp" : formatPhone(c.phoneNumber);
   return (
     <button onClick={onClick} className={[
       "w-full text-left px-4 py-3 border-b border-[var(--border-subtle)] transition-colors cursor-pointer",
@@ -148,11 +156,7 @@ function ContactCard({ c, selected, onClick }: { c: CrmContact; selected: boolea
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
           <p className="text-sm font-medium text-[var(--text-primary)] truncate">{name}</p>
-          {c.phoneNumber == null ? (
-            <p className="text-xs text-[var(--text-tertiary)] truncate italic">Aguardando número</p>
-          ) : (
-            <p className="text-xs text-[var(--text-tertiary)] truncate">{formatPhone(c.phoneNumber)}</p>
-          )}
+          <p className="text-xs text-[var(--text-tertiary)] truncate">{sub}</p>
         </div>
         <div className="flex-shrink-0 flex flex-col items-end gap-1">
           <span className="text-[10px] text-[var(--text-tertiary)] whitespace-nowrap">{formatTime(c.lastMessageAt)}</span>
@@ -388,19 +392,14 @@ export function CrmScreen({ initialInstances }: { initialInstances: InstanceSumm
   const handleSend = async () => {
     const text = input.trim();
     if (!text || !selected || sending) return;
-    const targetJid = selected.rawJid ?? selected.jid ?? (selected.phoneNumber ? normalizePhoneForSend(selected.phoneNumber) : null);
-    if (!targetJid) {
-      showToast("Número não disponível ainda. Tente novamente em instantes.", "err");
-      return;
-    }
     setSending(true);
     try {
       await requestClientApi(`/instances/${instanceId}/messages/send`, {
         method: "POST",
         body: {
           type: "text",
-          to: targetJid,
-          targetJid,
+          to: normalizePhoneForSend(selected.phoneNumber),
+          ...(selected.jid ? { targetJid: selected.jid } : {}),
           text
         }
       });
@@ -421,18 +420,12 @@ export function CrmScreen({ initialInstances }: { initialInstances: InstanceSumm
     try {
       const base64 = await fileToBase64(file);
       const type   = mediaMsgType(file.type);
-      const fileTargetJid = selected.rawJid ?? selected.jid ?? (selected.phoneNumber ? normalizePhoneForSend(selected.phoneNumber) : null);
-      if (!fileTargetJid) {
-        showToast("Número não disponível ainda. Tente novamente em instantes.", "err");
-        setUploadingFile(false);
-        return;
-      }
       await requestClientApi(`/instances/${instanceId}/messages/send`, {
         method: "POST",
         body: {
           type,
-          to: fileTargetJid,
-          targetJid: fileTargetJid,
+          to: normalizePhoneForSend(selected.phoneNumber),
+          ...(selected.jid ? { targetJid: selected.jid } : {}),
           media: { mimeType: file.type, fileName: file.name, base64 }
         }
       });
@@ -647,9 +640,7 @@ export function CrmScreen({ initialInstances }: { initialInstances: InstanceSumm
               <div className="mt-1.5 flex flex-wrap items-center gap-3">
                 <span className="flex items-center gap-1 text-[11px] text-[var(--text-tertiary)]">
                   <Phone className="h-3 w-3" />
-                  {selected.phoneNumber == null
-                    ? <span className="italic">Aguardando número</span>
-                    : formatPhone(selected.phoneNumber)}
+                  {isLidJid(selected.jid ?? "") ? "ID WhatsApp" : formatPhone(selected.phoneNumber)}
                 </span>
                 {detail?.serviceInterest && (
                   <span className="flex items-center gap-1 text-[11px] text-[var(--text-tertiary)]">

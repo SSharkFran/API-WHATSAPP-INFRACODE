@@ -46,8 +46,7 @@ import type { PlanEnforcementService } from "../platform/plan-enforcement.servic
 import type { WebhookService } from "../webhooks/service.js";
 import type { FiadoService } from "../chatbot/fiado.service.js";
 import type { PlatformAlertService } from "../platform/alert.service.js";
-import { type Queue, type Job } from "bullmq";
-import { createLidReconciliationQueue } from "../../queues/lid-reconciliation-queue.js";
+import type { Queue } from "bullmq";
 
 interface InstanceOrchestratorDeps {
   config: AppConfig;
@@ -252,7 +251,6 @@ export class InstanceOrchestrator {
   private readonly escalationService: EscalationService;
   private readonly platformAlertService?: PlatformAlertService;
   private readonly sendMessageQueue?: Queue;
-  private readonly lidReconciliationQueue: Queue;
   private readonly logEmitter = new EventEmitter();
   private readonly qrEmitter = new EventEmitter();
   private readonly latestQrCodes = new Map<string, QrCodeEvent>();
@@ -292,7 +290,6 @@ export class InstanceOrchestrator {
     this.escalationService = deps.escalationService;
     this.platformAlertService = deps.platformAlertService;
     this.sendMessageQueue = deps.sendMessageQueue;
-    this.lidReconciliationQueue = createLidReconciliationQueue(this.redis);
   }
 
   public setPlatformAlertService(service: PlatformAlertService): void {
@@ -1258,18 +1255,6 @@ if (event.status === "CONNECTED") {
         this.platformAlertService?.alertInstanceUp(tenantId, instance.id, instance.name).catch((err) => {
           console.error("[orchestrator] erro ao alertar reconexao:", err);
         });
-
-        // Instrument: trigger LID reconciliation window (CRM-01)
-        console.info(`[orchestrator] LID reconciliation enqueue triggered instanceId=${instance.id}`);
-        await this.lidReconciliationQueue.add(
-          "reconcile",
-          { tenantId, instanceId: instance.id },
-          {
-            jobId: `lid-reconcile:${instance.id}`, // BullMQ dedup: duplicate jobId is silently skipped
-            removeOnComplete: 10,
-            removeOnFail: 100
-          }
-        );
       }
 
       if (event.status === "DISCONNECTED" || event.status === "BANNED") {
@@ -1432,57 +1417,6 @@ if (event.status === "CONNECTED") {
         phoneNumber: sharedPhoneNumber
       }
     });
-  }
-
-  /**
-   * BullMQ worker processor for LID reconciliation jobs.
-   * Finds contacts with phoneNumber=null and rawJid!=null, then calls persistLidPhoneMapping.
-   * Does NOT duplicate the merge logic — defers entirely to persistLidPhoneMapping.
-   * T-02-01-05: Logs only rawJid (opaque LID string) and counts — never logs resolved phoneNumber.
-   */
-  async processLidReconciliation(job: Job<{ tenantId: string; instanceId: string }>): Promise<void> {
-    const { tenantId, instanceId } = job.data;
-    // T-02-01-02: verify tenantId matches instanceId's actual tenant before querying
-    const instance = await this.platformPrisma.instance.findUnique({
-      where: { id: instanceId },
-      select: { tenantId: true }
-    });
-    if (!instance || instance.tenantId !== tenantId) {
-      console.warn(`[lid-reconcile] tenantId mismatch for instanceId=${instanceId} — skipping`);
-      return;
-    }
-
-    const prisma = await this.tenantPrismaRegistry.getClient(tenantId);
-    const startMs = Date.now();
-
-    const unresolved = await prisma.contact.findMany({
-      where: { instanceId, phoneNumber: null, rawJid: { not: null } },
-      select: { id: true, rawJid: true, fields: true }
-    });
-
-    console.info(`[lid-reconcile] instanceId=${instanceId} found ${unresolved.length} unresolved contacts`);
-
-    let resolved = 0;
-    for (const contact of unresolved) {
-      const sharedPhoneJid =
-        contact.fields && typeof contact.fields === "object"
-          ? ((contact.fields as Record<string, unknown>).sharedPhoneJid as string | undefined)
-          : undefined;
-      if (!sharedPhoneJid) continue; // Cannot resolve without sharedPhoneJid — wait for next connection
-
-      try {
-        // Call existing persistLidPhoneMapping — DO NOT duplicate its merge logic
-        await this.persistLidPhoneMapping(prisma, instanceId, contact.rawJid!, sharedPhoneJid);
-        resolved++;
-      } catch (err) {
-        // T-02-01-05: log only rawJid — never log resolved phoneNumber
-        console.warn(`[lid-reconcile] failed for rawJid=${contact.rawJid} instanceId=${instanceId}`, err);
-      }
-    }
-
-    console.info(
-      `[lid-reconcile] instanceId=${instanceId} resolved=${resolved}/${unresolved.length} elapsedMs=${Date.now() - startMs}`
-    );
   }
 
   private async handlePhoneNumberShareEvent(
@@ -2024,43 +1958,24 @@ if (event.status === "CONNECTED") {
       lastRemoteJid: event.remoteJid,
       ...(realPhoneFromRemoteJid ? { sharedPhoneJid: event.remoteJid } : {})
     } as Prisma.InputJsonValue;
-    const isLid = event.remoteJid.endsWith("@lid");
-    const contact = isLid
-      ? // @lid contact: store rawJid, leave phoneNumber null — never write LID digits as phone
-        await prisma.contact.upsert({
-          where: { instanceId_rawJid: { instanceId: instance.id, rawJid: event.remoteJid } },
-          update: {
-            displayName: (event.payload.pushName as string | undefined) ?? undefined,
-            fields: nextContactFields
-          },
-          create: {
-            instanceId: instance.id,
-            phoneNumber: null,
-            rawJid: event.remoteJid,
-            displayName: (event.payload.pushName as string | undefined) ?? null,
-            fields: nextContactFields
-          }
-        })
-      : // Existing path — phoneNumber-based upsert unchanged
-        await prisma.contact.upsert({
-          where: {
-            instanceId_phoneNumber: {
-              instanceId: instance.id,
-              phoneNumber: storedContactPhoneNumber
-            }
-          },
-          update: {
-            displayName: (event.payload.pushName as string | undefined) ?? undefined,
-            fields: nextContactFields
-          },
-          create: {
-            instanceId: instance.id,
-            phoneNumber: storedContactPhoneNumber,
-            rawJid: event.remoteJid, // store rawJid for all contacts — enables rawJid-based message history fallback
-            displayName: (event.payload.pushName as string | undefined) ?? null,
-            fields: nextContactFields
-          }
-        });
+    const contact = await prisma.contact.upsert({
+      where: {
+        instanceId_phoneNumber: {
+          instanceId: instance.id,
+          phoneNumber: storedContactPhoneNumber
+        }
+      },
+      update: {
+        displayName: (event.payload.pushName as string | undefined) ?? undefined,
+        fields: nextContactFields
+      },
+      create: {
+        instanceId: instance.id,
+        phoneNumber: storedContactPhoneNumber,
+        displayName: (event.payload.pushName as string | undefined) ?? null,
+        fields: nextContactFields
+      }
+    });
     const contactFields =
       contact.fields && typeof contact.fields === "object"
         ? (contact.fields as Record<string, unknown>)

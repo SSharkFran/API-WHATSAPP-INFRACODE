@@ -54,9 +54,12 @@ Declared values (multiples of 4):
 | 3xl | 64px | Page-level top/bottom padding |
 
 Exceptions:
-- Touch targets on icon-only nav items: minimum 44px height — enforced by `h-7 w-7` (28px) within a larger hit area. **Action:** Any icon-only interactive added in Phase 3 must have min `h-11 w-11` (44px) to meet WCAG 2.5.5.
-- Progress track height: 4px (non-interactive — exception is intentional).
-- Status bar height: 1px (decorative only).
+
+| Exception | Value | Tailwind Enforcement | Reason |
+|-----------|-------|---------------------|--------|
+| Touch target — icon-only interactive | 44px minimum | `h-11 w-11` (44px) — any icon-only interactive added in Phase 3 MUST use these classes | WCAG 2.5.5 |
+| Progress track height | 4px | `h-1` | Non-interactive — exception is intentional |
+| Status bar height | 1px | `h-px` | Decorative only |
 
 Source: `globals.css` spacing patterns, `admin/layout.tsx` nav item heights, Button component `sizeStyles`.
 
@@ -67,12 +70,13 @@ Source: `globals.css` spacing patterns, `admin/layout.tsx` nav item heights, But
 | Role | Size | Weight | Line Height | Font |
 |------|------|--------|-------------|------|
 | Body | 14px (text-sm) | 400 (regular) | 1.5 | Space Grotesk |
-| Label / Kicker | 10px (text-[10px]) | 500 (medium) | 1.4 | IBM Plex Mono, uppercase, tracking-widest |
+| Label / Kicker | 10px (text-[10px]) | 400 (regular) | 1.4 | IBM Plex Mono, uppercase, tracking-widest |
 | Heading (card) | 16px (text-base) | 600 (semibold) | 1.3 | Space Grotesk |
 | Display (page title) | 20px (text-xl) | 700 (bold) | 1.2 | Space Grotesk |
 
 Rules:
-- Exactly 2 weights: **400** (body text, secondary labels) and **600/700** (headings, button labels, badge text).
+- Exactly 2 weights: **400** (body text, secondary labels, kicker labels) and **600/700** (headings, button labels, badge text).
+- The Label/Kicker visual identity comes from its font-family (IBM Plex Mono), uppercase transform, and `tracking-widest` letter-spacing — not from weight. Weight stays at 400.
 - Mono font reserved for: kicker labels (`control-kicker` pattern), slug/JID values, metric numbers in badge context.
 - Never use raw JID (`@s.whatsapp.net`, `@lid`) as visible text — always pass through `formatPhone()` (CRM-02, ADM requirement).
 
@@ -115,13 +119,36 @@ Source: `globals.css` accent variables, `Badge.tsx` variantStyles, `Button.tsx` 
 
 ---
 
+## Visual Hierarchy
+
+### Primary Screen: Overview Page
+
+The Overview page (`admin/page.tsx`) establishes the visual hierarchy for the entire admin shell:
+
+- **Focal point (primary):** The four `StatCard` metric tiles in the main content area. These are the highest-contrast, largest text elements on the page and draw the eye first. Their heading numbers use Display size (20px, weight 700).
+- **Secondary:** The sidebar identity indicator ("Super Admin" label with pulsing accent dot). It anchors the user's role context but is visually subordinate to the stat tiles.
+- **Tertiary:** Navigation items, breadcrumbs, and the Topbar. These are utility chrome — present but not competing for attention.
+
+### Tenants and Billing Pages
+
+- **Focal point:** The data table / list rows. Status badges (ACTIVE, SUSPENDED, PAID, PAST_DUE) are the highest-signal elements within each row.
+- **Secondary:** Filter/search controls above the list.
+- **Tertiary:** Page title and breadcrumb.
+
+### Error / Empty States
+
+When a 403 or data-fetch error replaces the focal content, the `EmptyState` component (icon + label + optional action) becomes the single focal point. No competing chrome should be rendered beneath it.
+
+---
+
 ## Copywriting Contract
 
 ### Primary CTA
 
 | Surface | CTA Label |
 |---------|-----------|
-| Tenant suspension confirm | "Suspender tenant" |
+| Tenant suspension confirm | "Confirmar suspensão" |
+| Tenant reactivation confirm | "Confirmar reativação" |
 | Route audit (internal) | No user-facing CTA — developer tool only |
 
 ### Empty States
@@ -133,7 +160,7 @@ All empty states use the existing `<EmptyState>` component (`components/ui/Empty
 | Tenants list — no tenants | `Users` | "Nenhum tenant cadastrado ainda." | none |
 | Billing list — no records | `CreditCard` | "Nenhum registro de cobrança encontrado." | none |
 | Admin route — 403 (no PLATFORM_OWNER role) | `ShieldOff` | "Acesso negado. Esta área requer permissão de Platform Owner." | none |
-| Admin route — API fetch error | `AlertTriangle` | "Não foi possível carregar os dados. Tente recarregar a página." | "Recarregar" (calls `router.refresh()`) |
+| Admin route — API fetch error | `AlertTriangle` | "Não foi possível carregar os dados. Tente recarregar a página." | "Recarregar página" (calls `router.refresh()`) |
 
 ### Error States
 
@@ -148,8 +175,8 @@ All empty states use the existing `<EmptyState>` component (`components/ui/Empty
 
 | Action | Confirmation Copy | Pattern |
 |--------|------------------|---------|
-| Suspend tenant | "Tem certeza que deseja suspender **{nome}**? O tenant perderá acesso imediatamente." | Inline confirmation row within TenantManager — "Confirmar" (danger) + "Cancelar" (ghost) buttons, no modal |
-| Reactivate suspended tenant | "Reativar **{nome}**?" | Inline confirmation — "Confirmar" (primary) + "Cancelar" (ghost) |
+| Suspend tenant | "Tem certeza que deseja suspender **{nome}**? O tenant perderá acesso imediatamente." | Inline confirmation row within TenantManager — "Confirmar suspensão" (danger) + "Não suspender" (ghost) buttons, no modal |
+| Reactivate suspended tenant | "Reativar **{nome}**?" | Inline confirmation — "Confirmar reativação" (primary) + "Não reativar" (ghost) |
 
 No modal/dialog is used for these confirmations — follow the existing inline-expansion pattern from `tenant-manager.tsx` (Phase 2 established this pattern in CRM).
 

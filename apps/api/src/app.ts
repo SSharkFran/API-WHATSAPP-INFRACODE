@@ -5,7 +5,7 @@ import sensible from "@fastify/sensible";
 import websocket from "@fastify/websocket";
 import { randomUUID } from "node:crypto";
 import { resolve, sep } from "node:path";
-import { type Queue, Worker as BullWorker } from "bullmq";
+import type { Queue } from "bullmq";
 import Fastify from "fastify";
 import { ZodTypeProvider } from "fastify-type-provider-zod";
 import { loadConfig } from "./config.js";
@@ -17,8 +17,6 @@ import { createRedis } from "./lib/redis.js";
 import { normalizeError } from "./lib/errors.js";
 import { createSendMessageQueue } from "./queues/message-queue.js";
 import { createWebhookQueue } from "./queues/webhook-queue.js";
-import { createLidReconciliationQueue } from "./queues/lid-reconciliation-queue.js";
-import { QUEUE_NAMES } from "./queues/queue-names.js";
 import { authPlugin } from "./plugins/auth.js";
 import { swaggerPlugin } from "./plugins/swagger.js";
 import { PlatformAdminService } from "./modules/admin/service.js";
@@ -161,15 +159,6 @@ export const buildApp = async () => {
     escalationService,
     sendMessageQueue
   });
-  const lidReconciliationQueue = config.NODE_ENV === "test" ? createNoopQueue() : createLidReconciliationQueue(redis);
-  const lidReconciliationWorker = config.NODE_ENV === "test"
-    ? null
-    : new BullWorker(
-        QUEUE_NAMES.LID_RECONCILIATION,
-        (job) => instanceOrchestrator.processLidReconciliation(job),
-        { connection: redis as never, concurrency: 1 }
-      );
-
   const platformAlertService = new PlatformAlertService(platformPrisma, instanceOrchestrator);
   chatbotService.setPlatformAlertService(platformAlertService);
   escalationService.setPlatformAlertService(platformAlertService);
@@ -286,8 +275,6 @@ export const buildApp = async () => {
     await messageService.close();
     await sendMessageQueue.close();
     await webhookDispatchQueue.close();
-    await lidReconciliationQueue.close();
-    if (lidReconciliationWorker) await lidReconciliationWorker.close();
     await redis.quit();
     await tenantPrismaRegistry.close();
     await platformPrisma.$disconnect();

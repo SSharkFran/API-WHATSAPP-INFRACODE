@@ -83,11 +83,11 @@ Add `apps/api/data/` to `.gitignore`. Run `git rm -r --cached apps/api/data/` if
 
 **Plans**: 5 plans
 
-- [x] 02-00-PLAN.md — Wave 0: Test scaffolds for all automated behaviors (CRM-01..CRM-06)
-- [x] 02-04-PLAN.md — Wave 1: Tenant schema migration tracking + runMigrations() infrastructure
-- [x] 02-01-PLAN.md — Wave 1: LID/JID normalization at ingestion — rawJid column, Prisma schema change, BullMQ reconciliation (CRM-01)
-- [x] 02-02-PLAN.md — Wave 2: formatPhone() utility + display normalization across all CRM surfaces (CRM-02, CRM-06, CRM-07)
-- [x] 02-03-PLAN.md — Wave 2: Custom fields UI surface, tags filter, N+1 fix, message history (CRM-03, CRM-04, CRM-05, CRM-06)
+- [ ] 02-00-PLAN.md — Wave 0: Test scaffolds for all automated behaviors (CRM-01..CRM-06)
+- [ ] 02-04-PLAN.md — Wave 1: Tenant schema migration tracking + runMigrations() infrastructure
+- [ ] 02-01-PLAN.md — Wave 1: LID/JID normalization at ingestion — rawJid column, Prisma schema change, BullMQ reconciliation (CRM-01)
+- [ ] 02-02-PLAN.md — Wave 2: formatPhone() utility + display normalization across all CRM surfaces (CRM-02, CRM-06, CRM-07)
+- [ ] 02-03-PLAN.md — Wave 2: Custom fields UI surface, tags filter, N+1 fix, message history (CRM-03, CRM-04, CRM-05, CRM-06)
 
 #### Plan 2.1 — LID/JID Normalization at Ingestion
 At the point where a contact record is created or updated from a Baileys inbound message, call `signalRepository.getPNForLID(lid)` before storing the JID as the contact's phone number. Store the resolved E.164 number in `phoneNumber`; store the raw JID in a separate `rawJid` field only. If LID resolution fails (mapping not yet populated), store the raw JID in `rawJid` and leave `phoneNumber` null — never write a `@lid` string into `phoneNumber`. Implement a background reconciliation job (BullMQ) that periodically retries resolution for contacts with null `phoneNumber` and non-null `rawJid`.
@@ -134,13 +134,7 @@ Add a `schema_migrations` table to every tenant schema at provisioning time. Imp
 
 **Requirements**: ADM-01, ADM-02, ADM-03, ADM-04
 
-**Plans**: 4 plans
-
-Plans:
-- [ ] 03-01-PLAN.md — Wave 1 (TDD): Extract AdminIdentityService from InstanceOrchestrator (ADM-01, ADM-02)
-- [ ] 03-02-PLAN.md — Wave 2: Redis JID cache at connection open; LID resolution via cached JID (ADM-03)
-- [ ] 03-03-PLAN.md — Wave 2: Super-admin route audit, 403 error states, platform routes 403 test (ADM-04)
-- [ ] 03-04-PLAN.md — Wave 3: Pino logger, scheduler lifecycle fix, dead code deletion, UTF-8 fix, worker exit handler (ADM-01)
+**Plans**:
 
 #### Plan 3.1 — Extract AdminIdentityService
 Extract lines 2049–2171 of `apps/api/src/modules/instances/service.ts` (the admin detection block) into a standalone `AdminIdentityService` class at `apps/api/src/modules/instances/admin-identity.service.ts`. The service accepts `IAprendizadoContinuoModule` (interface, not the concrete module) so it works whether the module is enabled or not. It returns a single `AdminIdentityContext` struct: `{ isAdmin, isVerifiedAdmin, isInstanceSelf, isAdminSelfChat, canReceiveLearningReply, matchedAdminPhone, escalationConversationId }`. Add unit tests for the four key scenarios before extraction.

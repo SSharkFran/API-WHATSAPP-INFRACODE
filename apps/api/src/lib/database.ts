@@ -2,13 +2,11 @@ import { createRequire } from "node:module";
 import { existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import type pino from "pino";
 import type { PrismaClient as PlatformPrismaClientType } from "../../../../prisma/generated/platform-client/index.js";
 import type { PrismaClient as TenantPrismaClientType } from "../../../../prisma/generated/tenant-client/index.js";
 import type { AppConfig } from "../config.js";
 import type { MetricsService } from "./metrics.js";
 import { buildTenantSchemaSql, resolveTenantSchemaName } from "./tenant-schema.js";
-import { runMigrations } from "./run-migrations.js";
 
 const require = createRequire(import.meta.url);
 const currentFileDirectory = dirname(fileURLToPath(import.meta.url));
@@ -71,17 +69,15 @@ interface TenantRegistryEntry {
 export class TenantPrismaRegistry {
   private readonly config: AppConfig;
   private readonly metricsService: MetricsService;
-  private readonly logger: pino.Logger;
   private readonly entries = new Map<string, TenantRegistryEntry>();
   private readonly creationLocks = new Map<string, Promise<TenantPrisma>>();
   private readonly ensuredSchemas = new Set<string>();
   private readonly schemaEnsureLocks = new Map<string, Promise<string>>();
   private evictionQueue = Promise.resolve();
 
-  public constructor(config: AppConfig, metricsService: MetricsService, logger: pino.Logger) {
+  public constructor(config: AppConfig, metricsService: MetricsService) {
     this.config = config;
     this.metricsService = metricsService;
-    this.logger = logger;
   }
 
   public async ensureSchema(platformPrisma: PlatformPrisma, tenantId: string): Promise<string> {
@@ -98,13 +94,9 @@ export class TenantPrismaRegistry {
     const ensurePromise = (async () => {
       const schemaName = resolveTenantSchemaName(tenantId);
 
-      // Create base tables (idempotent baseline)
       for (const sql of buildTenantSchemaSql(schemaName)) {
         await platformPrisma.$executeRawUnsafe(sql);
       }
-
-      // Apply versioned migrations (idempotent, skips already-applied versions)
-      await runMigrations(platformPrisma, tenantId, this.logger);
 
       this.ensuredSchemas.add(tenantId);
       return schemaName;

@@ -71,11 +71,11 @@ Source: `globals.css` spacing patterns, `admin/layout.tsx` nav item heights, But
 |------|------|--------|-------------|------|
 | Body | 14px (text-sm) | 400 (regular) | 1.5 | Space Grotesk |
 | Label / Kicker | 10px (text-[10px]) | 400 (regular) | 1.4 | IBM Plex Mono, uppercase, tracking-widest |
-| Heading (card) | 16px (text-base) | 600 (semibold) | 1.3 | Space Grotesk |
+| Heading (card) | 16px (text-base) | 700 (bold) | 1.3 | Space Grotesk |
 | Display (page title) | 20px (text-xl) | 700 (bold) | 1.2 | Space Grotesk |
 
 Rules:
-- Exactly 2 weights: **400** (body text, secondary labels, kicker labels) and **600/700** (headings, button labels, badge text).
+- Exactly 2 weights: **400** (body text, secondary labels, kicker labels) and **700** (headings, button labels, badge text).
 - The Label/Kicker visual identity comes from its font-family (IBM Plex Mono), uppercase transform, and `tracking-widest` letter-spacing — not from weight. Weight stays at 400.
 - Mono font reserved for: kicker labels (`control-kicker` pattern), slug/JID values, metric numbers in badge context.
 - Never use raw JID (`@s.whatsapp.net`, `@lid`) as visible text — always pass through `formatPhone()` (CRM-02, ADM requirement).

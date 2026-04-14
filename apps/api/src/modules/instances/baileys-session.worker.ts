@@ -31,6 +31,7 @@ interface WorkerInitPayload {
   authDirectory: string;
   sessionDbPath: string;
   proxyUrl?: string | null;
+  adminPhone?: string | null;
 }
 
 interface RpcCommand {
@@ -751,6 +752,22 @@ const startSocket = async (): Promise<void> => {
               phoneNumber: socket?.user?.id?.split(":")[0]?.split("@")[0] ?? null,
               avatarUrl: null
             });
+            // Resolve admin JID now that socket is authenticated
+            const adminPhone = init.adminPhone;
+            if (adminPhone && nextSocket) {
+              try {
+                const onWhatsAppResult = await nextSocket.onWhatsApp(adminPhone);
+                const resolved = Array.isArray(onWhatsAppResult) ? onWhatsAppResult[0] : undefined;
+                if (resolved?.exists && resolved.jid) {
+                  parentPort?.postMessage({
+                    type: "admin-jid-resolved",
+                    resolvedJid: resolved.jid
+                  });
+                }
+              } catch {
+                log("warn", "Falha ao resolver JID do admin na abertura de conexao");
+              }
+            }
           }
 
           if (event.connection === "close") {

@@ -987,6 +987,12 @@ export class InstanceOrchestrator {
   }
 
   private async spawnWorker(tenantId: string, instance: Instance & { usage?: InstanceUsage | null }): Promise<void> {
+    // Resolve adminPhone from configs so the worker can call onWhatsApp() at connection open
+    const prismaForAdmin = await this.tenantPrismaRegistry.getClient(tenantId);
+    const chatbotCfgForAdmin = await prismaForAdmin.chatbotConfig.findFirst({ where: { instanceId: instance.id } });
+    const platformCfgForAdmin = await this.platformPrisma.platformConfig.findFirst();
+    const adminPhone = chatbotCfgForAdmin?.leadsPhoneNumber ?? platformCfgForAdmin?.adminAlertPhone ?? null;
+
     const worker = new Worker(new URL("./baileys-session.worker.js", import.meta.url), {
       workerData: {
         instanceId: instance.id,
@@ -994,7 +1000,8 @@ export class InstanceOrchestrator {
         instanceName: instance.name,
         authDirectory: instance.authDirectory,
         sessionDbPath: instance.sessionDbPath,
-        proxyUrl: instance.proxyUrl
+        proxyUrl: instance.proxyUrl,
+        adminPhone
       }
     });
 
@@ -1195,6 +1202,18 @@ export class InstanceOrchestrator {
       return;
     }
 
+    if (event.type === "admin-jid-resolved") {
+      const resolvedJid = (event as { type: string; resolvedJid: string }).resolvedJid;
+      if (resolvedJid) {
+        await this.redis.set(`instance:${instance.id}:admin_jid`, resolvedJid);
+        console.log("[admin-identity] JID do admin cacheado no Redis", {
+          instanceId: instance.id,
+          resolvedJid
+        });
+      }
+      return;
+    }
+
     if (event.type === "inbound-message") {
       await this.handleInboundMessage(tenantId, instance, event);
       return;
@@ -1257,6 +1276,10 @@ if (event.status === "CONNECTED") {
         this.platformAlertService?.alertInstanceUp(tenantId, instance.id, instance.name).catch((err) => {
           console.error("[orchestrator] erro ao alertar reconexao:", err);
         });
+      }
+
+      if (event.status === "DISCONNECTED" || event.status === "PAUSED") {
+        await this.redis.del(`instance:${instance.id}:admin_jid`);
       }
 
       if (event.status === "DISCONNECTED" || event.status === "BANNED") {

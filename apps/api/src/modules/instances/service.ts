@@ -2112,6 +2112,8 @@ if (event.status === "CONNECTED") {
       }
     }
     const quotedLearningConversationId = quotedLearningConversationIdFromSignals ?? persistedAdminPromptConversationId;
+    // Read cached admin JID from Redis (set at connection open by admin-jid-resolved handler)
+    const cachedAdminJid = await this.redis.get(`instance:${instance.id}:admin_jid`);
     // Build AdminIdentityInput and resolve admin identity via service
     const adminIdentityInput: AdminIdentityInput = {
       remoteJid: event.remoteJid,
@@ -2143,7 +2145,8 @@ if (event.status === "CONNECTED") {
       realPhoneFromRemoteJid,
       cleanPhoneFromRemoteJid,
       sharedPhoneNumberFromFields,
-      lastRemoteNumber
+      lastRemoteNumber,
+      cachedAdminJid
     };
     const adminCtx = this.adminIdentityService.resolve(adminIdentityInput);
     const {

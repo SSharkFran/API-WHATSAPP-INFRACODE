@@ -44,6 +44,7 @@ export interface AdminIdentityInput {
   cleanPhoneFromRemoteJid: string;
   sharedPhoneNumberFromFields: string | null;
   lastRemoteNumber: string | null;
+  cachedAdminJid?: string | null;
 }
 
 export class AdminIdentityService {
@@ -87,7 +88,17 @@ export class AdminIdentityService {
           ]
         : [];
 
+    // LID resolution: if the remoteJid is a @lid JID and we have a Redis-cached admin JID,
+    // check if they match. If so, inject the primary admin phone as a synthetic candidate.
+    let resolvedLidPhone: string | null = null;
+    if (input.remoteJid.endsWith("@lid") && input.cachedAdminJid) {
+      if (this.jidsMatch(input.cachedAdminJid, [input.remoteJid])) {
+        resolvedLidPhone = adminCandidatePhones.find((p): p is string => p != null) ?? null;
+      }
+    }
+
     const adminSenderCandidates = [
+      resolvedLidPhone,
       senderNumber,
       remoteChatNumber,
       resolvedContactNumber,

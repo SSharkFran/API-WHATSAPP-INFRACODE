@@ -113,7 +113,7 @@ describe("AdminIdentityService", () => {
   });
 
   describe("Scenario 4 — LID-form JID placeholder (ADM-03)", () => {
-    it("@lid JID does not match phone candidates (no false positive)", () => {
+    it("@lid JID does not match phone candidates without cachedAdminJid (no false positive)", () => {
       const input = buildInput({
         remoteJid: "abc123@lid",
         adminCandidatePhones: ["5511999990003"],
@@ -134,6 +134,31 @@ describe("AdminIdentityService", () => {
       const ctx = service.resolve(input);
 
       expect(ctx.isAdmin).toBe(false);
+    });
+
+    it("@lid JID resolves admin via Redis-cached JID (ADM-03 fix)", () => {
+      const input = buildInput({
+        remoteJid: "abc123@lid",
+        adminCandidatePhones: ["5511999990003"],
+        aprendizadoContinuoModule: null,
+        escalationConversationId: null,
+        fromMe: false,
+        cachedAdminJid: "abc123@lid",
+        // No phone candidates available — all null
+        senderNumber: null,
+        remoteChatNumber: null,
+        resolvedContactNumber: null,
+        remoteNumber: null,
+        realPhoneFromRemoteJid: null,
+        cleanPhoneFromRemoteJid: "",
+        sharedPhoneNumberFromFields: null,
+        lastRemoteNumber: null
+      });
+
+      const ctx = service.resolve(input);
+
+      expect(ctx.isAdmin).toBe(true);
+      expect(ctx.matchedAdminPhone).toBe("5511999990003");
     });
   });
 });

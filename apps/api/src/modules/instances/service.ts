@@ -19,6 +19,7 @@ import type { PlatformPrisma, TenantPrismaRegistry } from "../../lib/database.js
 import { ApiError } from "../../lib/errors.js";
 import type { MetricsService } from "../../lib/metrics.js";
 import { normalizePhoneNumber, normalizeWhatsAppPhoneNumber, toJid, looksLikeRealPhone } from "../../lib/phone.js";
+import { AdminIdentityService, type AdminIdentityInput } from "./admin-identity.service.js";
 import { ConversationAgent } from "../chatbot/agents/conversation.agent.js";
 import { FiadoAgent } from "../chatbot/agents/fiado.agent.js";
 import { MemoryAgent } from "../chatbot/agents/memory.agent.js";
@@ -251,6 +252,7 @@ export class InstanceOrchestrator {
   private readonly escalationService: EscalationService;
   private readonly platformAlertService?: PlatformAlertService;
   private readonly sendMessageQueue?: Queue;
+  private readonly adminIdentityService = new AdminIdentityService();
   private readonly logEmitter = new EventEmitter();
   private readonly qrEmitter = new EventEmitter();
   private readonly latestQrCodes = new Map<string, QrCodeEvent>();
@@ -1485,7 +1487,7 @@ if (event.status === "CONNECTED") {
       normalizePhoneNumber(lid.split("@")[0] ?? "")
     ];
     const shouldLinkAlias =
-      this.matchesAnyExpectedPhones(
+      this.adminIdentityService.matchesAnyExpectedPhones(
         [
           aprendizadoContinuoModule.configuredAdminPhone,
           aprendizadoContinuoModule.verifiedPhone,
@@ -1494,7 +1496,7 @@ if (event.status === "CONNECTED") {
         ],
         candidatePhones
       ) ||
-      this.matchesAnyExpectedJids(
+      this.adminIdentityService.matchesAnyExpectedJids(
         [
           ...aprendizadoContinuoModule.verifiedRemoteJids,
           ...aprendizadoContinuoModule.verifiedSenderJids
@@ -1616,7 +1618,7 @@ if (event.status === "CONNECTED") {
       !params.event.remoteJid.endsWith("@g.us")
     );
     const quotedExternalMessageId = this.extractQuotedMessageExternalId(params.event.rawMessage);
-    const matchesConfiguredPhone = this.phonesMatch(
+    const matchesConfiguredPhone = this.adminIdentityService.phonesMatch(
       aprendizadoContinuoModule.configuredAdminPhone ?? params.configuredAdminPhone,
       params.adminSenderCandidates
     );
@@ -1625,12 +1627,12 @@ if (event.status === "CONNECTED") {
       quotedExternalMessageId &&
       aprendizadoContinuoModule.challengeMessageId === quotedExternalMessageId
     );
-    const matchesChallengeChat = this.matchesAnyExpectedJids(
+    const matchesChallengeChat = this.adminIdentityService.matchesAnyExpectedJids(
       [aprendizadoContinuoModule.challengeRemoteJid],
       [params.event.remoteJid, params.senderJid]
     );
 
-    const matchesChallengeAlias = this.matchesAnyExpectedJids(
+    const matchesChallengeAlias = this.adminIdentityService.matchesAnyExpectedJids(
       [aprendizadoContinuoModule.challengeRemoteJid],
       [
         (params.contactFields?.sharedPhoneJid as string) ?? null,
@@ -1734,7 +1736,7 @@ if (event.status === "CONNECTED") {
     }
 
     const verifiedPhone =
-      this.findMatchingExpectedPhone(
+      this.adminIdentityService.findMatchingExpectedPhone(
         [normalizedConfiguredAdminPhone],
         params.adminSenderCandidates
       ) ??
@@ -2050,22 +2052,6 @@ if (event.status === "CONNECTED") {
       platformConfig?.adminAlertPhone ?? null,
       chatbotConfig?.leadsPhoneNumber ?? null
     ];
-    const verifiedAdminPhones =
-      aprendizadoContinuoModule?.isEnabled && aprendizadoContinuoModule.verificationStatus === "VERIFIED"
-        ? [
-            aprendizadoContinuoModule.configuredAdminPhone ?? null,
-            aprendizadoContinuoModule.verifiedPhone ?? null,
-            ...aprendizadoContinuoModule.verifiedPhones,
-            ...(aprendizadoContinuoModule.additionalAdminPhones ?? [])
-          ]
-        : [];
-    const verifiedAdminJids =
-      aprendizadoContinuoModule?.isEnabled && aprendizadoContinuoModule.verificationStatus === "VERIFIED"
-        ? [
-            ...aprendizadoContinuoModule.verifiedRemoteJids,
-            ...aprendizadoContinuoModule.verifiedSenderJids
-          ]
-        : [];
     const instanceOwnPhone =
       normalizeWhatsAppPhoneNumber(currentInstance?.phoneNumber ?? instance.phoneNumber) ??
       normalizePhoneNumber(currentInstance?.phoneNumber ?? instance.phoneNumber ?? "");
@@ -2080,19 +2066,7 @@ if (event.status === "CONNECTED") {
       sharedPhoneNumberFromFields,
       lastRemoteNumber
     ];
-    const matchedAdminPhone = this.findMatchingExpectedPhone(adminCandidatePhones, adminSenderCandidates);
-    const matchedVerifiedAdminPhone = this.findMatchingExpectedPhone(verifiedAdminPhones, adminSenderCandidates);
-    // Para mensagens fromMe (echoes), remoteJid e o destinatario — nao o remetente.
-    // Usar remoteJid para detectar admin sender causaria falso positivo quando o bot envia para o admin.
-    const isVerifiedAprendizadoContinuoAdminSender = !event.messageKey?.fromMe && (
-      Boolean(matchedVerifiedAdminPhone) ||
-      this.matchesAnyExpectedJids(verifiedAdminJids, [
-        event.remoteJid,
-        senderJid,
-        typeof contactFields?.sharedPhoneJid === "string" ? contactFields.sharedPhoneJid : null,
-        typeof contactFields?.lastRemoteJid === "string" ? contactFields.lastRemoteJid : null
-      ])
-    );
+    // Resolve escalation conversation ID (async I/O — stays in handleInboundMessage, passed to service)
     const quotedLearningConversationIdFromSignals =
       this.extractQuotedLearningConversationId(event.rawMessage) ??
       this.extractLearningConversationIdFromText(rawTextInput) ??
@@ -2114,7 +2088,67 @@ if (event.status === "CONNECTED") {
         console.error("[escalation] falha ao consultar alerta admin persistido:", error);
       }
     }
-    let quotedLearningConversationId = quotedLearningConversationIdFromSignals ?? persistedAdminPromptConversationId;
+    const quotedLearningConversationId = quotedLearningConversationIdFromSignals ?? persistedAdminPromptConversationId;
+    // Build AdminIdentityInput and resolve admin identity via service
+    const adminIdentityInput: AdminIdentityInput = {
+      remoteJid: event.remoteJid,
+      senderJid,
+      fromMe: event.messageKey?.fromMe,
+      rawTextInput,
+      adminCandidatePhones,
+      aprendizadoContinuoModule: aprendizadoContinuoModule
+        ? {
+            isEnabled: aprendizadoContinuoModule.isEnabled,
+            verificationStatus: aprendizadoContinuoModule.verificationStatus,
+            configuredAdminPhone: aprendizadoContinuoModule.configuredAdminPhone ?? null,
+            verifiedPhone: aprendizadoContinuoModule.verifiedPhone ?? null,
+            verifiedPhones: aprendizadoContinuoModule.verifiedPhones ?? [],
+            additionalAdminPhones: aprendizadoContinuoModule.additionalAdminPhones ?? null,
+            verifiedRemoteJids: aprendizadoContinuoModule.verifiedRemoteJids ?? [],
+            verifiedSenderJids: aprendizadoContinuoModule.verifiedSenderJids ?? []
+          }
+        : null,
+      instanceOwnPhone,
+      contactPhoneNumber: contact.phoneNumber ?? null,
+      sharedPhoneJid: typeof contactFields?.sharedPhoneJid === "string" ? contactFields.sharedPhoneJid : null,
+      lastRemoteJid: typeof contactFields?.lastRemoteJid === "string" ? contactFields.lastRemoteJid : null,
+      escalationConversationId: quotedLearningConversationId,
+      senderNumber,
+      remoteChatNumber,
+      resolvedContactNumber,
+      remoteNumber,
+      realPhoneFromRemoteJid,
+      cleanPhoneFromRemoteJid,
+      sharedPhoneNumberFromFields,
+      lastRemoteNumber
+    };
+    const adminCtx = this.adminIdentityService.resolve(adminIdentityInput);
+    const {
+      isAdmin: isAdminSender,
+      isVerifiedAdmin: isVerifiedAprendizadoContinuoAdminSender,
+      isInstanceSelf: isInstanceSender,
+      isAdminSelfChat,
+      canReceiveLearningReply: canProcessAprendizadoContinuoReply,
+      matchedAdminPhone,
+      isAdminOrInstanceSender,
+      shouldBypassDirectSenderTakeover,
+      isAdminLearningReply
+    } = adminCtx;
+    // matchedVerifiedAdminPhone: the verified admin phone that matched the sender (used for fallback/logging).
+    // Computed once after service call for downstream usage.
+    const verifiedAdminPhonesForMatch =
+      aprendizadoContinuoModule?.isEnabled && aprendizadoContinuoModule.verificationStatus === "VERIFIED"
+        ? [
+            aprendizadoContinuoModule.configuredAdminPhone ?? null,
+            aprendizadoContinuoModule.verifiedPhone ?? null,
+            ...aprendizadoContinuoModule.verifiedPhones,
+            ...(aprendizadoContinuoModule.additionalAdminPhones ?? [])
+          ]
+        : [];
+    const matchedVerifiedAdminPhone = this.adminIdentityService.findMatchingExpectedPhone(
+      verifiedAdminPhonesForMatch,
+      adminSenderCandidates
+    );
     if (
       rawTextInput &&
       (
@@ -2128,56 +2162,18 @@ if (event.status === "CONNECTED") {
         instanceId: instance.id,
         externalMessageId: event.externalMessageId,
         matchedAdminPhone,
-        matchedVerifiedAdminPhone,
         quotedLearningConversationId,
         remoteJid: event.remoteJid,
         senderJid,
         textPreview: rawTextInput.slice(0, 500)
       });
     }
-    const isAdminSender = Boolean(matchedAdminPhone);
-    let isAdminLearningReply = Boolean(quotedLearningConversationId && isVerifiedAprendizadoContinuoAdminSender);
-    const isInstanceSender = Boolean(
-      instanceOwnPhone &&
-      this.phonesMatch(instanceOwnPhone, [
-        senderNumber,
-        remoteChatNumber,
-        resolvedContactNumber,
-        normalizePhoneNumber(contact.phoneNumber ?? ""),
-        remoteNumber,
-        realPhoneFromRemoteJid,
-        cleanPhoneFromRemoteJid,
-        sharedPhoneNumberFromFields,
-        lastRemoteNumber
-      ])
-    );
-    let isAdminOrInstanceSender =
-      isAdminSender ||
-      isVerifiedAprendizadoContinuoAdminSender ||
-      isAdminLearningReply ||
-      isInstanceSender;
-    // IMPORTANTE: isInstanceSender NAO deve entrar aqui — echoes fromMe do proprio bot
-    // podem ter awaitingAdminResponse=true ativo e disparariam aprendizado incorreto.
-    const canProcessAprendizadoContinuoReply =
-      isVerifiedAprendizadoContinuoAdminSender ||
-      isAdminLearningReply;
-    const isAdminSelfChat = Boolean(
-      isAdminSender &&
-      remoteChatNumber &&
-      this.matchesAnyExpectedPhones(adminCandidatePhones, [remoteChatNumber])
-    );
-    const isInstanceSelfChat = Boolean(isInstanceSender && instanceOwnPhone && remoteChatNumber === instanceOwnPhone);
-    // Admin verificado do aprendizadoContinuo nunca deve acionar human takeover no chat de alerta
-    const isVerifiedAdminEscalationChat = Boolean(isVerifiedAprendizadoContinuoAdminSender || isAdminLearningReply);
-    const shouldBypassDirectSenderTakeover = isAdminSelfChat || isInstanceSelfChat || isVerifiedAdminEscalationChat;
-
     if (isVerifiedAprendizadoContinuoAdminSender) {
       console.log("[aprendizado-continuo] remetente reconhecido como admin verificado", {
         instanceId: instance.id,
         remoteJid: event.remoteJid,
         senderJid,
         quotedLearningConversationId,
-        matchedVerifiedAdminPhone,
         textPreview: rawTextInput.slice(0, 120)
       });
     }
@@ -3180,8 +3176,7 @@ if (event.status === "CONNECTED") {
           remoteJid: event.remoteJid,
           senderJid,
           adminCandidatePhones: adminCandidatePhones.filter(Boolean),
-          verifiedAdminPhones: verifiedAdminPhones.filter(Boolean),
-          verifiedAdminJids: verifiedAdminJids.filter(Boolean),
+          verifiedAdminPhones: verifiedAdminPhonesForMatch.filter(Boolean),
           adminSenderCandidates: adminSenderCandidates.filter(Boolean),
           quotedLearningConversationId
         });
@@ -3678,94 +3673,6 @@ if (event.status === "CONNECTED") {
     return session.resetGeneration !== expectedGeneration;
   }
 
-  private buildPhoneMatchVariants(phone?: string | null): string[] {
-    const normalized = normalizePhoneNumber(phone ?? "");
-
-    if (!normalized) {
-      return [];
-    }
-
-    const variants = new Set<string>([normalized]);
-    const withoutCountryCode =
-      normalized.startsWith("55") && normalized.length > 11 ? normalized.slice(2) : normalized;
-
-    variants.add(withoutCountryCode);
-
-    if (withoutCountryCode.length === 11 && withoutCountryCode[2] === "9") {
-      variants.add(`${withoutCountryCode.slice(0, 2)}${withoutCountryCode.slice(3)}`);
-    }
-
-    if (normalized.startsWith("55") && withoutCountryCode.length === 11 && withoutCountryCode[2] === "9") {
-      variants.add(`55${withoutCountryCode.slice(0, 2)}${withoutCountryCode.slice(3)}`);
-    }
-
-    return [...variants].filter(Boolean);
-  }
-
-  private phonesMatch(expected?: string | null, candidates: Array<string | null | undefined> = []): boolean {
-    const expectedVariants = new Set(this.buildPhoneMatchVariants(expected));
-
-    if (expectedVariants.size === 0) {
-      return false;
-    }
-
-    return candidates.some((candidate) => {
-      const candidateVariants = this.buildPhoneMatchVariants(candidate);
-      return candidateVariants.some((variant) => expectedVariants.has(variant));
-    });
-  }
-
-  private matchesAnyExpectedPhones(
-    expectedPhones: Array<string | null | undefined>,
-    candidates: Array<string | null | undefined> = []
-  ): boolean {
-    return expectedPhones.some((expectedPhone) => this.phonesMatch(expectedPhone, candidates));
-  }
-
-  private buildJidMatchVariants(jid?: string | null): string[] {
-    const trimmed = jid?.trim();
-
-    if (!trimmed) {
-      return [];
-    }
-
-    const variants = new Set<string>([trimmed]);
-    const withoutDeviceSuffix = trimmed.replace(/:\d+(?=@)/, "");
-    variants.add(withoutDeviceSuffix);
-
-    const localPart = withoutDeviceSuffix.split("@")[0] ?? "";
-    const digits = normalizePhoneNumber(localPart);
-
-    if (digits) {
-      variants.add(digits);
-      variants.add(`${digits}@s.whatsapp.net`);
-      variants.add(`${digits}@c.us`);
-      variants.add(`${digits}@lid`);
-    }
-
-    return [...variants].filter(Boolean);
-  }
-
-  private jidsMatch(expected?: string | null, candidates: Array<string | null | undefined> = []): boolean {
-    const expectedVariants = new Set(this.buildJidMatchVariants(expected));
-
-    if (expectedVariants.size === 0) {
-      return false;
-    }
-
-    return candidates.some((candidate) => {
-      const candidateVariants = this.buildJidMatchVariants(candidate);
-      return candidateVariants.some((variant) => expectedVariants.has(variant));
-    });
-  }
-
-  private matchesAnyExpectedJids(
-    expectedJids: Array<string | null | undefined>,
-    candidates: Array<string | null | undefined> = []
-  ): boolean {
-    return expectedJids.some((expectedJid) => this.jidsMatch(expectedJid, candidates));
-  }
-
   private appendUniqueStrings(
     values: Array<string | null | undefined>,
     normalizer?: (value: string) => string | null
@@ -3791,19 +3698,6 @@ if (event.status === "CONNECTED") {
     }
 
     return output;
-  }
-
-  private findMatchingExpectedPhone(
-    expectedPhones: Array<string | null | undefined>,
-    candidates: Array<string | null | undefined> = []
-  ): string | null {
-    for (const expectedPhone of expectedPhones) {
-      if (this.phonesMatch(expectedPhone, candidates)) {
-        return expectedPhone ?? null;
-      }
-    }
-
-    return null;
   }
 
   private resolveConfiguredPhone(...candidates: Array<string | null | undefined>): string | null {

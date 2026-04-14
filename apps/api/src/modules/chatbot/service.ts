@@ -4,10 +4,12 @@ import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { z } from "zod";
 import type { Prisma } from "../../../../../prisma/generated/tenant-client/index.js";
+import type pino from "pino";
 import type { AppConfig } from "../../config.js";
 import type { PlatformPrisma, TenantPrismaRegistry } from "../../lib/database.js";
 import { decrypt, encrypt } from "../../lib/crypto.js";
 import { ApiError } from "../../lib/errors.js";
+import { createLogger } from "../../lib/logger.js";
 import {
   assertValidPhoneNumber,
   ensurePhoneCountryCode,
@@ -304,6 +306,7 @@ export class ChatbotService {
   private readonly persistentMemoryService?: PersistentMemoryService;
   private readonly groqKeyRotator: GroqKeyRotator;
   private readonly orchestratorAgent: OrchestratorAgent;
+  private readonly logger: pino.Logger;
   private globalSystemPromptCache: { value: string | null; expiresAt: number } | undefined;
 
   public constructor(deps: ChatbotServiceDeps) {
@@ -314,13 +317,14 @@ export class ChatbotService {
     this.knowledgeService = deps.knowledgeService;
     this.persistentMemoryService = deps.persistentMemoryService;
     this.orchestratorAgent = new OrchestratorAgent();
+    this.logger = createLogger(deps.config).child({ component: "ChatbotService" });
 
     const extraKeys = (deps.config.GROQ_EXTRA_API_KEYS ?? "")
       .split(",")
       .map((k) => k.trim())
       .filter(Boolean);
     this.groqKeyRotator = new GroqKeyRotator([deps.config.GROQ_API_KEY, ...extraKeys]);
-    console.log(`[groq-rotator] inicializado com ${this.groqKeyRotator.size} chave(s)`);
+    this.logger.info({ keys: this.groqKeyRotator.size }, "[groq-rotator] inicializado");
   }
 
   public setPlatformAlertService(service: PlatformAlertService): void {
@@ -438,7 +442,7 @@ export class ChatbotService {
     });
 
     if (!response.ok) {
-      console.warn(`[knowledge-synthesis] erro na IA: ${response.status}`);
+      this.logger.warn({ status: response.status }, "[knowledge-synthesis] erro na IA");
       return;
     }
 
@@ -446,7 +450,7 @@ export class ChatbotService {
     const synthesis = data.choices?.[0]?.message?.content?.trim();
 
     if (!synthesis) {
-      console.warn("[knowledge-synthesis] resposta vazia da IA");
+      this.logger.warn("[knowledge-synthesis] resposta vazia da IA");
       return;
     }
 
@@ -458,7 +462,7 @@ export class ChatbotService {
       }
     });
 
-    console.log(`[knowledge-synthesis] documento atualizado para instancia ${instanceId} (${records.length} fatos)`);
+    this.logger.info({ instanceId, factos: records.length }, "[knowledge-synthesis] documento atualizado");
   }
 
   /**
@@ -516,7 +520,7 @@ export class ChatbotService {
       });
 
       if (!response.ok) {
-        console.warn(`[knowledge-entry-synthesis] IA retornou ${response.status}, usando valores brutos`);
+        this.logger.warn({ status: response.status }, "[knowledge-entry-synthesis] IA retornou erro, usando valores brutos");
         return fallback;
       }
 
@@ -530,10 +534,10 @@ export class ChatbotService {
 
       if (!question || !answer) return fallback;
 
-      console.log(`[knowledge-entry-synthesis] pergunta sintetizada: "${question.slice(0, 80)}..."`);
+      this.logger.info({ pergunta: question.slice(0, 80) }, "[knowledge-entry-synthesis] pergunta sintetizada");
       return { question, answer };
     } catch (err) {
-      console.warn(`[knowledge-entry-synthesis] erro ao sintetizar, usando valores brutos:`, err);
+      this.logger.warn({ err }, "[knowledge-entry-synthesis] erro ao sintetizar, usando valores brutos");
       return fallback;
     }
   }
@@ -706,7 +710,7 @@ export class ChatbotService {
       });
 
       if (currentInstance?.status !== "CONNECTED") {
-        console.warn("[aprendizado-continuo] instancia desconectada; desafio de verificacao segue pendente no painel", {
+        this.logger.warn({
           instanceId,
           status: currentInstance?.status ?? "UNKNOWN"
         });
@@ -863,7 +867,7 @@ public async simulate(
     const { config, managedAiProvider, prisma } = await this.getContext(tenantId, instanceId);
 
     if (!config.isEnabled) {
-      console.warn("[chatbot] mensagem ignorada porque o chatbot principal esta desativado", {
+      this.logger.warn({
         instanceId,
         tenantId,
         textPreview: input.text?.slice(0, 120) ?? ""
@@ -874,7 +878,7 @@ public async simulate(
     const result = await this.evaluateConfig(tenantId, prisma, config, managedAiProvider, input);
 
     if (result.action === "NO_MATCH") {
-      console.warn("[chatbot] mensagem sem resposta apos avaliacao", {
+      this.logger.warn({
         instanceId,
         tenantId,
         textPreview: input.text?.slice(0, 120) ?? ""
@@ -943,7 +947,7 @@ public async simulate(
 
       return cleanedResponse || adminRawAnswer.trim();
     } catch (err) {
-      console.error("[chatbot:admin-answer] erro ao formular resposta:", err);
+      this.logger.error({ err }, "[chatbot:admin-answer] erro ao formular resposta");
       return adminRawAnswer.trim();
     }
   }
@@ -1022,7 +1026,7 @@ public async simulate(
 
       return cleaned || fallback;
     } catch (err) {
-      console.warn("[chatbot:escalation-question] erro ao formular pergunta, usando fallback:", err);
+      this.logger.warn({ err }, "[chatbot:escalation-question] erro ao formular pergunta, usando fallback");
       return fallback;
     }
   }
@@ -1092,7 +1096,7 @@ public async simulate(
 
       return !/\[ALLOW\]/i.test(response ?? "");
     } catch (err) {
-      console.error("[chatbot:grounding-check] erro ao validar contexto institucional:", err);
+      this.logger.error({ err }, "[chatbot:grounding-check] erro ao validar contexto institucional");
       return true;
     }
   }
@@ -1559,7 +1563,7 @@ private async evaluateConfig(
     remoteJid: string | null;
   } | null> {
     if (!this.platformAlertService) {
-      console.warn("[aprendizado-continuo] platformAlertService indisponivel para verificacao do admin");
+      this.logger.warn("[aprendizado-continuo] platformAlertService indisponivel para verificacao do admin");
       return null;
     }
 
@@ -1581,7 +1585,7 @@ private async evaluateConfig(
     );
 
     if (!result.delivered) {
-      console.warn("[aprendizado-continuo] falha ao entregar desafio de verificacao do admin");
+      this.logger.warn("[aprendizado-continuo] falha ao entregar desafio de verificacao do admin");
       return null;
     }
 
@@ -1710,14 +1714,14 @@ private async evaluateConfig(
     phoneNumber: string
   ): Promise<void> {
     const tenantId = chatbotConfig.__tenantId?.trim();
-    console.log("[lead:phone] raw phoneNumber received:", JSON.stringify(phoneNumber));
+    this.logger.info({ phoneNumber }, "[lead:phone] raw phoneNumber received");
 
     if (!tenantId) {
       return;
     }
 
     const prisma = await this.tenantPrismaRegistry.getClient(tenantId);
-    console.log("[lead] iniciando extração para conversa:", conversationId);
+    this.logger.info({ conversationId }, "[lead] iniciando extracao para conversa");
 
     try {
       const conversation = await this.waitForLeadPhoneResolution(prisma, conversationId, phoneNumber);
@@ -1735,7 +1739,7 @@ private async evaluateConfig(
             awaitingLeadExtraction: false
           } as Prisma.ConversationUncheckedUpdateInput
         });
-        console.log("[lead] awaitingLeadExtraction reset para conversa:", conversationId);
+        this.logger.info({ conversationId }, "[lead] awaitingLeadExtraction reset para conversa");
         return;
       }
 
@@ -1753,7 +1757,7 @@ private async evaluateConfig(
           : null;
       const remoteJid = lastRemoteJid || toJid(conversation.contact?.phoneNumber ?? phoneNumber);
       const cleanPhone = this.resolveLeadPhoneFromConversation(conversation, phoneNumber).cleanPhone;
-      console.log("[lead:phone] cleanPhone:", cleanPhone);
+      this.logger.info({ cleanPhone }, "[lead:phone] cleanPhone");
       const leadRemoteJids = Array.from(
         new Set(
           [lastRemoteJid, sharedPhoneJid, remoteJid, cleanPhone ? toJid(cleanPhone) : null].filter(
@@ -1769,7 +1773,7 @@ private async evaluateConfig(
       );
       const extracted = await this.extractLeadWithAi(messages, cleanPhone, chatbotConfig);
 
-      console.log("[lead] dados extraídos:", JSON.stringify(extracted));
+      this.logger.info({ extracted }, "[lead] dados extraidos");
 
       if (!extracted) {
         throw new Error("Falha ao extrair dados obrigatorios do lead");
@@ -1794,9 +1798,9 @@ private async evaluateConfig(
         }))?.adminAlertPhone ?? null;
       const alertPhone = instanceAlertPhone ?? adminAlertPhone;
 
-      console.log("[lead] tentando enviar para:", alertPhone);
-      console.log("[lead] instanceId:", conversation.instanceId);
-      console.log("[lead] mensagem:", alertMessage);
+      this.logger.info({ alertPhone }, "[lead] tentando enviar para");
+      this.logger.info({ instanceId: conversation.instanceId }, "[lead] instanceId");
+      this.logger.info({ alertMessage }, "[lead] mensagem");
 
       let alertSent = false;
 
@@ -1810,10 +1814,7 @@ private async evaluateConfig(
             )) ?? false
           : false;
       } catch (error) {
-        console.error(
-          "[lead] erro completo ao enviar:",
-          JSON.stringify(error, Object.getOwnPropertyNames(error))
-        );
+        this.logger.error({ err: error }, "[lead] erro completo ao enviar");
         throw error;
       }
 
@@ -1830,10 +1831,10 @@ private async evaluateConfig(
           awaitingLeadExtraction: false
         } as Prisma.ConversationUncheckedUpdateInput
       });
-      console.log("[lead] awaitingLeadExtraction reset para conversa:", conversationId);
-      console.log("[lead] lead enviado para:", cleanPhone);
+      this.logger.info({ conversationId }, "[lead] awaitingLeadExtraction reset para conversa");
+      this.logger.info({ cleanPhone }, "[lead] lead enviado para");
     } catch (error) {
-      console.error("[lead] erro na extração:", error);
+      this.logger.error({ err: error }, "[lead] erro na extracao");
       await prisma.conversation.update({
         where: {
           id: conversationId
@@ -1842,7 +1843,7 @@ private async evaluateConfig(
           awaitingLeadExtraction: false
         } as Prisma.ConversationUncheckedUpdateInput
       }).catch(() => undefined);
-      console.log("[lead] awaitingLeadExtraction reset para conversa:", conversationId);
+      this.logger.info({ conversationId }, "[lead] awaitingLeadExtraction reset para conversa");
     }
   }
 
@@ -2402,7 +2403,7 @@ private async evaluateConfig(
 
       // Escalacao implicita: IA disse "vou verificar" sem emitir [ESCALATE_ADMIN]
       if (isImplicitEscalation) {
-        console.warn(`[chatbot:ai] escalacao implicita detectada — IA disse "vou verificar" sem marcador. Convertendo para ESCALATE_ADMIN.`);
+        this.logger.warn("[chatbot:ai] escalacao implicita detectada - IA disse vou verificar sem marcador. Convertendo para ESCALATE_ADMIN");
         return {
           action: "ESCALATE_ADMIN",
           matchedRuleId: null,
@@ -2413,7 +2414,7 @@ private async evaluateConfig(
 
       // Agendamento implicito: IA disse "vou verificar disponibilidade" sem emitir [AGENDAR_ADMIN]
       if (isImplicitScheduling) {
-        console.warn(`[chatbot:ai] agendamento implicito detectado — IA disse "vou verificar disponibilidade" sem marcador. Convertendo para ESCALATE_ADMIN.`);
+        this.logger.warn("[chatbot:ai] agendamento implicito detectado - IA disse vou verificar disponibilidade sem marcador. Convertendo para ESCALATE_ADMIN");
         return {
           action: "ESCALATE_ADMIN",
           matchedRuleId: null,
@@ -2429,7 +2430,7 @@ private async evaluateConfig(
         responseText: cleanedText
       };
     } catch (err) {
-      console.error("[chatbot:ai] erro:", err);
+      this.logger.error({ err }, "[chatbot:ai] erro");
       return {
         action: "AI",
         matchedRuleId: null,
@@ -2702,7 +2703,7 @@ private async evaluateConfig(
 
         const alternativeKeys = this.groqKeyRotator.availableKeys().filter((k) => k !== apiKey);
         for (const altKey of alternativeKeys) {
-          console.warn(`[chatbot:ai] ${primaryProviderLabel} 429, tentando chave alternativa GROQ ...${altKey.slice(-6)}`);
+          this.logger.warn({ primaryProviderLabel, altKeySuffix: altKey.slice(-6) }, "[chatbot:ai] 429, tentando chave alternativa GROQ");
           try {
             const result = await this.requestOpenAiCompatibleCompletion(
               managedAiProvider,
@@ -2716,11 +2717,11 @@ private async evaluateConfig(
           } catch (altErr: unknown) {
             const altStatus = (altErr as { status?: number })?.status;
             this.groqKeyRotator.reportFailure(altKey, altStatus ?? 500);
-            console.warn(`[chatbot:ai] chave alternativa ...${altKey.slice(-6)} falhou (${altStatus})`);
+            this.logger.warn({ altKeySuffix: altKey.slice(-6), altStatus }, "[chatbot:ai] chave alternativa falhou");
           }
         }
 
-        console.warn(`[chatbot:ai] todas as chaves GROQ indisponiveis, tentando fallback externo`);
+        this.logger.warn("[chatbot:ai] todas as chaves GROQ indisponiveis, tentando fallback externo");
       }
 
       if (
@@ -2728,9 +2729,7 @@ private async evaluateConfig(
         config.aiFallbackProvider &&
         (config.aiFallbackProvider === "ollama" || config.aiFallbackApiKey)
       ) {
-        console.warn(
-          `[chatbot:ai] ${primaryProviderLabel} falhou (${status}), tentando fallback: ${config.aiFallbackProvider}`
-        );
+        this.logger.warn({ primaryProviderLabel, status, fallbackProvider: config.aiFallbackProvider }, "[chatbot:ai] provider falhou, tentando fallback");
         await this.notifyAdminFallback(tenantId, config, primaryProviderLabel, status ?? 0);
         try {
           return await this.callFallbackProvider(
@@ -2741,10 +2740,7 @@ private async evaluateConfig(
             temperature
           );
         } catch (fallbackErr) {
-          console.error(
-            `[chatbot:ai] fallback ${config.aiFallbackProvider} falhou apos erro do provider principal:`,
-            fallbackErr
-          );
+          this.logger.error({ err: fallbackErr, fallbackProvider: config.aiFallbackProvider }, "[chatbot:ai] fallback falhou apos erro do provider principal");
           throw fallbackErr;
         }
       }
@@ -2823,7 +2819,8 @@ private async evaluateConfig(
         } catch {
           // ignore
         }
-        console.error(`[chatbot:ai:gemini] erro ${response.status} para modelo "${geminiModel}":`, errorBody.slice(0, 300));
+        this.logger.error({ status: response.status, geminiModel, errorBody: errorBody.slice(0, 300) }, "[chatbot:ai:gemini] erro");
+
         throw new Error(`Gemini error ${response.status}`);
       }
       const json = (await response.json()) as {
@@ -2875,16 +2872,14 @@ private async evaluateConfig(
     providerName: string,
     statusCode: number
   ): Promise<void> {
-    console.warn(
-      `[chatbot:ai:fallback] tenant=${config.instanceId} notified of AI fallback (status=${statusCode})`
-    );
+    this.logger.warn({ instanceId: config.instanceId, statusCode }, "[chatbot:ai:fallback] tenant notified of AI fallback");
 
     this.platformAlertService?.alertCriticalError(
       tenantId,
       config.instanceId,
       `Falha do provider principal ${providerName} - usando fallback ${config.aiFallbackProvider} (status: ${statusCode})`
     ).catch((err) => {
-      console.error("[chatbot:ai] erro ao alertar fallback:", err);
+      this.logger.error({ err }, "[chatbot:ai] erro ao alertar fallback");
     });
   }
 

@@ -14,9 +14,11 @@ import type {
 } from "@infracode/types";
 import type { Prisma, Instance, InstanceUsage } from "../../../../../prisma/generated/tenant-client/index.js";
 import { Redis as IORedis } from "ioredis";
+import type pino from "pino";
 import type { AppConfig } from "../../config.js";
 import type { PlatformPrisma, TenantPrismaRegistry } from "../../lib/database.js";
 import { ApiError } from "../../lib/errors.js";
+import { createLogger } from "../../lib/logger.js";
 import type { MetricsService } from "../../lib/metrics.js";
 import { normalizePhoneNumber, normalizeWhatsAppPhoneNumber, toJid, looksLikeRealPhone } from "../../lib/phone.js";
 import { AdminIdentityService, type AdminIdentityInput } from "./admin-identity.service.js";
@@ -273,6 +275,7 @@ export class InstanceOrchestrator {
   // RISCO-07: instancias cujo admin ja recebeu aviso de ambiguidade de escalacao;
   // na proxima resposta sem citar, processa normalmente (confirmacao implicita)
   private readonly escalationAmbiguityAcknowledged = new Map<string, NodeJS.Timeout>();
+  private readonly logger: pino.Logger;
 
   public constructor(deps: InstanceOrchestratorDeps) {
     this.config = deps.config;
@@ -298,6 +301,7 @@ export class InstanceOrchestrator {
     this.escalationService = deps.escalationService;
     this.platformAlertService = deps.platformAlertService;
     this.sendMessageQueue = deps.sendMessageQueue;
+    this.logger = createLogger(deps.config).child({ component: "InstanceOrchestrator" });
   }
 
   public setPlatformAlertService(service: PlatformAlertService): void {
@@ -313,7 +317,7 @@ export class InstanceOrchestrator {
     // Limpa escalações travadas a cada 15 minutos
     this.escalationCleanupInterval = setInterval(() => {
       void this.runEscalationCleanup().catch((err) => {
-        console.warn("[scheduler] erro no cleanup de escalacoes:", err);
+        this.logger.warn({ err }, "[scheduler] erro no cleanup de escalacoes");
       });
     }, 15 * 60 * 1000);
 
@@ -325,7 +329,7 @@ export class InstanceOrchestrator {
         (60 - now.getUTCMinutes()) * 60 * 1000 - now.getUTCSeconds() * 1000 - now.getUTCMilliseconds();
       this.dailySummaryInterval = setTimeout(() => {
         void this.runDailySummaryForAllInstances().catch((err) => {
-          console.warn("[scheduler] erro no resumo diario:", err);
+          this.logger.warn({ err }, "[scheduler] erro no resumo diario");
         });
         // Reagenda para a próxima hora exata
         scheduleDailySummaryTick();
@@ -344,7 +348,7 @@ export class InstanceOrchestrator {
         }
       }
       if (evicted > 0) {
-        console.log(`[session-gc] ${evicted} sessao(es) inativa(s) removida(s) da memoria`);
+        this.logger.info({ evicted }, "[session-gc] sessao(es) inativa(s) removida(s) da memoria");
       }
     }, 30 * 60 * 1000);
   }
@@ -427,7 +431,7 @@ export class InstanceOrchestrator {
         this.dailySummarySentDates.set(summaryKey, today);
         await this.redis.set(redisDedupeKey, "1", "EX", 86400).catch(() => null);
       } catch (err) {
-        console.warn(`[scheduler] erro ao enviar resumo diario para ${workerKey}:`, err);
+        this.logger.warn({ err, workerKey }, "[scheduler] erro ao enviar resumo diario");
       }
     }
   }
@@ -845,7 +849,7 @@ export class InstanceOrchestrator {
       }) as { buffer: string; mimeType: string | null };
       return result;
     } catch (err) {
-      console.error("[worker] erro ao baixar midia do worker:", err);
+      this.logger.error({ err }, "[worker] erro ao baixar midia do worker");
       return null;
     }
   }
@@ -878,7 +882,7 @@ export class InstanceOrchestrator {
 
     if (!response.ok) {
       this.chatbotService.reportGroqKeyResult(apiKey, response.status);
-      console.error("[audio] Groq Whisper error:", await response.text());
+      this.logger.error({ status: response.status }, "[audio] Groq Whisper error");
       return null;
     }
 
@@ -1025,7 +1029,7 @@ export class InstanceOrchestrator {
       void this.handleWorkerEvent(tenantId, instance, managedWorker, event).catch((error) => {
         const normalizedError = error instanceof Error ? error : new Error(String(error));
 
-        console.error("[orchestrator] erro ao processar evento do worker:", {
+        this.logger.error({
           error: normalizedError.message,
           eventType: event.type,
           instanceId: instance.id,
@@ -1072,7 +1076,7 @@ export class InstanceOrchestrator {
         return;
       }
 
-      console.warn("[orchestrator] worker da instancia encerrado", {
+      this.logger.warn({
         code,
         instanceId: instance.id,
         paused: current.paused,
@@ -1212,7 +1216,7 @@ export class InstanceOrchestrator {
       const resolvedJid = event.resolvedJid;
       if (resolvedJid) {
         await this.redis.set(`instance:${instance.id}:admin_jid`, resolvedJid);
-        console.log("[admin-identity] JID do admin cacheado no Redis", {
+        this.logger.info({
           instanceId: instance.id,
           resolvedJid
         });
@@ -1237,7 +1241,7 @@ export class InstanceOrchestrator {
 
     if (event.type === "status") {
       managedWorker.currentStatus = event.status;
-      console.log("[worker-status]", {
+      this.logger.info({
         instanceId: instance.id,
         lastError: event.lastError ?? null,
         reconnectAttempts: event.reconnectAttempts ?? 0,
@@ -1280,7 +1284,7 @@ if (event.status === "CONNECTED") {
         });
 
         this.platformAlertService?.alertInstanceUp(tenantId, instance.id, instance.name).catch((err) => {
-          console.error("[orchestrator] erro ao alertar reconexao:", err);
+          this.logger.error({ err }, "[orchestrator] erro ao alertar reconexao");
         });
       }
 
@@ -1302,7 +1306,7 @@ if (event.status === "CONNECTED") {
         });
 
         this.platformAlertService?.alertInstanceDown(tenantId, instance.id, instance.name).catch((err) => {
-          console.error("[orchestrator] erro ao alertar queda:", err);
+          this.logger.error({ err }, "[orchestrator] erro ao alertar queda");
         });
       }
     }
@@ -1460,7 +1464,7 @@ if (event.status === "CONNECTED") {
     const linkedConversationId = this.escalationService.linkAdminAlertChatAlias(event.lid, event.jid);
 
     if (linkedConversationId) {
-      console.log("[escalation] alias @lid vinculado ao chat do admin", {
+      this.logger.info({
         conversationId: linkedConversationId,
         jid: event.jid,
         lid: event.lid
@@ -1478,7 +1482,7 @@ if (event.status === "CONNECTED") {
     const linkedConversationId = this.escalationService.linkAdminAlertChatAlias(event.lid, event.jid);
 
     if (linkedConversationId) {
-      console.log("[escalation] alias de chat mapeado para alerta admin", {
+      this.logger.info({
         conversationId: linkedConversationId,
         jid: event.jid,
         lid: event.lid
@@ -1689,7 +1693,7 @@ if (event.status === "CONNECTED") {
       !matchesChallengeAlias &&
       !matchesEscalationAlias
     ) {
-      console.warn("[aprendizado-continuo] codigo de verificacao recebido, mas remetente nao corresponde ao admin esperado", {
+      this.logger.warn({
         challengeRemoteJid: aprendizadoContinuoModule.challengeRemoteJid,
         configuredAdminPhone: aprendizadoContinuoModule.configuredAdminPhone,
         instanceId: params.instanceId,
@@ -1706,7 +1710,7 @@ if (event.status === "CONNECTED") {
       return false;
     }
 
-    console.log("[aprendizado-continuo] mensagem recebida durante verificacao pendente", {
+    this.logger.info({
       hasCodeCandidate: Boolean(extractedVerificationCode),
       instanceId: params.instanceId,
       matchesChallengeChat,
@@ -1727,7 +1731,7 @@ if (event.status === "CONNECTED") {
           await this.redis.expire(rateLimitKey, 10 * 60).catch(() => null);
         }
         if (attempts !== null && attempts >= 5) {
-          console.warn("[aprendizado-continuo] rate limit atingido para verificacao de admin", {
+          this.logger.warn({
             instanceId: params.instanceId,
             remoteJid: params.event.remoteJid,
             attempts
@@ -1737,7 +1741,7 @@ if (event.status === "CONNECTED") {
       }
 
       if (params.rawTextInput.trim()) {
-        console.log("[aprendizado-continuo] mensagem recebida durante verificacao pendente, aguardando codigo correto", {
+        this.logger.info({
           instanceId: params.instanceId,
           remoteJid: params.event.remoteJid,
           senderJid: params.senderJid,
@@ -1756,7 +1760,7 @@ if (event.status === "CONNECTED") {
       !matchesChallengeAlias &&
       !matchesEscalationAlias
     ) {
-      console.warn("[aprendizado-continuo] codigo correto recebido fora dos aliases conhecidos; promovendo conversa atual a admin", {
+      this.logger.warn({
         configuredAdminPhone: aprendizadoContinuoModule.configuredAdminPhone,
         instanceId: params.instanceId,
         remoteJid: params.event.remoteJid,
@@ -1870,7 +1874,7 @@ if (event.status === "CONNECTED") {
       });
     }
 
-    console.log("[aprendizado-continuo] admin verificado com sucesso", {
+    this.logger.info({
       instanceId: params.instanceId,
       remoteJid: params.event.remoteJid,
       senderJid: params.senderJid,
@@ -2114,7 +2118,7 @@ if (event.status === "CONNECTED") {
           adminSenderCandidates
         );
       } catch (error) {
-        console.error("[escalation] falha ao consultar alerta admin persistido:", error);
+        this.logger.error({ err: error }, "[escalation] falha ao consultar alerta admin persistido");
       }
     }
     const quotedLearningConversationId = quotedLearningConversationIdFromSignals ?? persistedAdminPromptConversationId;
@@ -2190,7 +2194,7 @@ if (event.status === "CONNECTED") {
         /\bID:\s*[a-z0-9]+\b/i.test(rawTextInput)
       )
     ) {
-      console.log("[escalation] inbound admin candidate", {
+      this.logger.info({
         instanceId: instance.id,
         externalMessageId: event.externalMessageId,
         matchedAdminPhone,
@@ -2201,7 +2205,7 @@ if (event.status === "CONNECTED") {
       });
     }
     if (isVerifiedAprendizadoContinuoAdminSender) {
-      console.log("[aprendizado-continuo] remetente reconhecido como admin verificado", {
+      this.logger.info({
         instanceId: instance.id,
         remoteJid: event.remoteJid,
         senderJid,
@@ -2260,7 +2264,7 @@ if (event.status === "CONNECTED") {
           phoneNumber: true
         }
       });
-      console.log("[lead] awaitingLeadExtraction reset para conversa:", resolvedConversation.id);
+      this.logger.info({ conversationId: resolvedConversation.id }, "[lead] awaitingLeadExtraction reset para conversa");
     }
 
     const activeConversation = !resolvedConversation
@@ -2353,7 +2357,7 @@ if (event.status === "CONNECTED") {
       activeConversation.awaitingAdminResponse = false;
       activeConversation.pendingClientJid = null;
 
-      console.log("[aprendizado-continuo] conversa destravada porque o modulo esta desativado", {
+      this.logger.info({
         conversationId: activeConversation.id,
         instanceId: instance.id
       });
@@ -2386,7 +2390,7 @@ if (event.status === "CONNECTED") {
       const dedupKey = `admin-msg-dedup:${instance.id}:${event.externalMessageId}`;
       const alreadyProcessed = await this.redis.set(dedupKey, "1", "EX", 30, "NX");
       if (!alreadyProcessed) {
-        console.warn(`[admin-dedup] mensagem ${event.externalMessageId} já processada, ignorando duplicata`);
+        this.logger.warn({ externalMessageId: event.externalMessageId }, "[admin-dedup] mensagem ja processada, ignorando duplicata");
         return;
       }
     }
@@ -2504,7 +2508,7 @@ if (event.status === "CONNECTED") {
           aiDisabledPermanent: false
         } as Prisma.ConversationUncheckedUpdateInput
       });
-      console.log("[lead] awaitingLeadExtraction reset para conversa:", activeConversation.id);
+      this.logger.info({ conversationId: activeConversation.id }, "[lead] awaitingLeadExtraction reset para conversa");
 
       await prisma.message.deleteMany({
         where: {
@@ -2613,13 +2617,13 @@ if (event.status === "CONNECTED") {
     if (!isAdminOrInstanceSender && !isControlCommand) {
       // blacklist por modulo (complementa contact.isBlacklisted que e por DB)
       if (isPhoneBlockedByBlacklist(sanitizedChatbotModules, resolvedContactNumber)) {
-        console.log("[blacklist] numero bloqueado pelo modulo:", resolvedContactNumber);
+        this.logger.info({ resolvedContactNumber }, "[blacklist] numero bloqueado pelo modulo");
         return;
       }
 
       // lista branca: so responde numeros da lista quando modo = "permitir_lista"
       if (!isPhoneAllowedByListaBranca(sanitizedChatbotModules, resolvedContactNumber)) {
-        console.log("[lista-branca] numero nao permitido:", resolvedContactNumber);
+        this.logger.info({ resolvedContactNumber }, "[lista-branca] numero nao permitido");
         return;
       }
 
@@ -2649,7 +2653,7 @@ if (event.status === "CONNECTED") {
           await this.redis.expire(spamKey, ttlSeconds).catch(() => null);
         }
         if (spamCount !== null && spamCount > antiSpamModule.maxMensagens) {
-          console.log("[anti-spam] mensagem bloqueada para:", resolvedContactNumber);
+          this.logger.info({ resolvedContactNumber }, "[anti-spam] mensagem bloqueada para");
           return;
         }
       }
@@ -2712,7 +2716,7 @@ if (event.status === "CONNECTED") {
 
       const audioMsg = rawMessage?.audioMessage ?? rawMessage?.pttMessage;
       if (audioMsg && (chatbotConfig?.audioEnabled ?? false)) {
-        console.log("[audio] mensagem de audio detectada, transcrevendo...");
+        this.logger.info("[audio] mensagem de audio detectada, transcrevendo");
         try {
           const transcript = await this.transcribeAudio(
             tenantId,
@@ -2721,17 +2725,17 @@ if (event.status === "CONNECTED") {
             messageKey
           );
           if (transcript) {
-            console.log("[audio] transcricao:", transcript.slice(0, 100));
+            this.logger.info({ transcricao: transcript.slice(0, 100) }, "[audio] transcricao");
             finalInputText = transcript;
           }
         } catch (err) {
-          console.error("[audio] erro na transcricao:", err);
+          this.logger.error({ err }, "[audio] erro na transcricao");
         }
       }
 
       const imageMsg = rawMessage?.imageMessage;
       if (imageMsg && (chatbotConfig?.visionEnabled ?? false)) {
-        console.log("[vision] imagem detectada, analisando...");
+        this.logger.info("[vision] imagem detectada, analisando");
         try {
           const caption = (imageMsg as { caption?: string })?.caption ?? "";
           const visionResult = await this.analyzeImage(
@@ -2759,7 +2763,7 @@ if (event.status === "CONNECTED") {
             finalInputText = `[O cliente enviou uma imagem. Analise: ${visionResult}]${caption ? ` Legenda: ${caption}` : ""}`;
           }
         } catch (err) {
-          console.error("[vision] erro na analise:", err);
+          this.logger.error({ err }, "[vision] erro na analise");
         }
       }
 
@@ -2830,7 +2834,7 @@ if (event.status === "CONNECTED") {
       }
 
       if (activeConversation.awaitingLeadExtraction && (isAdminOrInstanceSender || hasPendingEscalationsForAdminBypass)) {
-        console.log("[escalation] ignorando awaitingLeadExtraction do chat do admin para processar aprendizado pendente", {
+        this.logger.info({
           activeConversationId: activeConversation.id,
           hasPendingEscalationsForAdminBypass,
           instanceId: instance.id,
@@ -2881,10 +2885,10 @@ if (event.status === "CONNECTED") {
       if (finalInputText && isVerifiedAprendizadoContinuoAdminSender) {
         const correctionQuestion = this.extractQuotedConfirmationQuestion(event.rawMessage);
         if (correctionQuestion) {
-          console.log("[escalation] correcao detectada pelo admin", { question: correctionQuestion, instanceId: instance.id });
+          this.logger.info({ question: correctionQuestion, instanceId: instance.id }, "[escalation] correcao detectada pelo admin");
           await this.escalationService.processAdminCorrection(tenantId, instance.id, correctionQuestion, finalInputText);
           void this.chatbotService.triggerKnowledgeSynthesis(tenantId, instance.id)
-            .catch((err) => console.warn("[knowledge-synthesis] erro na correcao:", err));
+            .catch((err) => this.logger.warn({ err }, "[knowledge-synthesis] erro na correcao"));
           await this.sendAutomatedTextMessage(
             tenantId,
             instance.id,
@@ -2985,7 +2989,7 @@ if (event.status === "CONNECTED") {
                 this.appendConversationHistory(clientSession, "assistant", clientResponse);
               }
             } else {
-              console.warn("[escalation] nao foi possivel derivar o numero do cliente a partir do JID");
+              this.logger.warn("[escalation] nao foi possivel derivar o numero do cliente a partir do JID");
             }
 
             const learningAdminPhone = this.resolveConfiguredPhone(
@@ -3011,7 +3015,7 @@ if (event.status === "CONNECTED") {
               );
 
               if (delivered === false) {
-                console.warn("[escalation] falha ao enviar confirmacao de aprendizado ao admin");
+                this.logger.warn("[escalation] falha ao enviar confirmacao de aprendizado ao admin");
               }
 
               // PENDING_REVIEW: janela de 5 min para correcao pos-aprendizado
@@ -3030,7 +3034,7 @@ if (event.status === "CONNECTED") {
 
             // fire-and-forget: sintetiza conhecimento apos novo aprendizado
             void this.chatbotService.triggerKnowledgeSynthesis(tenantId, instance.id)
-              .catch((err) => console.warn("[knowledge-synthesis] erro no fire-and-forget:", err));
+              .catch((err) => this.logger.warn({ err }, "[knowledge-synthesis] erro no fire-and-forget"));
 
             return;
           }
@@ -3134,7 +3138,7 @@ if (event.status === "CONNECTED") {
               { action: "scheduling_admin_reply_ack", kind: "chatbot" }
             );
           } else {
-            console.warn("[scheduling] falha ao normalizar numero do cliente para agendamento", {
+            this.logger.warn({
               instanceId: instance.id,
               clientJid: schedulingPending.clientJid,
               clientRemoteNumber
@@ -3202,7 +3206,7 @@ if (event.status === "CONNECTED") {
       }
 
       if (finalInputText && activeConversation.awaitingAdminResponse && !canProcessAprendizadoContinuoReply) {
-        console.warn("[escalation] mensagem recebida com aprendizado pendente, mas remetente nao foi reconhecido como admin", {
+        this.logger.warn({
           instanceId: instance.id,
           conversationId: activeConversation.id,
           remoteJid: event.remoteJid,
@@ -3215,7 +3219,7 @@ if (event.status === "CONNECTED") {
       }
 
       if (activeConversation.awaitingAdminResponse && !canProcessAprendizadoContinuoReply) {
-        console.log("[escalation] conversa pausada, ignorando mensagem do cliente");
+        this.logger.info("[escalation] conversa pausada, ignorando mensagem do cliente");
         return;
       }
 
@@ -3277,7 +3281,7 @@ if (event.status === "CONNECTED") {
             adminJid,
             adminNotifyMsg,
             { action: "scheduling_admin_confirmation_alert", kind: "chatbot" }
-          ).catch((err) => console.warn("[scheduling] falha ao notificar admin com preferencia do cliente:", err));
+          ).catch((err) => this.logger.warn({ err }, "[scheduling] falha ao notificar admin com preferencia do cliente"));
 
           return;
         }
@@ -3302,7 +3306,7 @@ if (event.status === "CONNECTED") {
             data: { humanTakeover: true, humanTakeoverAt: new Date() } as Prisma.ConversationUncheckedUpdateInput
           });
           this.clearConversationSession(sessionKey);
-          console.log("[palavra-pausa] bot desativado para conversa:", activeConversation.id);
+          this.logger.info({ conversationId: activeConversation.id }, "[palavra-pausa] bot desativado para conversa");
           return;
         }
       }
@@ -3405,9 +3409,9 @@ if (event.status === "CONNECTED") {
 
       const clientText = rawResponse.replace(/\[RESUMO_LEAD\][\s\S]*?\[\/RESUMO_LEAD\]/, "").trim();
 
-      console.log("[chatbot] rawResponse:", rawResponse.slice(0, 300));
-      console.log("[chatbot] resumoDetectado:", !!resumoLead);
-      console.log("[chatbot] clientText:", clientText.slice(0, 300));
+      this.logger.info({ rawResponse: rawResponse.slice(0, 300) }, "[chatbot] rawResponse");
+      this.logger.info({ resumoDetectado: !!resumoLead }, "[chatbot] resumoDetectado");
+      this.logger.info({ clientText: clientText.slice(0, 300) }, "[chatbot] clientText");
 
       let leadData: LeadData | null = null;
 
@@ -3434,7 +3438,7 @@ if (event.status === "CONNECTED") {
         const camposOk = !campoFaltando;
 
         if (!camposOk && campoFaltando) {
-          console.log("[leads] RESUMO_LEAD incompleto, reforçando coleta:", campoFaltando.pergunta);
+          this.logger.info({ pergunta: campoFaltando.pergunta }, "[leads] RESUMO_LEAD incompleto, reforcando coleta");
           const delayReforco = Math.floor(Math.random() * 500) + 1000;
           await new Promise((resolve) => setTimeout(resolve, delayReforco));
           await this.sendAutomatedTextMessage(
@@ -3500,7 +3504,7 @@ if (event.status === "CONNECTED") {
                 resumoLead,
                 resolvedContactNumber
               ).catch((err) => {
-                console.error("[orchestrator] erro ao alertar novo lead:", err);
+                this.logger.error({ err }, "[orchestrator] erro ao alertar novo lead");
                 return false;
               })) ?? false;
 
@@ -3508,10 +3512,10 @@ if (event.status === "CONNECTED") {
               await this.markConversationLeadSent(prisma, activeConversation.id, session);
             }
           } else {
-            console.log("[leads] resumo duplicado ignorado");
+            this.logger.info("[leads] resumo duplicado ignorado");
           }
         } else if (!leadData?.isComplete) {
-          console.log("[leads] resumo incompleto, nao enviado:", resumoLead.slice(0, 100));
+          this.logger.info({ resumo: resumoLead.slice(0, 100) }, "[leads] resumo incompleto, nao enviado");
         }
       }
 
@@ -3566,7 +3570,7 @@ if (event.status === "CONNECTED") {
           resolvedContactNumber,
           session.history
         ).catch((err) => {
-          console.warn("[persistent-memory] erro no fire-and-forget:", err);
+          this.logger.warn({ err }, "[persistent-memory] erro no fire-and-forget");
         });
       }
 
@@ -3597,14 +3601,14 @@ if (event.status === "CONNECTED") {
                       activeConversation.phoneNumber !== cleanPhoneFromRemoteJid
                     ? toJid(activeConversation.phoneNumber)
                     : "";
-            console.log("[lead:phone] source variable:", JSON.stringify(senderRemoteJid || event.remoteJid));
+            this.logger.info({ source: senderRemoteJid || event.remoteJid }, "[lead:phone] source variable");
             const senderPhone =
               String(senderRemoteJid ?? "")
                 .replace(/@s\.whatsapp\.net$/i, "")
                 .replace(/@c\.us$/i, "")
                 .replace(/@.*$/, "")
                 .replace(/\D/g, "");
-            console.log("[lead:phone] passing to processLead:", JSON.stringify(senderPhone));
+            this.logger.info({ senderPhone }, "[lead:phone] passing to processLead");
             await this.chatbotService.processLeadAfterConversation(
               activeConversation.id,
               {
@@ -3614,7 +3618,7 @@ if (event.status === "CONNECTED") {
               senderPhone
             );
           } catch (error) {
-            console.error("[lead] erro na extração:", error);
+            this.logger.error({ err: error }, "[lead] erro na extracao");
             await prisma.conversation.update({
               where: {
                 id: activeConversation.id
@@ -3643,7 +3647,7 @@ if (event.status === "CONNECTED") {
         instance.id,
         error instanceof Error ? error.message : "Erro desconhecido no chatbot"
       ).catch((err) => {
-        console.error("[orchestrator] erro ao alertar erro critico:", err);
+        this.logger.error({ err }, "[orchestrator] erro ao alertar erro critico");
       });
     }
   }
@@ -3693,11 +3697,11 @@ if (event.status === "CONNECTED") {
     }
 
     await this.clientMemoryService.removeTag(params.tenantId, normalizedPhoneNumber, "paused_by_human");
-    console.log("[chatbot] removendo paused_by_human residual", {
+    this.logger.info({
       conversationId: params.conversation.id,
       phoneNumber: normalizedPhoneNumber,
       reason: params.reason
-    });
+    }, "[chatbot] removendo paused_by_human residual");
     return true;
   }
 
@@ -3886,7 +3890,7 @@ if (event.status === "CONNECTED") {
 
       // Reset histórico se sessão está inativa há mais tempo do que o configurado
       if (inactivityMs != null && Date.now() - existingSession.lastActivityAt.getTime() > inactivityMs) {
-        console.log(`[sessao-inatividade] sessao reiniciada por inatividade (${Math.round((Date.now() - existingSession.lastActivityAt.getTime()) / 3600000)}h)`, { instanceId, remoteJid });
+        this.logger.info({ instanceId, remoteJid, horasInatividade: Math.round((Date.now() - existingSession.lastActivityAt.getTime()) / 3600000) }, "[sessao-inatividade] sessao reiniciada por inatividade");
         existingSession.history = [];
         existingSession.lastActivityAt = new Date();
       }
@@ -3950,7 +3954,7 @@ if (event.status === "CONNECTED") {
         });
       }
     } else {
-      console.log(`[sessao-inatividade] histórico ignorado por inatividade (${Math.round((Date.now() - mostRecentRecord.createdAt.getTime()) / 3600000)}h)`, { instanceId, remoteJid });
+      this.logger.info({ instanceId, remoteJid, horasInatividade: Math.round((Date.now() - mostRecentRecord.createdAt.getTime()) / 3600000) }, "[sessao-inatividade] historico ignorado por inatividade");
     }
 
     const session: ConversationSession = {
@@ -4094,7 +4098,7 @@ if (event.status === "CONNECTED") {
         context.instance.id,
         error instanceof Error ? error.message : "Erro desconhecido no chatbot"
       ).catch((err) => {
-        console.error("[orchestrator] erro ao alertar erro critico:", err);
+        this.logger.error({ err }, "[orchestrator] erro ao alertar erro critico");
       });
     } finally {
       session.isProcessing = false;
@@ -4286,7 +4290,7 @@ if (event.status === "CONNECTED") {
           adminJid,
           `Transbordo humano solicitado pelo cliente ${params.resolvedContactNumber}. O bot foi pausado para este contato.`,
           { action: "human_handoff_alert", kind: "chatbot" }
-        ).catch((err) => console.warn("[handoff] falha ao notificar admin:", err));
+        ).catch((err) => this.logger.warn({ err }, "[handoff] falha ao notificar admin"));
       }
       return;
     }
@@ -4338,7 +4342,7 @@ if (event.status === "CONNECTED") {
             { action: "scheduling_admin_alert", kind: "chatbot" }
           );
         } catch (err) {
-          console.warn("[scheduling] falha ao notificar admin:", err);
+          this.logger.warn({ err }, "[scheduling] falha ao notificar admin");
         }
 
         // Registra no mapa de pendentes (30 min para o admin responder)
@@ -4352,7 +4356,7 @@ if (event.status === "CONNECTED") {
           payload.dataPreferencia
         );
       } else {
-        console.warn("[scheduling] adminPhone nao configurado, solicitacao de agendamento ignorada");
+        this.logger.warn("[scheduling] adminPhone nao configurado, solicitacao de agendamento ignorada");
       }
 
       // Envia mensagem de espera ao cliente.
@@ -4426,11 +4430,11 @@ if (event.status === "CONNECTED") {
                 normalizedResumeLead,
                 params.resolvedContactNumber
               ).catch((err) => {
-                console.error("[orchestrator] erro ao alertar novo lead (scheduling):", err);
+                this.logger.error({ err }, "[orchestrator] erro ao alertar novo lead (scheduling)");
               });
             }
           } else {
-            console.log("[leads] resumo de scheduling duplicado ignorado");
+            this.logger.info("[leads] resumo de scheduling duplicado ignorado");
           }
         }
       }
@@ -4483,7 +4487,7 @@ if (event.status === "CONNECTED") {
         platformConfig?.adminAlertPhone
       );
       if (!adminPhone) {
-        console.warn("[escalation] adminPhone nao configurado, escalacao ignorada");
+        this.logger.warn("[escalation] adminPhone nao configurado, escalacao ignorada");
         const fallbackText = "Nao consegui obter essa informacao agora. Por favor, entre em contato com nossa equipe.";
         await this.sendAutomatedTextMessage(
           params.tenantId,
@@ -4509,11 +4513,11 @@ if (event.status === "CONNECTED") {
           params.session.history
         )
         .catch((err) => {
-          console.warn("[escalation] erro ao formular pergunta para admin, usando mensagem bruta:", err);
+          this.logger.warn({ err }, "[escalation] erro ao formular pergunta para admin, usando mensagem bruta");
           return params.inputText;
         });
 
-      console.log("[escalation] enviando pergunta ao admin", {
+      this.logger.info({
         instanceId: params.instance.id,
         conversationId: params.conversationId,
         adminPhone,
@@ -4563,9 +4567,9 @@ if (event.status === "CONNECTED") {
     const resumoLead = resumoMatch ? resumoMatch[0] : null;
     const clientText = rawResponse.replace(/\[RESUMO_LEAD\][\s\S]*?\[\/RESUMO_LEAD\]/, "").trim();
 
-    console.log("[chatbot] rawResponse:", rawResponse.slice(0, 300));
-    console.log("[chatbot] resumoDetectado:", !!resumoLead);
-    console.log("[chatbot] clientText:", clientText.slice(0, 300));
+    this.logger.info({ rawResponse: rawResponse.slice(0, 300) }, "[chatbot] rawResponse");
+    this.logger.info({ resumoDetectado: !!resumoLead }, "[chatbot] resumoDetectado");
+    this.logger.info({ clientText: clientText.slice(0, 300) }, "[chatbot] clientText");
 
     if (this.isSessionExecutionStale(params.session, params.sessionGeneration)) {
       return;
@@ -4596,7 +4600,7 @@ if (event.status === "CONNECTED") {
       const camposOk = !campoFaltando;
 
       if (!camposOk && campoFaltando) {
-        console.log("[leads] RESUMO_LEAD incompleto, reforçando coleta:", campoFaltando.pergunta);
+        this.logger.info({ pergunta: campoFaltando.pergunta }, "[leads] RESUMO_LEAD incompleto, reforcando coleta");
         const delayReforco = Math.floor(Math.random() * 500) + 1000;
         await new Promise((resolve) => setTimeout(resolve, delayReforco));
         await this.sendAutomatedTextMessage(
@@ -4684,14 +4688,14 @@ if (event.status === "CONNECTED") {
               normalizedResumeLead,
               params.resolvedContactNumber
             ).catch((err) => {
-              console.error("[orchestrator] erro ao alertar novo lead:", err);
+              this.logger.error({ err }, "[orchestrator] erro ao alertar novo lead");
             });
           }
         } else {
-          console.log("[leads] resumo duplicado ignorado");
+          this.logger.info("[leads] resumo duplicado ignorado");
         }
       } else if (!leadData?.isComplete) {
-        console.log("[leads] resumo incompleto, nao enviado:", resumoLead.slice(0, 100));
+        this.logger.info({ resumo: resumoLead.slice(0, 100) }, "[leads] resumo incompleto, nao enviado");
       }
     }
 
@@ -4763,7 +4767,7 @@ if (event.status === "CONNECTED") {
         params.resolvedContactNumber,
         params.session.history
       ).catch((err) => {
-        console.warn("[persistent-memory] erro no fire-and-forget:", err);
+        this.logger.warn({ err }, "[persistent-memory] erro no fire-and-forget");
       });
     }
 
@@ -4793,14 +4797,14 @@ if (event.status === "CONNECTED") {
                 : params.conversationPhoneNumber
                     ? toJid(params.conversationPhoneNumber)
                     : "";
-          console.log("[lead:phone] source variable:", JSON.stringify(senderRemoteJid || params.targetJid));
+          this.logger.info({ source: senderRemoteJid || params.targetJid }, "[lead:phone] source variable");
           const senderPhone =
             String(senderRemoteJid ?? "")
               .replace(/@s\.whatsapp\.net$/i, "")
               .replace(/@c\.us$/i, "")
               .replace(/@.*$/, "")
               .replace(/\D/g, "");
-          console.log("[lead:phone] passing to processLead:", JSON.stringify(senderPhone));
+          this.logger.info({ senderPhone }, "[lead:phone] passing to processLead");
           await this.chatbotService.processLeadAfterConversation(
             params.conversationId,
             {
@@ -4810,7 +4814,7 @@ if (event.status === "CONNECTED") {
             senderPhone
           );
         } catch (error) {
-          console.error("[lead] erro na extraÃ§Ã£o:", error);
+          this.logger.error({ err: error }, "[lead] erro na extracao");
           await prisma.conversation.update({
             where: {
               id: params.conversationId
@@ -4945,7 +4949,7 @@ if (event.status === "CONNECTED") {
           instanceId,
           messageId: queued.id
         });
-        console.warn("[chatbot] worker indisponivel, mensagem automatizada enfileirada:", queued.id);
+        this.logger.warn({ queuedId: queued.id }, "[chatbot] worker indisponivel, mensagem automatizada enfileirada");
         return;
       }
       throw err;

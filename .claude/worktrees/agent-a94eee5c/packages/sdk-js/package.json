@@ -1,5 +1,5 @@
 {
-  "name": "@infracode/types",
+  "name": "@infracode/sdk-js",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -13,10 +13,13 @@
     }
   },
   "files": ["src", "dist"],
+  "dependencies": {
+    "@infracode/types": "workspace:*"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "lint": "tsc -p tsconfig.json --noEmit",
-    "test": "echo \"No tests for @infracode/types\""
+    "test": "echo \"No tests for @infracode/sdk-js\""
   },
   "devDependencies": {
     "typescript": "^5.9.2"

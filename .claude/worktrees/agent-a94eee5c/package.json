@@ -1,0 +1,21 @@
+{
+  "name": "infracode-whatsapp-platform",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "pnpm@10.16.0",
+  "scripts": {
+    "build": "pnpm -r build",
+    "dev": "pnpm --parallel --filter @infracode/api --filter @infracode/panel --filter @infracode/worker dev",
+    "dev:api": "pnpm --filter @infracode/api dev",
+    "dev:panel": "pnpm --filter @infracode/panel dev",
+    "dev:worker": "pnpm --filter @infracode/worker dev",
+    "test": "pnpm -r test",
+    "lint": "pnpm -r lint",
+    "prisma:generate": "pnpm --filter @infracode/api prisma:generate",
+    "prisma:push:platform": "pnpm --filter @infracode/api prisma:push:platform"
+  },
+  "devDependencies": {
+    "@prisma/client": "6.19.2",
+    "prisma": "6.19.2"
+  }
+}

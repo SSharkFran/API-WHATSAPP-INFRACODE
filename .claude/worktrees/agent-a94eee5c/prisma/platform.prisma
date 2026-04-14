@@ -1,0 +1,229 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../prisma/generated/platform-client"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("PLATFORM_DATABASE_URL")
+  directUrl = env("PLATFORM_DIRECT_DATABASE_URL")
+}
+
+model Tenant {
+  id                    String                @id @default(cuid())
+  name                  String
+  slug                  String                @unique
+  schemaName            String                @unique
+  status                String                @default("ACTIVE")
+  billingEmail          String?
+  onboardingStep        String                @default("INVITED")
+  onboardingCompletedAt DateTime?
+  storageBytes          BigInt                @default(0)
+  messagesThisMonth     Int                   @default(0)
+  instanceLimit         Int                   @default(3)
+  messagesPerMonth      Int                   @default(10000)
+  usersLimit            Int                   @default(5)
+  rateLimitPerMinute    Int                   @default(20)
+  maintenanceMode       Boolean               @default(false)
+  suspendedAt           DateTime?
+  planId                String?
+  createdAt             DateTime              @default(now())
+  updatedAt             DateTime              @updatedAt
+  plan                  BillingPlan?          @relation(fields: [planId], references: [id], onDelete: SetNull)
+  subscriptions         BillingSubscription[]
+  memberships           TenantMembership[]
+  invitations           Invitation[]
+  apiKeys               ApiKey[]
+  impersonations        ImpersonationSession[]
+  aiProvider            TenantAiProvider?
+}
+
+model BillingPlan {
+  id                 String                @id @default(cuid())
+  code               String                @unique
+  name               String
+  description        String?
+  priceCents         Int                   @default(0)
+  currency           String                @default("BRL")
+  instanceLimit      Int                   @default(3)
+  messagesPerMonth   Int                   @default(10000)
+  usersLimit         Int                   @default(5)
+  rateLimitPerMinute Int                   @default(20)
+  isActive           Boolean               @default(true)
+  createdAt          DateTime              @default(now())
+  updatedAt          DateTime              @updatedAt
+  tenants            Tenant[]
+  subscriptions      BillingSubscription[]
+}
+
+model BillingSubscription {
+  id                 String      @id @default(cuid())
+  tenantId           String
+  planId             String
+  status             String      @default("ACTIVE")
+  currentPeriodStart DateTime    @default(now())
+  currentPeriodEnd   DateTime?
+  nextDueAt          DateTime?
+  suspendedAt        DateTime?
+  canceledAt         DateTime?
+  notes              String?
+  createdAt          DateTime    @default(now())
+  updatedAt          DateTime    @updatedAt
+  tenant             Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  plan               BillingPlan @relation(fields: [planId], references: [id], onDelete: Restrict)
+
+  @@index([tenantId, status])
+}
+
+model User {
+  id                 String               @id @default(cuid())
+  email              String               @unique
+  name               String
+  passwordHash       String?
+  platformRole       String?
+  isActive           Boolean              @default(true)
+  twoFactorEnabled   Boolean              @default(false)
+  totpSecret         String?
+  pendingTotpSecret  String?
+  backupCodes        String[]             @default([])
+  lastLoginAt        DateTime?
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime             @updatedAt
+  memberships        TenantMembership[]
+  invitationsSent    Invitation[]         @relation("InvitationSender")
+  refreshSessions    RefreshSession[]
+  passwordResetTokens PasswordResetToken[]
+}
+
+model TenantMembership {
+  id        String   @id @default(cuid())
+  tenantId  String
+  userId    String
+  role      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, userId])
+  @@index([tenantId, role])
+}
+
+model Invitation {
+  id              String   @id @default(cuid())
+  tenantId        String
+  email           String
+  role            String
+  tokenHash       String   @unique
+  invitedByUserId String?
+  expiresAt       DateTime
+  acceptedAt      DateTime?
+  createdAt       DateTime @default(now())
+  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  invitedByUser   User?    @relation("InvitationSender", fields: [invitedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, email])
+}
+
+model PasswordResetToken {
+  id         String   @id @default(cuid())
+  userId     String
+  tokenHash  String   @unique
+  expiresAt  DateTime
+  consumedAt DateTime?
+  createdAt  DateTime @default(now())
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model RefreshSession {
+  id                  String   @id @default(cuid())
+  userId              String
+  tenantId            String?
+  tokenHash           String   @unique
+  impersonatedByUserId String?
+  expiresAt           DateTime
+  revokedAt           DateTime?
+  ipAddress           String?
+  userAgent           String?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+  user                User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, tenantId])
+}
+
+model ApiKey {
+  id         String   @id @default(cuid())
+  tenantId    String
+  name        String
+  keyHash     String
+  scopes      String[]
+  expiresAt   DateTime?
+  lastUsedAt  DateTime?
+  revokedAt   DateTime?
+  createdAt   DateTime @default(now())
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, keyHash])
+}
+
+model ImpersonationSession {
+  id               String   @id @default(cuid())
+  platformUserId   String
+  tenantId         String
+  sessionTokenHash String   @unique
+  reason           String
+  expiresAt        DateTime
+  revokedAt        DateTime?
+  createdAt        DateTime @default(now())
+  tenant           Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([platformUserId, tenantId])
+}
+
+model TenantAiProvider {
+  id              String   @id @default(cuid())
+  tenantId        String   @unique
+  provider        String   @default("GROQ")
+  baseUrl         String
+  model           String
+  apiKeyEncrypted String
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+}
+
+model PlatformSetting {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now())
+}
+
+model PlatformConfig {
+  id               String    @id @default("singleton")
+  adminAlertPhone  String?
+  groqUsageLimit   Int       @default(80)
+  alertInstanceDown Boolean  @default(true)
+  alertNewLead     Boolean   @default(true)
+  alertHighTokens  Boolean   @default(true)
+  updatedAt        DateTime  @updatedAt
+  createdAt        DateTime  @default(now())
+}
+
+model PlatformAuditLog {
+  id         String   @id @default(cuid())
+  actorType  String
+  actorId    String
+  tenantId   String?
+  action     String
+  ipAddress  String
+  targetType String
+  targetId   String
+  payload    Json
+  signature  String
+  createdAt  DateTime @default(now())
+
+  @@index([tenantId, createdAt])
+}

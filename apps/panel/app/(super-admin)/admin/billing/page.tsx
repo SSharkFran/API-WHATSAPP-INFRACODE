@@ -1,13 +1,58 @@
+import { ShieldOff, AlertTriangle } from "lucide-react";
 import { StatCard } from "../../../../components/dashboard/stat-card";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@infracode/ui";
-import { getAdminBilling } from "../../../../lib/api";
+import { getAdminBilling, ForbiddenError } from "../../../../lib/api";
+import { EmptyState } from "../../../../components/ui/EmptyState";
+import { isRedirectError } from "next/dist/client/components/redirect";
 
 export const dynamic = "force-dynamic";
 
 export default async function SuperAdminBillingPage() {
-  const items = await getAdminBilling();
+  let items: Awaited<ReturnType<typeof getAdminBilling>>;
+
+  try {
+    items = await getAdminBilling();
+  } catch (error) {
+    if (isRedirectError(error)) {
+      throw error;
+    }
+    if (error instanceof ForbiddenError) {
+      return (
+        <div role="alert" aria-live="assertive">
+          <EmptyState
+            icon={ShieldOff}
+            label="Acesso negado. Esta área requer permissão de Platform Owner."
+          />
+        </div>
+      );
+    }
+    return (
+      <div role="alert" aria-live="assertive">
+        <EmptyState
+          icon={AlertTriangle}
+          label="Não foi possível carregar os dados. Tente recarregar a página."
+        />
+      </div>
+    );
+  }
+
   const active = items.filter((item) => item.status === "ACTIVE");
   const overdue = items.filter((item) => item.status === "PAST_DUE");
+
+  if (items.length === 0) {
+    return (
+      <section className="space-y-6">
+        <div className="max-w-3xl space-y-2">
+          <p className="control-kicker text-slate-400">Billing</p>
+          <h2 className="text-3xl font-semibold text-white">Faturamento, vencimentos e risco financeiro</h2>
+        </div>
+        <EmptyState
+          icon={AlertTriangle}
+          label="Nenhum registro de cobrança encontrado."
+        />
+      </section>
+    );
+  }
 
   return (
     <section className="space-y-6">

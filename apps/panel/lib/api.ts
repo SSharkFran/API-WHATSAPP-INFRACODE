@@ -4,6 +4,17 @@ import { redirect } from "next/navigation";
 import { isRedirectError } from "next/dist/client/components/redirect";
 import { getServerPanelSession } from "./server-session";
 
+/**
+ * Thrown when the API returns 403 — caller lacks PLATFORM_OWNER scope.
+ * Server components catch this to render the ShieldOff EmptyState.
+ */
+export class ForbiddenError extends Error {
+  constructor() {
+    super("forbidden");
+    this.name = "ForbiddenError";
+  }
+}
+
 const resolveInternalApiBaseUrl = (): string => {
   // API_INTERNAL_BASE_URL is a server-only runtime env (not NEXT_PUBLIC_), so it works at runtime
   if (process.env.API_INTERNAL_BASE_URL) {
@@ -130,6 +141,10 @@ const request = async <TResponse>(path: string, mode: "admin" | "tenant"): Promi
 
   if (response.status === 401) {
     redirect("/login");
+  }
+
+  if (response.status === 403) {
+    throw new ForbiddenError();
   }
 
   if (!response.ok) {

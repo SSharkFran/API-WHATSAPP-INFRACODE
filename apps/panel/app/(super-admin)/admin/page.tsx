@@ -1,14 +1,44 @@
-import { Users, XCircle, AlertTriangle, Zap } from "lucide-react";
+import { Users, XCircle, AlertTriangle, Zap, ShieldOff } from "lucide-react";
 import { StatCard } from "../../../components/dashboard/stat-card";
-import { getAdminBilling, getAdminTenants } from "../../../lib/api";
+import { getAdminBilling, getAdminTenants, ForbiddenError } from "../../../lib/api";
+import { EmptyState } from "../../../components/ui/EmptyState";
 import { Badge } from "../../../components/ui/Badge";
+import { isRedirectError } from "next/dist/client/components/redirect";
 
 export const dynamic = "force-dynamic";
 
 const formatNumber = (value: number) => new Intl.NumberFormat("pt-BR").format(value);
 
 export default async function SuperAdminOverviewPage() {
-  const [tenants, billing] = await Promise.all([getAdminTenants(), getAdminBilling()]);
+  let tenants: Awaited<ReturnType<typeof getAdminTenants>>;
+  let billing: Awaited<ReturnType<typeof getAdminBilling>>;
+
+  try {
+    [tenants, billing] = await Promise.all([getAdminTenants(), getAdminBilling()]);
+  } catch (error) {
+    if (isRedirectError(error)) {
+      throw error;
+    }
+    if (error instanceof ForbiddenError) {
+      return (
+        <div role="alert" aria-live="assertive">
+          <EmptyState
+            icon={ShieldOff}
+            label="Acesso negado. Esta área requer permissão de Platform Owner."
+          />
+        </div>
+      );
+    }
+    return (
+      <div role="alert" aria-live="assertive">
+        <EmptyState
+          icon={AlertTriangle}
+          label="Não foi possível carregar os dados. Tente recarregar a página."
+        />
+      </div>
+    );
+  }
+
   const activeTenants = tenants.filter((t) => t.status === "ACTIVE");
   const suspendedTenants = tenants.filter((t) => t.status === "SUSPENDED");
   const overdueAccounts = billing.filter((b) => b.status === "PAST_DUE");

@@ -1,10 +1,13 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@infracode/ui";
 import { Button } from "../../../../components/ui/Button";
+import { Skeleton } from "../../../../components/ui/Skeleton";
+import { EmptyState } from "../../../../components/ui/EmptyState";
 import { requestClientApi } from "../../../../lib/client-api";
-import { CheckCircle2, AlertTriangle, Loader2 } from "lucide-react";
+import { CheckCircle2, AlertTriangle, Loader2, ShieldOff } from "lucide-react";
 
 interface AlertConfig {
   adminAlertPhone: string | null;
@@ -18,13 +21,17 @@ interface GlobalChatbotPromptConfig {
   systemPrompt: string | null;
 }
 
+type ErrorState = "forbidden" | "server-error" | null;
+
 export default function SuperAdminSettingsPage() {
+  const router = useRouter();
   const [alertConfig, setAlertConfig] = useState<AlertConfig | null>(null);
   const [globalChatbotPromptConfig, setGlobalChatbotPromptConfig] = useState<GlobalChatbotPromptConfig | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<ErrorState>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   const [phone, setPhone] = useState("");
   const [groqLimit, setGroqLimit] = useState(80);
@@ -33,13 +40,10 @@ export default function SuperAdminSettingsPage() {
   const [alertHighTokens, setAlertHighTokens] = useState(true);
   const [globalSystemPrompt, setGlobalSystemPrompt] = useState("");
 
-  useEffect(() => {
-    loadConfig();
-  }, []);
-
-  const loadConfig = async () => {
+  const loadConfig = useCallback(async () => {
     try {
       setLoading(true);
+      setError(null);
       const [config, promptConfig] = await Promise.all([
         requestClientApi<AlertConfig>("/admin/alerts-config"),
         requestClientApi<GlobalChatbotPromptConfig>("/admin/chatbot-global-prompt")
@@ -53,16 +57,29 @@ export default function SuperAdminSettingsPage() {
       setAlertHighTokens(config.alertHighTokens);
       setGlobalSystemPrompt(promptConfig.systemPrompt ?? "");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Erro ao carregar configuracao");
+      const message = err instanceof Error ? err.message : "";
+      if (message.includes("401") || message.includes("expirou")) {
+        router.replace("/login");
+        return;
+      }
+      if (message.includes("403") || message.includes("PLATFORM_ACCESS_DENIED") || message.includes("PLATFORM_ROLE_FORBIDDEN")) {
+        setError("forbidden");
+        return;
+      }
+      setError("server-error");
     } finally {
       setLoading(false);
     }
-  };
+  }, [router]);
+
+  useEffect(() => {
+    loadConfig();
+  }, [loadConfig]);
 
   const handleSave = async () => {
     try {
       setSaving(true);
-      setError(null);
+      setSaveError(null);
       setSaved(false);
       const [updated, updatedPromptConfig] = await Promise.all([
         requestClientApi<AlertConfig>("/admin/alerts-config", {
@@ -88,7 +105,7 @@ export default function SuperAdminSettingsPage() {
       setSaved(true);
       setTimeout(() => setSaved(false), 3000);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Erro ao salvar");
+      setSaveError(err instanceof Error ? err.message : "Erro ao salvar");
     } finally {
       setSaving(false);
     }
@@ -96,7 +113,7 @@ export default function SuperAdminSettingsPage() {
 
   if (loading) {
     return (
-      <section className="space-y-6">
+      <section className="space-y-6" aria-busy="true">
         <div className="max-w-3xl space-y-2">
           <p className="control-kicker text-slate-400">Settings</p>
           <h2 className="text-3xl font-semibold text-white">Guardrails globais do SaaS</h2>
@@ -105,7 +122,35 @@ export default function SuperAdminSettingsPage() {
           <Loader2 className="w-5 h-5 animate-spin" />
           <span>Carregando...</span>
         </div>
+        <div className="space-y-3">
+          <Skeleton className="h-8 w-full" />
+          <Skeleton className="h-8 w-3/4" />
+          <Skeleton className="h-8 w-full" />
+        </div>
       </section>
+    );
+  }
+
+  if (error === "forbidden") {
+    return (
+      <div role="alert" aria-live="assertive">
+        <EmptyState
+          icon={ShieldOff}
+          label="Acesso negado. Esta área requer permissão de Platform Owner."
+        />
+      </div>
+    );
+  }
+
+  if (error === "server-error") {
+    return (
+      <div role="alert" aria-live="assertive">
+        <EmptyState
+          icon={AlertTriangle}
+          label="Não foi possível carregar os dados. Tente recarregar a página."
+          action={{ label: "Recarregar página", onClick: () => router.refresh() }}
+        />
+      </div>
     );
   }
 
@@ -156,9 +201,9 @@ export default function SuperAdminSettingsPage() {
             Receba notificacoes sobre instancias caídas, novos leads, uso alto de tokens e erros criticos de worker/log.
           </p>
 
-          {error && (
+          {saveError && (
             <div className="p-3 rounded-md bg-red-500/10 border border-red-500/20 text-red-400 text-sm">
-              {error}
+              {saveError}
             </div>
           )}
 

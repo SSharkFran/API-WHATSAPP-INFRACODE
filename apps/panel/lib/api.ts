@@ -407,6 +407,10 @@ export const getAdminTenants = async (): Promise<AdminTenantSummary[]> => {
       throw error;
     }
 
+    if (error instanceof ForbiddenError) {
+      throw error;
+    }
+
     if (allowMockFallback) {
       return mockAdminTenants;
     }
@@ -426,6 +430,10 @@ export const getAdminBilling = async (): Promise<BillingSummary[]> => {
       throw error;
     }
 
+    if (error instanceof ForbiddenError) {
+      throw error;
+    }
+
     if (allowMockFallback) {
       return mockBilling;
     }
@@ -442,6 +450,10 @@ export const getAdminPlans = async (): Promise<AdminPlanSummary[]> => {
     return await request<AdminPlanSummary[]>("/admin/plans", "admin");
   } catch (error) {
     if (isRedirectError(error)) {
+      throw error;
+    }
+
+    if (error instanceof ForbiddenError) {
       throw error;
     }
 

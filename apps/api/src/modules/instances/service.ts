@@ -135,6 +135,11 @@ interface ChatPhoneMappingWorkerEvent {
   jid: string;
 }
 
+interface AdminJidResolvedWorkerEvent {
+  type: "admin-jid-resolved";
+  resolvedJid: string;
+}
+
 type WorkerEvent =
   | StatusWorkerEvent
   | LogWorkerEvent
@@ -143,6 +148,7 @@ type WorkerEvent =
   | InboundMessageWorkerEvent
   | PhoneNumberShareWorkerEvent
   | ChatPhoneMappingWorkerEvent
+  | AdminJidResolvedWorkerEvent
   | RpcResultWorkerEvent
   | RpcErrorWorkerEvent;
 
@@ -1203,7 +1209,7 @@ export class InstanceOrchestrator {
     }
 
     if (event.type === "admin-jid-resolved") {
-      const resolvedJid = (event as { type: string; resolvedJid: string }).resolvedJid;
+      const resolvedJid = event.resolvedJid;
       if (resolvedJid) {
         await this.redis.set(`instance:${instance.id}:admin_jid`, resolvedJid);
         console.log("[admin-identity] JID do admin cacheado no Redis", {

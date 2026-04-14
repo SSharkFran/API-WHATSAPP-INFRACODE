@@ -1082,7 +1082,7 @@ export class InstanceOrchestrator {
         paused: current.paused,
         status: current.currentStatus,
         tenantId
-      });
+      }, "[orchestrator] worker da instancia encerrado");
 
       for (const pending of current.pendingRequests.values()) {
         clearTimeout(pending.timeout);
@@ -1090,6 +1090,20 @@ export class InstanceOrchestrator {
       }
 
       this.workers.delete(workerKey);
+
+      if (code !== 0) {
+        this.tenantPrismaRegistry.getClient(tenantId).then((prisma) => {
+          return prisma.instance.update({
+            where: { id: instance.id },
+            data: {
+              status: "DISCONNECTED",
+              lastError: `Worker encerrado com código ${code}`
+            }
+          });
+        }).catch((updateErr) => {
+          this.logger.error({ err: updateErr, instanceId: instance.id }, "[orchestrator] falha ao atualizar status na saida do worker");
+        });
+      }
     });
   }
 
@@ -3332,305 +3346,6 @@ if (event.status === "CONNECTED") {
       });
       return;
 
-      /*
-      this.appendConversationHistory(session, "user", finalInputText);
-
-      const fiadoResponse = await this.fiadoAgent.process({
-        message: finalInputText,
-        phoneNumber: resolvedContactNumber,
-        tenantId,
-        instanceId: instance.id,
-        displayName: contact.displayName ?? null,
-        fiadoEnabled: chatbotConfig?.fiadoEnabled ?? false
-      });
-
-      if (fiadoResponse) {
-        await this.memoryAgent.update({
-          tenantId,
-          phoneNumber: resolvedContactNumber,
-          clientMessage: finalInputText
-        });
-        await this.sendConversationWithDelay({
-          tenantId,
-          instanceId: instance.id,
-          remoteNumber: resolvedContactNumber,
-          targetJid: event.remoteJid,
-          text: fiadoResponse,
-          metadata: {
-            action: "fiado_agent",
-            kind: "chatbot"
-          },
-          session
-        });
-        return;
-      }
-
-      const chatbotResult = await this.conversationAgent.reply({
-        tenantId,
-        instanceId: instance.id,
-        message: finalInputText,
-        history: session.history,
-        clientContext: contextString,
-        isFirstContact,
-        contactName: undefined,
-        phoneNumber: contact.phoneNumber ?? remoteNumber,
-        remoteJid: event.remoteJid
-      });
-
-      if (chatbotResult?.action === "HUMAN_HANDOFF") {
-        await this.clientMemoryService.upsert(tenantId, resolvedContactNumber, {
-          lastContactAt: new Date(),
-          tags: [...new Set<ClientMemoryTag>([...(clientMemory?.tags ?? []), "paused_by_human"])]
-        });
-
-        if (adminPhone) {
-          await this.sendMessage(tenantId, instance.id, {
-            type: "text",
-            to: adminPhone,
-            text: `Transbordo humano solicitado pelo cliente ${resolvedContactNumber}. O bot foi pausado para este contato.`
-          });
-        }
-        return;
-      }
-
-      const rawResponse = chatbotResult?.responseText ?? null;
-
-      if (!rawResponse) {
-        await this.memoryAgent.update({
-          tenantId,
-          phoneNumber: resolvedContactNumber,
-          clientMessage: finalInputText
-        });
-        return;
-      }
-
-      const resumoMatch = rawResponse.match(/\[RESUMO_LEAD\][\s\S]*?\[\/RESUMO_LEAD\]/);
-      const resumoLead = resumoMatch ? resumoMatch[0] : null;
-
-      const clientText = rawResponse.replace(/\[RESUMO_LEAD\][\s\S]*?\[\/RESUMO_LEAD\]/, "").trim();
-
-      this.logger.info({ rawResponse: rawResponse.slice(0, 300) }, "[chatbot] rawResponse");
-      this.logger.info({ resumoDetectado: !!resumoLead }, "[chatbot] resumoDetectado");
-      this.logger.info({ clientText: clientText.slice(0, 300) }, "[chatbot] clientText");
-
-      let leadData: LeadData | null = null;
-
-      if (resumoLead) {
-        const leadsPhone = chatbotConfig?.leadsPhoneNumber;
-        const leadsEnabled = chatbotConfig?.leadsEnabled ?? true;
-
-        const camposVerificacao = [
-          {
-            regex: /Nome:\s*(?!n[ãa]o informado|\(nome\))/i,
-            pergunta: "Antes de confirmar, pode me dizer seu nome? 😊"
-          },
-          {
-            regex: /Servi[çc]o de interesse:\s*(?!n[ãa]o informado)/i,
-            pergunta: "Me conta o que você precisa — seria um app, sistema web ou automação? 🤔"
-          },
-          {
-            regex: /Hor[áa]rio agendado:\s*(?!n[ãa]o informado|a confirmar)/i,
-            pergunta: "Qual dia e horário ficaria melhor pra você para a reunião? 📅"
-          }
-        ];
-
-        const campoFaltando = camposVerificacao.find((c) => !c.regex.test(resumoLead));
-        const camposOk = !campoFaltando;
-
-        if (!camposOk && campoFaltando) {
-          this.logger.info({ pergunta: campoFaltando.pergunta }, "[leads] RESUMO_LEAD incompleto, reforcando coleta");
-          const delayReforco = Math.floor(Math.random() * 500) + 1000;
-          await new Promise((resolve) => setTimeout(resolve, delayReforco));
-          await this.sendAutomatedTextMessage(
-            tenantId,
-            instance.id,
-            remoteNumber,
-            event.remoteJid,
-            campoFaltando.pergunta,
-            { action: "lead_field_reinforcement", kind: "chatbot" }
-          );
-          this.appendConversationHistory(session, "assistant", campoFaltando.pergunta);
-        }
-
-        if (camposOk) {
-          const nomeMatch = resumoLead.match(/Nome:\s*(.+)/i);
-          const contatoMatch = resumoLead.match(/Contato:\s*(.+)/i);
-          const emailMatch = resumoLead.match(/E-mail:\s*(.+)/i);
-          const empresaMatch = resumoLead.match(/Empresa:\s*(.+)/i);
-          const problemaMatch = resumoLead.match(/Problema:\s*(.+)/i);
-          const servicoMatch = resumoLead.match(/Serviço de interesse:\s*(.+)/i);
-          const horarioMatch = resumoLead.match(/Horário agendado:\s*(.+)/i);
-
-          leadData = {
-            rawSummary: resumoLead,
-            name: nomeMatch ? nomeMatch[1].trim() : null,
-            contact: contatoMatch ? contatoMatch[1].trim() : remoteNumber,
-            email: emailMatch ? emailMatch[1].trim() : null,
-            companyName: empresaMatch ? empresaMatch[1].trim() : null,
-            problemDescription: problemaMatch ? problemaMatch[1].trim() : null,
-            serviceInterest: servicoMatch ? servicoMatch[1].trim() : null,
-            scheduledText: horarioMatch ? horarioMatch[1].trim() : null,
-            scheduledAt: null,
-            isComplete: true
-          };
-        }
-
-        if (leadData?.isComplete && leadsPhone && leadsEnabled) {
-          const hashInput = [
-            leadData?.name ?? "",
-            leadData?.serviceInterest ?? "",
-            resolvedContactNumber
-          ].join("|");
-          const hash = Buffer.from(hashInput).toString("base64").slice(0, 32);
-          const dedupeKey = `leads:dedup:${instance.id}:${remoteNumber}:${hash}`;
-          const jaEnviado = await this.redis.get(dedupeKey).catch(() => null);
-
-          if (!jaEnviado) {
-            await this.redis.set(dedupeKey, "1", "EX", 86400);
-            const leadsJid = `${leadsPhone}@s.whatsapp.net`;
-            await this.sendAutomatedTextMessage(
-              tenantId,
-              instance.id,
-              leadsPhone,
-              leadsJid,
-              `🔔 Novo lead agendado:\n\n${resumoLead}`,
-              { action: "lead_summary", kind: "chatbot" }
-            );
-
-            const summaryAlertSent =
-              (await this.platformAlertService?.alertNewLead(
-                tenantId,
-                instance.name,
-                resumoLead,
-                resolvedContactNumber
-              ).catch((err) => {
-                this.logger.error({ err }, "[orchestrator] erro ao alertar novo lead");
-                return false;
-              })) ?? false;
-
-            if (summaryAlertSent) {
-              await this.markConversationLeadSent(prisma, activeConversation.id, session);
-            }
-          } else {
-            this.logger.info("[leads] resumo duplicado ignorado");
-          }
-        } else if (!leadData?.isComplete) {
-          this.logger.info({ resumo: resumoLead.slice(0, 100) }, "[leads] resumo incompleto, nao enviado");
-        }
-      }
-
-      await this.memoryAgent.update({
-        tenantId,
-        phoneNumber: resolvedContactNumber,
-        clientMessage: finalInputText,
-        leadData
-      });
-
-      if (leadData?.isComplete && (!chatbotConfig?.leadsPhoneNumber || chatbotConfig.leadsEnabled === false)) {
-        this.emitLog(buildWorkerKey(tenantId, instance.id), {
-          context: {
-            instanceId: instance.id
-          },
-          instanceId: instance.id,
-          level: "warn",
-          message: "Resumo de lead gerado, mas leadsPhoneNumber nao configurado ou leadsEnabled=false",
-          timestamp: new Date().toISOString()
-        });
-      }
-
-      if (!clientText.trim()) {
-        return;
-      }
-
-      await new Promise((resolve) => setTimeout(resolve, initialAiResponseDelayMs));
-
-      const partes = splitBotResponse(clientText);
-      for (let i = 0; i < partes.length; i++) {
-        const parte = partes[i]!;
-        await this.sendAutomatedTextMessage(
-          tenantId,
-          instance.id,
-          remoteNumber,
-          event.remoteJid,
-          parte,
-          { action: "conversation_agent", kind: "chatbot" }
-        );
-        this.appendConversationHistory(session, "assistant", parte);
-        if (i < partes.length - 1) {
-          const delayDigitacao = Math.floor(Math.random() * 1000) + 1500;
-          await new Promise((resolve) => setTimeout(resolve, delayDigitacao));
-        }
-      }
-
-      const memoriaModule = getMemoriaPersonalizadaModuleConfig(sanitizeChatbotModules(chatbotConfig?.modules));
-      if (memoriaModule?.isEnabled === true && memoriaModule.fields.length > 0) {
-        void this.chatbotService.extractPersistentMemory(
-          tenantId,
-          instance.id,
-          resolvedContactNumber,
-          session.history
-        ).catch((err) => {
-          this.logger.warn({ err }, "[persistent-memory] erro no fire-and-forget");
-        });
-      }
-
-      const leadAutoExtractValue = chatbotConfig?.leadAutoExtract as unknown;
-      const leadAutoExtractEnabled = leadAutoExtractValue === true || leadAutoExtractValue === "true";
-      const responseText = clientText.replace(/\|\|\|/g, " ");
-      const isClosing = /consultor|agendamento|em instantes|encaminhei|entrar.{0,20}contato/i.test(responseText ?? "");
-
-      if (leadAutoExtractEnabled && isClosing && !session.leadAlreadySent && !activeConversation.awaitingLeadExtraction) {
-        await prisma.conversation.update({
-          where: {
-            id: activeConversation.id
-          },
-          data: {
-            awaitingLeadExtraction: true
-          } as Prisma.ConversationUncheckedUpdateInput
-        });
-
-        void (async () => {
-          try {
-            const resolvedChatbotConfig = await this.chatbotService.getConfig(tenantId, instance.id);
-            const senderRemoteJid =
-              /@(s\.whatsapp\.net|c\.us)$/i.test(event.remoteJid)
-                ? event.remoteJid
-                : typeof contactFields?.sharedPhoneJid === "string" && contactFields.sharedPhoneJid.trim()
-                  ? contactFields.sharedPhoneJid.trim()
-                  : activeConversation.phoneNumber &&
-                      activeConversation.phoneNumber !== cleanPhoneFromRemoteJid
-                    ? toJid(activeConversation.phoneNumber)
-                    : "";
-            this.logger.info({ source: senderRemoteJid || event.remoteJid }, "[lead:phone] source variable");
-            const senderPhone =
-              String(senderRemoteJid ?? "")
-                .replace(/@s\.whatsapp\.net$/i, "")
-                .replace(/@c\.us$/i, "")
-                .replace(/@.*$/, "")
-                .replace(/\D/g, "");
-            this.logger.info({ senderPhone }, "[lead:phone] passing to processLead");
-            await this.chatbotService.processLeadAfterConversation(
-              activeConversation.id,
-              {
-                ...resolvedChatbotConfig,
-                __tenantId: tenantId
-              },
-              senderPhone
-            );
-          } catch (error) {
-            this.logger.error({ err: error }, "[lead] erro na extracao");
-            await prisma.conversation.update({
-              where: {
-                id: activeConversation.id
-              },
-              data: {
-                awaitingLeadExtraction: false
-              } as Prisma.ConversationUncheckedUpdateInput
-            });
-          }
-        })();
-      }
-      */
     } catch (error) {
       this.emitLog(buildWorkerKey(tenantId, instance.id), {
         context: {

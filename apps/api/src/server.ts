@@ -15,6 +15,7 @@ const bootstrap = async (): Promise<void> => {
       port: app.config.PORT
     });
 
+    app.instanceOrchestrator.startSchedulers();
     app.log.info({ port: app.config.PORT }, "InfraCode API iniciada");
   } catch (error) {
     app.log.error({ err: error }, "Falha ao iniciar a API");

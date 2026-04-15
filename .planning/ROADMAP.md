@@ -188,10 +188,10 @@ Replace all `console.log/warn/error` in `service.ts` and `chatbot/service.ts` wi
 **Plans**: 4 plans
 
 Plans:
-- [ ] 04-01-PLAN.md — Wave 1 (TDD): ConversationSessionManager extraction from InstanceOrchestrator + LRU cap (SESS-01)
-- [ ] 04-02-PLAN.md — Wave 2: Redis session hash + ConversationSession table via buildTenantSchemaSql (SESS-02, SESS-06, SESS-07, SESS-08)
-- [ ] 04-03-PLAN.md — Wave 3: SessionLifecycleService + BullMQ session-timeout queue with deduplication.extend (SESS-03, SESS-04, SESS-05, SESS-09)
-- [ ] 04-04-PLAN.md — Wave 4: InstanceEventBus typed EventEmitter + InstanceOrchestrator emit wiring (SESS-01, SESS-03, SESS-07)
+- [x] 04-01-PLAN.md — Wave 1 (TDD): ConversationSessionManager extraction from InstanceOrchestrator + LRU cap (SESS-01)
+- [x] 04-02-PLAN.md — Wave 2: Redis session hash + ConversationSession table via buildTenantSchemaSql (SESS-02, SESS-06, SESS-07, SESS-08)
+- [x] 04-03-PLAN.md — Wave 3: SessionLifecycleService + BullMQ session-timeout queue with deduplication.extend (SESS-03, SESS-04, SESS-05, SESS-09)
+- [x] 04-04-PLAN.md — Wave 4: InstanceEventBus typed EventEmitter + InstanceOrchestrator emit wiring (SESS-01, SESS-03, SESS-07)
 
 #### Plan 4.1 — ConversationSessionManager Extraction
 Extract the `conversationSessions` Map, `getConversationSession()`, `clearConversationSession()`, `buildConversationSessionKey()`, debounce timer management, and the GC interval from `InstanceOrchestrator` into a `ConversationSessionManager` class. The orchestrator holds the only instance. Add a bounded LRU cap (configurable, default 500 sessions per instance) to prevent unbounded heap growth. Wire `conversationSessions.forEach(s => clearTimeout(s.debounceTimer))` into the `close()` method. No behavioral change — pure reorganization.

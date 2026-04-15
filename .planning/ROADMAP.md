@@ -139,8 +139,8 @@ Add a `schema_migrations` table to every tenant schema at provisioning time. Imp
 Plans:
 - [x] 03-01-PLAN.md — Wave 1 (TDD): Extract AdminIdentityService from InstanceOrchestrator (ADM-01, ADM-02)
 - [x] 03-02-PLAN.md — Wave 2: Redis JID cache at connection open; LID resolution via cached JID (ADM-03)
-- [ ] 03-03-PLAN.md — Wave 2: Super-admin route audit, 403 error states, platform routes 403 test (ADM-04)
-- [ ] 03-04-PLAN.md — Wave 3: Pino logger, scheduler lifecycle fix, dead code deletion, UTF-8 fix, worker exit handler (ADM-01)
+- [x] 03-03-PLAN.md — Wave 2: Super-admin route audit, 403 error states, platform routes 403 test (ADM-04)
+- [x] 03-04-PLAN.md — Wave 3: Pino logger, scheduler lifecycle fix, dead code deletion, UTF-8 fix, worker exit handler (ADM-01)
 
 #### Plan 3.1 — Extract AdminIdentityService
 Extract lines 2049–2171 of `apps/api/src/modules/instances/service.ts` (the admin detection block) into a standalone `AdminIdentityService` class at `apps/api/src/modules/instances/admin-identity.service.ts`. The service accepts `IAprendizadoContinuoModule` (interface, not the concrete module) so it works whether the module is enabled or not. It returns a single `AdminIdentityContext` struct: `{ isAdmin, isVerifiedAdmin, isInstanceSelf, isAdminSelfChat, canReceiveLearningReply, matchedAdminPhone, escalationConversationId }`. Add unit tests for the four key scenarios before extraction.
@@ -185,7 +185,13 @@ Replace all `console.log/warn/error` in `service.ts` and `chatbot/service.ts` wi
 
 **Requirements**: SESS-01, SESS-02, SESS-03, SESS-04, SESS-05, SESS-06, SESS-07, SESS-08, SESS-09
 
-**Plans**:
+**Plans**: 4 plans
+
+Plans:
+- [ ] 04-01-PLAN.md — Wave 1 (TDD): ConversationSessionManager extraction from InstanceOrchestrator + LRU cap (SESS-01)
+- [ ] 04-02-PLAN.md — Wave 2: Redis session hash + ConversationSession table via buildTenantSchemaSql (SESS-02, SESS-06, SESS-07, SESS-08)
+- [ ] 04-03-PLAN.md — Wave 3: SessionLifecycleService + BullMQ session-timeout queue with deduplication.extend (SESS-03, SESS-04, SESS-05, SESS-09)
+- [ ] 04-04-PLAN.md — Wave 4: InstanceEventBus typed EventEmitter + InstanceOrchestrator emit wiring (SESS-01, SESS-03, SESS-07)
 
 #### Plan 4.1 — ConversationSessionManager Extraction
 Extract the `conversationSessions` Map, `getConversationSession()`, `clearConversationSession()`, `buildConversationSessionKey()`, debounce timer management, and the GC interval from `InstanceOrchestrator` into a `ConversationSessionManager` class. The orchestrator holds the only instance. Add a bounded LRU cap (configurable, default 500 sessions per instance) to prevent unbounded heap growth. Wire `conversationSessions.forEach(s => clearTimeout(s.debounceTimer))` into the `close()` method. No behavioral change — pure reorganization.

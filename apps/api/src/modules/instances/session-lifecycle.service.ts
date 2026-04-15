@@ -10,27 +10,8 @@ import {
   createSessionTimeoutProcessor,
   type SessionTimeoutJobPayload,
 } from "../../workers/session-timeout.worker.js";
-
-// ---------------------------------------------------------------------------
-// SESS-09: Static closure phrase list (stub)
-// Phase 5 will replace this with a Groq LLM pre-pass classifier.
-// ---------------------------------------------------------------------------
-
-const CLOSURE_PHRASES = [
-  "obrigado",
-  "obrigada",
-  "era só isso",
-  "pode encerrar",
-  "até mais",
-  "tchau",
-  "valeu",
-  "foi isso",
-  "pode fechar",
-  "isso é tudo",
-  "finalizei",
-  "terminei",
-  "não preciso mais",
-];
+import { type InstanceEventBus } from "../../lib/instance-events.js";
+import { recognizeCloseIntent } from "../../lib/session-intents.js";
 
 const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000;       // 10 minutes production
 const DEFAULT_SECOND_TIMEOUT_MS = 5 * 60 * 1000;  // 5 minutes second window
@@ -50,6 +31,7 @@ export interface SessionLifecycleServiceDeps {
     NODE_ENV: string;
   };
   logger: pino.Logger;
+  eventBus?: InstanceEventBus;
 }
 
 export interface SessionActivityParams {
@@ -103,6 +85,37 @@ export class SessionLifecycleService {
         processor,
         { autorun: true, connection: this.workerConnection as never, concurrency: 10 }
       );
+    }
+
+    // ---------------------------------------------------------------------------
+    // InstanceEventBus subscriptions
+    // T-04-04-01: every async listener wraps in .catch() so unhandled rejections
+    // do NOT propagate to the InstanceOrchestrator emit call site
+    // ---------------------------------------------------------------------------
+    if (deps.eventBus) {
+      deps.eventBus.on('session.activity', async (event) => {
+        if (event.type !== 'session.activity') return;
+        await this.recordActivity({
+          sessionId: event.sessionId,
+          tenantId: event.tenantId,
+          instanceId: event.instanceId,
+          remoteJid: event.remoteJid,
+        }).catch(err =>
+          this.logger.error({ err, sessionId: event.sessionId }, '[lifecycle] error handling session.activity')
+        );
+      });
+
+      deps.eventBus.on('session.close_intent_detected', async (event) => {
+        if (event.type !== 'session.close_intent_detected') return;
+        this.logger.info(
+          { sessionId: event.sessionId, intentLabel: event.intentLabel },
+          '[lifecycle] close intent detected'
+        );
+        // Transition to CONFIRMACAO_ENVIADA — Phase 5 will complete this wiring
+        await this.deps.sessionStateService
+          .updateStatus(event.tenantId, event.instanceId, event.remoteJid, SessionStatus.CONFIRMACAO_ENVIADA)
+          .catch(err => this.logger.error({ err }, '[lifecycle] error handling close_intent_detected'));
+      });
     }
   }
 
@@ -231,18 +244,13 @@ export class SessionLifecycleService {
   // ---------------------------------------------------------------------------
 
   /**
-   * SESS-09 stub: matches static Portuguese closure phrases using normalized comparison.
-   * Phase 5 will replace this with a Groq LLM pre-pass classifier for higher accuracy.
+   * SESS-09 stub: delegates to the shared recognizeCloseIntent utility in
+   * apps/api/src/lib/session-intents.ts to avoid duplicate logic and circular
+   * imports between service.ts and session-lifecycle.service.ts.
+   * Phase 5 will replace the underlying utility with a Groq LLM pre-pass classifier.
    */
   recognizeCloseIntent(text: string): boolean {
-    const normalized = text
-      .toLowerCase()
-      .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "");
-    return CLOSURE_PHRASES.some((phrase) => {
-      const normalizedPhrase = phrase.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-      return normalized.includes(normalizedPhrase);
-    });
+    return recognizeCloseIntent(text);
   }
 
   // ---------------------------------------------------------------------------

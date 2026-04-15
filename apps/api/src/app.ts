@@ -20,6 +20,7 @@ import { createWebhookQueue } from "./queues/webhook-queue.js";
 import { createSessionTimeoutQueue } from "./queues/session-timeout-queue.js";
 import { SessionStateService } from "./modules/instances/session-state.service.js";
 import { SessionLifecycleService } from "./modules/instances/session-lifecycle.service.js";
+import { InstanceEventBus } from "./lib/instance-events.js";
 import { authPlugin } from "./plugins/auth.js";
 import { swaggerPlugin } from "./plugins/swagger.js";
 import { PlatformAdminService } from "./modules/admin/service.js";
@@ -76,6 +77,7 @@ export const buildApp = async () => {
   }
 
   const logger = createLogger(config);
+  const eventBus = new InstanceEventBus();
   const app = Fastify({
     logger: false,
     loggerInstance: logger,
@@ -161,7 +163,8 @@ export const buildApp = async () => {
     adminCommandService,
     fiadoService,
     escalationService,
-    sendMessageQueue
+    sendMessageQueue,
+    eventBus,
   });
   const platformAlertService = new PlatformAlertService(platformPrisma, instanceOrchestrator);
   chatbotService.setPlatformAlertService(platformAlertService);
@@ -200,6 +203,7 @@ export const buildApp = async () => {
       NODE_ENV: config.NODE_ENV,
     },
     logger,
+    eventBus,
   });
 
   app.decorate("config", config);

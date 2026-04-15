@@ -266,3 +266,20 @@ model FiadoTab {
 
   @@unique([instanceId, phoneNumber])
 }
+
+model ConversationSession {
+  id              String    @id @default(cuid())
+  instanceId      String
+  contactId       String?
+  remoteJid       String
+  status          String    @default("ATIVA")
+  startedAt       DateTime  @default(now())
+  endedAt         DateTime?
+  durationSeconds Int?
+  firstResponseMs Int?
+  handoffCount    Int       @default(0)
+  closedReason    String?
+  conversationId  String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+}

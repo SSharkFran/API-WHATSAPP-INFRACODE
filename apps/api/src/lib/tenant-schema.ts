@@ -263,6 +263,28 @@ export const buildTenantSchemaSql = (schemaName: string): string[] => {
       "updatedAt" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       CONSTRAINT "uniq_${schemaName}_persistent_memory_instance_phone" UNIQUE ("instanceId", "phoneNumber")
     );`,
-    `CREATE INDEX IF NOT EXISTS "idx_${schemaName}_persistent_memory_instance" ON ${schema}."ContactPersistentMemory" ("instanceId");`
+    `CREATE INDEX IF NOT EXISTS "idx_${schemaName}_persistent_memory_instance" ON ${schema}."ContactPersistentMemory" ("instanceId");`,
+    `CREATE TABLE IF NOT EXISTS ${schema}."ConversationSession" (
+      "id" TEXT PRIMARY KEY,
+      "instanceId" TEXT NOT NULL REFERENCES ${schema}."Instance"("id") ON DELETE CASCADE,
+      "contactId" TEXT,
+      "remoteJid" TEXT NOT NULL,
+      "status" TEXT NOT NULL DEFAULT 'ATIVA',
+      "startedAt" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      "endedAt" TIMESTAMPTZ,
+      "durationSeconds" INTEGER,
+      "firstResponseMs" INTEGER,
+      "handoffCount" INTEGER NOT NULL DEFAULT 0,
+      "closedReason" TEXT,
+      "conversationId" TEXT REFERENCES ${schema}."Conversation"("id") ON DELETE SET NULL,
+      "createdAt" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      "updatedAt" TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );`,
+    `CREATE INDEX IF NOT EXISTS "idx_${schemaName}_session_instance_started"
+      ON ${schema}."ConversationSession" ("instanceId", "startedAt");`,
+    `CREATE INDEX IF NOT EXISTS "idx_${schemaName}_session_remote_jid"
+      ON ${schema}."ConversationSession" ("instanceId", "remoteJid");`,
+    `ALTER TABLE ${schema}."ConversationSession" ADD COLUMN IF NOT EXISTS "firstResponseMs" INTEGER;`,
+    `ALTER TABLE ${schema}."ConversationSession" ADD COLUMN IF NOT EXISTS "conversationId" TEXT REFERENCES ${schema}."Conversation"("id") ON DELETE SET NULL;`
   ];
 };

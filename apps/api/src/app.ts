@@ -17,6 +17,9 @@ import { createRedis } from "./lib/redis.js";
 import { normalizeError } from "./lib/errors.js";
 import { createSendMessageQueue } from "./queues/message-queue.js";
 import { createWebhookQueue } from "./queues/webhook-queue.js";
+import { createSessionTimeoutQueue } from "./queues/session-timeout-queue.js";
+import { SessionStateService } from "./modules/instances/session-state.service.js";
+import { SessionLifecycleService } from "./modules/instances/session-lifecycle.service.js";
 import { authPlugin } from "./plugins/auth.js";
 import { swaggerPlugin } from "./plugins/swagger.js";
 import { PlatformAdminService } from "./modules/admin/service.js";
@@ -127,6 +130,7 @@ export const buildApp = async () => {
   });
   const sendMessageQueue = config.NODE_ENV === "test" ? createNoopQueue() : createSendMessageQueue(redis);
   const webhookDispatchQueue = config.NODE_ENV === "test" ? createNoopQueue() : createWebhookQueue(redis);
+  const sessionTimeoutQueue = config.NODE_ENV === "test" ? createNoopQueue() : createSessionTimeoutQueue(redis);
   const webhookService = new WebhookService({
     config,
     metricsService,
@@ -183,6 +187,19 @@ export const buildApp = async () => {
     queue: sendMessageQueue,
     redis,
     webhookService
+  });
+  const sessionStateService = new SessionStateService({ redis, tenantPrismaRegistry, logger });
+  const sessionLifecycleService = new SessionLifecycleService({
+    redis,
+    queue: sessionTimeoutQueue,
+    sessionStateService,
+    instanceOrchestrator,
+    config: {
+      SESSION_LIFECYCLE_V2: process.env["SESSION_LIFECYCLE_V2"],
+      SESSION_TIMEOUT_MS: process.env["SESSION_TIMEOUT_MS"],
+      NODE_ENV: config.NODE_ENV,
+    },
+    logger,
   });
 
   app.decorate("config", config);
@@ -273,8 +290,10 @@ export const buildApp = async () => {
   app.addHook("onClose", async () => {
     await instanceOrchestrator.close();
     await messageService.close();
+    await sessionLifecycleService.close();
     await sendMessageQueue.close();
     await webhookDispatchQueue.close();
+    await sessionTimeoutQueue.close();
     await redis.quit();
     await tenantPrismaRegistry.close();
     await platformPrisma.$disconnect();

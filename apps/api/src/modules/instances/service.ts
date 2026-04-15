@@ -773,6 +773,24 @@ export class InstanceOrchestrator {
     });
   }
 
+  /**
+   * Sends an automated session lifecycle message to a WhatsApp contact.
+   * Used by SessionLifecycleService to send the "still there?" inactivity confirmation.
+   * Errors are caught and logged by the caller (non-fatal if delivery fails).
+   */
+  public async sendSessionMessage(
+    tenantId: string,
+    instanceId: string,
+    remoteJid: string,
+    text: string
+  ): Promise<void> {
+    await this.sendMessage(tenantId, instanceId, {
+      to: remoteJid,
+      type: "text",
+      text,
+    });
+  }
+
   private async callWorkerRpc(
     tenantId: string,
     instanceId: string,

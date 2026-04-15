@@ -50,6 +50,8 @@ import type { WebhookService } from "../webhooks/service.js";
 import type { FiadoService } from "../chatbot/fiado.service.js";
 import type { PlatformAlertService } from "../platform/alert.service.js";
 import type { Queue } from "bullmq";
+import { InstanceEventBus } from '../../lib/instance-events.js';
+import { recognizeCloseIntent } from '../../lib/session-intents.js';
 
 interface InstanceOrchestratorDeps {
   config: AppConfig;
@@ -67,6 +69,7 @@ interface InstanceOrchestratorDeps {
   escalationService: EscalationService;
   platformAlertService?: PlatformAlertService;
   sendMessageQueue?: Queue;
+  eventBus?: InstanceEventBus;
 }
 
 interface StatusWorkerEvent {
@@ -251,6 +254,7 @@ export class InstanceOrchestrator {
   private readonly platformAlertService?: PlatformAlertService;
   private readonly sendMessageQueue?: Queue;
   private readonly adminIdentityService = new AdminIdentityService();
+  private readonly eventBus: InstanceEventBus;
   private readonly logEmitter = new EventEmitter();
   private readonly qrEmitter = new EventEmitter();
   private readonly latestQrCodes = new Map<string, QrCodeEvent>();
@@ -289,6 +293,7 @@ export class InstanceOrchestrator {
     this.escalationService = deps.escalationService;
     this.platformAlertService = deps.platformAlertService;
     this.sendMessageQueue = deps.sendMessageQueue;
+    this.eventBus = deps.eventBus ?? new InstanceEventBus();
   }
 
   public setPlatformAlertService(service: PlatformAlertService): void {
@@ -2202,6 +2207,41 @@ if (event.status === "CONNECTED") {
         senderJid,
         quotedLearningConversationId,
         textPreview: rawTextInput.slice(0, 120)
+      });
+    }
+
+    // ---------------------------------------------------------------------------
+    // Domain event emissions — decoupling seam for downstream services
+    // T-04-04-03: admin.command only emitted after isAdminOrInstanceSender confirmed
+    // ---------------------------------------------------------------------------
+    if (!isAdminOrInstanceSender) {
+      this.eventBus.emit('session.activity', {
+        type: 'session.activity',
+        tenantId,
+        instanceId: instance.id,
+        remoteJid: event.remoteJid,
+        sessionId: '', // placeholder — full sessionId wiring comes in Phase 5
+      });
+
+      if (rawTextInput && recognizeCloseIntent(rawTextInput)) {
+        this.eventBus.emit('session.close_intent_detected', {
+          type: 'session.close_intent_detected',
+          tenantId,
+          instanceId: instance.id,
+          remoteJid: event.remoteJid,
+          sessionId: '',
+          intentLabel: 'ENCERRAMENTO',
+        });
+      }
+    }
+
+    if (isAdminOrInstanceSender) {
+      this.eventBus.emit('admin.command', {
+        type: 'admin.command',
+        tenantId,
+        instanceId: instance.id,
+        command: rawTextInput,
+        fromJid: event.remoteJid,
       });
     }
 

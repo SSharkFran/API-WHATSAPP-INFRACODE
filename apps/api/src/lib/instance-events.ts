@@ -1,0 +1,58 @@
+import { EventEmitter } from 'node:events';
+
+// ---------------------------------------------------------------------------
+// Domain event interfaces
+// ---------------------------------------------------------------------------
+
+export interface SessionActivityEvent {
+  type: 'session.activity';
+  tenantId: string;
+  instanceId: string;
+  remoteJid: string;
+  sessionId: string; // from Redis hash — may be empty string if session not yet persisted
+}
+
+export interface SessionCloseIntentEvent {
+  type: 'session.close_intent_detected';
+  tenantId: string;
+  instanceId: string;
+  remoteJid: string;
+  sessionId: string;
+  intentLabel: string; // e.g. 'ENCERRAMENTO' — static label from SESS-09 stub, LLM label in Phase 5
+}
+
+export interface AdminCommandEvent {
+  type: 'admin.command';
+  tenantId: string;
+  instanceId: string;
+  command: string;
+  fromJid: string; // admin JID
+}
+
+export type InstanceDomainEvent =
+  | SessionActivityEvent
+  | SessionCloseIntentEvent
+  | AdminCommandEvent;
+
+// ---------------------------------------------------------------------------
+// InstanceEventBus — typed EventEmitter wrapper
+// ---------------------------------------------------------------------------
+
+/**
+ * Typed in-process event bus for InstanceOrchestrator domain events.
+ * Typed overloads ensure TypeScript rejects unknown event names at compile time.
+ * All listeners must catch their own errors to avoid propagating to the emit call site.
+ */
+export class InstanceEventBus extends EventEmitter {
+  emit(event: InstanceDomainEvent['type'], payload: InstanceDomainEvent): boolean {
+    return super.emit(event, payload);
+  }
+
+  on(event: InstanceDomainEvent['type'], listener: (payload: InstanceDomainEvent) => void): this {
+    return super.on(event, listener);
+  }
+
+  off(event: InstanceDomainEvent['type'], listener: (payload: InstanceDomainEvent) => void): this {
+    return super.off(event, listener);
+  }
+}

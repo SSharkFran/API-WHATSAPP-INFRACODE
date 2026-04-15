@@ -164,6 +164,7 @@ export const buildApp = async () => {
   escalationService.setPlatformAlertService(platformAlertService);
   escalationService.setChatbotService(chatbotService);
   instanceOrchestrator.setPlatformAlertService(platformAlertService);
+  instanceOrchestrator.startSchedulers();
   const platformAdminService = new PlatformAdminService({
     config,
     platformPrisma,
@@ -270,7 +271,6 @@ export const buildApp = async () => {
   });
 
   app.addHook("onClose", async () => {
-    instanceOrchestrator.stopSchedulers();
     await instanceOrchestrator.close();
     await messageService.close();
     await sendMessageQueue.close();

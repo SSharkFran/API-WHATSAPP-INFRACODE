@@ -101,7 +101,7 @@ export class SessionLifecycleService {
           instanceId: event.instanceId,
           remoteJid: event.remoteJid,
         }).catch(err =>
-          this.logger.error({ err, sessionId: event.sessionId }, '[lifecycle] error handling session.activity')
+          this.logger.error({ errMsg: (err as Error).message, stack: (err as Error).stack, sessionId: event.sessionId }, '[lifecycle] error handling session.activity')
         );
       });
 
@@ -114,7 +114,7 @@ export class SessionLifecycleService {
         // Transition to CONFIRMACAO_ENVIADA — Phase 5 will complete this wiring
         await this.deps.sessionStateService
           .updateStatus(event.tenantId, event.instanceId, event.remoteJid, SessionStatus.CONFIRMACAO_ENVIADA)
-          .catch(err => this.logger.error({ err }, '[lifecycle] error handling close_intent_detected'));
+          .catch(err => this.logger.error({ errMsg: (err as Error).message, stack: (err as Error).stack }, '[lifecycle] error handling close_intent_detected'));
       });
     }
   }

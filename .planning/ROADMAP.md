@@ -237,7 +237,13 @@ Introduce `InstanceEventBus` (typed `EventEmitter` wrapper) in `apps/api/src/lib
 
 **Requirements**: IA-01, IA-02, IA-03, IA-04, IA-05, IA-06
 
-**Plans**:
+**Plans**: 4 plans
+
+Plans:
+- [ ] 05-01-PLAN.md — Wave 1: Groq LLM intent pre-pass classifier (IA-01, IA-02)
+- [ ] 05-02-PLAN.md — Wave 2: Automatic state transitions from intent (IA-02, IA-06)
+- [ ] 05-03-PLAN.md — Wave 2: Graceful "I Don't Know" response + OrchestratorAgent fallback (IA-03, IA-04)
+- [ ] 05-04-PLAN.md — Wave 3: Fire-and-forget replacement + pino logging (IA-03, IA-05)
 
 #### Plan 5.1 — Groq LLM Intent Classifier (Pre-pass)
 Implement `IntentClassifierService` as a lightweight pre-pass before `OrchestratorAgent`. Uses Groq Llama 3.1 8B with the prompt pattern: "Classify the following Brazilian Portuguese message into exactly one of: ENCERRAMENTO, URGENCIA_ALTA, TRANSFERENCIA_HUMANO, PERGUNTA, CONTINUACAO, OUTRO. Reply with ONLY the label." Cache the classification result in the in-session context — do not re-classify the same message. Verify whether `IntentRouter` in `OrchestratorAgent` already returns a close signal before adding a new `ENCERRAMENTO` route; extend only what is missing.

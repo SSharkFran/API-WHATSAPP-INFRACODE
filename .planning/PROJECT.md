@@ -69,11 +69,11 @@ O atendimento via WhatsApp deve funcionar de ponta a ponta de forma confiável �
 - [ ] Interface de configuração do módulo clara e funcional no painel
 - [ ] Logs de aprendizado auditáveis
 
-**IA Conversacional — Menos Linear**
-- [ ] Chatbot entende intenção do cliente (não apenas segue fluxo fixo)
-- [ ] Quando não sabe a resposta: informa claramente ao cliente E (se módulo ativo) escala ao admin
-- [ ] Conversa não linear: contorna situações inesperadas em vez de travar
-- [ ] Transferência para humano: marcar conversa como `humanTakeover`, notificar admin
+**IA Conversacional — Menos Linear** *(Phase 5 complete — automated checks passed, 3 items pending E2E human testing)*
+- [x] Chatbot entende intenção do cliente — Groq LLM classifier (INTENT_CLASSIFIER_V2) — Validated in Phase 5: intent-detection-conversational-ai
+- [x] Quando não sabe a resposta: informa claramente ao cliente E (se módulo ativo) escala ao admin — Validated in Phase 5
+- [x] Conversa não linear: contorna situações inesperadas em vez de travar — Validated in Phase 5
+- [x] Transferência para humano: marcar conversa como `humanTakeover`, notificar admin — Validated in Phase 5
 
 **Funcionalidades Avançadas (v1 completo)**
 - [ ] Score de urgência por conversa (classifica prioridade)
@@ -146,4 +146,4 @@ Este documento evolui a cada transição de fase e milestone.
 4. Atualizar Context com estado atual
 
 ---
-*Last updated: 2026-04-10 after initialization*
+*Last updated: 2026-04-16 — Phase 5 (Intent Detection & Conversational AI) complete*

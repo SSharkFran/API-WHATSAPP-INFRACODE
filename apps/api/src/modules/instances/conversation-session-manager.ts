@@ -2,6 +2,7 @@ import type { ChatMessage, ConversationSession as BaseConversationSession } from
 import type { TenantPrisma } from "../../lib/database.js";
 import type { ChatbotModules } from "@infracode/types";
 import type { Instance } from "../../../../../prisma/generated/tenant-client/index.js";
+import type { IntentLabel } from "../../lib/intent-classifier.service.js";
 
 // ---------------------------------------------------------------------------
 // SessionStatus
@@ -60,7 +61,7 @@ export interface ConversationSession extends BaseConversationSession {
   // Phase 5: caches last intent classification to avoid re-classifying same message
   lastIntentClassification?: {
     text: string;
-    label: import('../../../lib/intent-classifier.service.js').IntentLabel;
+    label: IntentLabel;
     confidence: number;
   };
 }

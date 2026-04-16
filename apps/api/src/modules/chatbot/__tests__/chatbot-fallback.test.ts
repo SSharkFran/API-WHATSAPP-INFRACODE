@@ -256,7 +256,7 @@ describe("IA-03/IA-04: Honest fallback when chatbotResult is null", () => {
     const { sendSpy } = stubForFallbackTest({ isBlocked: false, conversationAgentResult: null });
 
     const params = makeParams();
-    await (orchestrator as never)["processConversationTurn"](params);
+    await (orchestrator as any)["processConversationTurn"](params);
 
     const honestFallbackCalls = sendSpy.mock.calls.filter(
       (call: unknown[]) => (call[5] as { action: string })?.action === "honest_fallback"
@@ -269,7 +269,7 @@ describe("IA-03/IA-04: Honest fallback when chatbotResult is null", () => {
     const { sendSpy } = stubForFallbackTest({ isBlocked: true, conversationAgentResult: null });
 
     const params = makeParams();
-    await (orchestrator as never)["processConversationTurn"](params);
+    await (orchestrator as any)["processConversationTurn"](params);
 
     const honestFallbackCalls = sendSpy.mock.calls.filter(
       (call: unknown[]) => (call[5] as { action: string })?.action === "honest_fallback"
@@ -289,7 +289,7 @@ describe("IA-03/IA-04: Honest fallback when chatbotResult is null", () => {
       },
     });
 
-    await (orchestrator as never)["processConversationTurn"](params);
+    await (orchestrator as any)["processConversationTurn"](params);
 
     // Part A (client honest fallback) must fire
     const partACalls = sendSpy.mock.calls.filter(
@@ -322,7 +322,7 @@ describe("IA-03/IA-04: Honest fallback when chatbotResult is null", () => {
     // Set inputText to something recognizable
     (params as Record<string, unknown>)["inputText"] = "Qual o valor do plano premium?";
 
-    await (orchestrator as never)["processConversationTurn"](params);
+    await (orchestrator as any)["processConversationTurn"](params);
 
     // Part A
     const partACalls = sendSpy.mock.calls.filter(
@@ -356,7 +356,7 @@ describe("IA-03/IA-04: Honest fallback when chatbotResult is null", () => {
       leadsPhoneNumber: null,
     });
 
-    await (orchestrator as never)["processConversationTurn"](params);
+    await (orchestrator as any)["processConversationTurn"](params);
 
     // Part A fires
     const partACalls = sendSpy.mock.calls.filter(

@@ -57,6 +57,12 @@ export interface ConversationSession extends BaseConversationSession {
   flushAfterProcessing: boolean;
   resetGeneration: number;
   lastActivityAt: Date;
+  // Phase 5: caches last intent classification to avoid re-classifying same message
+  lastIntentClassification?: {
+    text: string;
+    label: import('../../../lib/intent-classifier.service.js').IntentLabel;
+    confidence: number;
+  };
 }
 
 // ---------------------------------------------------------------------------

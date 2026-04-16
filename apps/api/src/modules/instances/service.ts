@@ -52,6 +52,8 @@ import type { PlatformAlertService } from "../platform/alert.service.js";
 import type { Queue } from "bullmq";
 import { InstanceEventBus } from '../../lib/instance-events.js';
 import { recognizeCloseIntent } from '../../lib/session-intents.js';
+import { classifyIntent } from '../../lib/intent-classifier.service.js';
+import type { AiCaller } from '../chatbot/agents/types.js';
 
 interface InstanceOrchestratorDeps {
   config: AppConfig;
@@ -2223,15 +2225,53 @@ if (event.status === "CONNECTED") {
         sessionId: '', // placeholder — full sessionId wiring comes in Phase 5
       });
 
-      if (rawTextInput && recognizeCloseIntent(rawTextInput)) {
-        this.eventBus.emit('session.close_intent_detected', {
-          type: 'session.close_intent_detected',
-          tenantId,
-          instanceId: instance.id,
-          remoteJid: event.remoteJid,
-          sessionId: '',
-          intentLabel: 'ENCERRAMENTO',
-        });
+      // Phase 5: LLM intent pre-pass (replaces recognizeCloseIntent regex stub — Pitfall 1)
+      // Feature flag: INTENT_CLASSIFIER_V2=true enables LLM classifier; false keeps regex stub.
+      if (process.env.INTENT_CLASSIFIER_V2 === 'true') {
+        const sessionKey = this.sessionManager.buildKey(instance.id, event.remoteJid);
+        const session = this.sessionManager.get(sessionKey);
+        // Cache: skip re-classification if text is unchanged (Pitfall 2)
+        const needsClassify = rawTextInput &&
+          session?.lastIntentClassification?.text !== rawTextInput;
+
+        if (rawTextInput && needsClassify) {
+          try {
+            const classification = await classifyIntent(
+              rawTextInput,
+              this.makeAiCaller(tenantId, instance),
+              session?.history?.slice(-6)
+            );
+            if (session) {
+              session.lastIntentClassification = { text: rawTextInput, ...classification };
+            }
+
+            if (classification.label === 'ENCERRAMENTO') {
+              this.eventBus.emit('session.close_intent_detected', {
+                type: 'session.close_intent_detected',
+                tenantId,
+                instanceId: instance.id,
+                remoteJid: event.remoteJid,
+                sessionId: '',
+                intentLabel: 'ENCERRAMENTO',
+              });
+            }
+            // URGENCIA_ALTA and TRANSFERENCIA_HUMANO are handled in Plan 5.2
+          } catch (err) {
+            console.warn('[intent-classifier] pre-pass failed, continuing pipeline', err);
+          }
+        }
+      } else {
+        // Fallback: regex stub (SESS-09 placeholder) — remove when INTENT_CLASSIFIER_V2 proven in staging
+        if (rawTextInput && recognizeCloseIntent(rawTextInput)) {
+          this.eventBus.emit('session.close_intent_detected', {
+            type: 'session.close_intent_detected',
+            tenantId,
+            instanceId: instance.id,
+            remoteJid: event.remoteJid,
+            sessionId: '',
+            intentLabel: 'ENCERRAMENTO',
+          });
+        }
       }
     }
 
@@ -4982,6 +5022,45 @@ if (event.status === "CONNECTED") {
 
   private emitLog(key: string, event: InstanceLogEvent): void {
     this.logEmitter.emit(key, event);
+  }
+
+  /**
+   * Builds a lightweight AiCaller for the intent pre-pass classifier.
+   * Uses the same GroqKeyRotator pool managed by ChatbotService — no separate key config needed.
+   * Same Groq chat/completions endpoint used by other LLM calls in the pipeline.
+   */
+  private makeAiCaller(_tenantId: string, _instance: Instance): AiCaller {
+    return async (system, messages, opts) => {
+      const apiKey = this.chatbotService.getNextGroqApiKey() ?? this.config.GROQ_API_KEY;
+      const model = opts?.model ?? "llama-3.1-8b-instant";
+      const temperature = opts?.temperature ?? 0;
+
+      const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model,
+          temperature,
+          messages: [
+            { role: "system", content: system },
+            ...messages,
+          ],
+          max_tokens: 64,
+        }),
+      });
+
+      if (!response.ok) {
+        this.chatbotService.reportGroqKeyResult(apiKey, response.status);
+        return null;
+      }
+
+      this.chatbotService.reportGroqKeyResult(apiKey, "success");
+      const data = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
+      return data.choices?.[0]?.message?.content ?? null;
+    };
   }
 }
 

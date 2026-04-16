@@ -59,7 +59,7 @@ export class OrchestratorAgent {
         return await this.generalAgent.respond(ctx);
       } catch (fallbackErr) {
         console.error("[orchestrator] GeneralAgent também falhou:", fallbackErr);
-        return null;
+        return null; // IA-03: never return undefined — null signals "no response available"
       }
     }
   }

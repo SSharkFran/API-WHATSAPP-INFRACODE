@@ -19,6 +19,11 @@ O atendimento via WhatsApp deve funcionar de ponta a ponta de forma confiável �
 - ✓ Módulo de aprendizado contínuo (aprendizadoContinuo) com verificação de admin — existente (parcial)
 - ✓ BullMQ para envio assíncrono e dispatch de webhooks — existente
 - ✓ Painel Next.js com rotas para super-admin, tenant e instâncias — existente
+- ✓ Ciclo de vida formal da sessão (ATIVA → CONFIRMACAO_ENVIADA → ENCERRADA/INATIVA) com Redis + PostgreSQL — Validated in Phase 4: session-lifecycle-formalization
+- ✓ BullMQ session-timeout queue com deduplication.extend para reset de timer em O(1) — Validated in Phase 4
+- ✓ ConversationSessionManager, SessionStateService, SessionLifecycleService, InstanceEventBus extraídos do InstanceOrchestrator — Validated in Phase 4
+- ✓ humanTakeover persiste em PostgreSQL e sobrevive a restart do servidor — Validated in Phase 4
+- ✓ Feature flag SESSION_LIFECYCLE_V2 guarda toda atividade de BullMQ — Validated in Phase 4
 
 ### Active
 
@@ -124,11 +129,13 @@ O atendimento via WhatsApp deve funcionar de ponta a ponta de forma confiável �
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
 | Aprendizado contínuo como módulo opcional | Sistema deve funcionar sem ele; não criar dependências rígidas | — Pending |
-| Extrair ciclo de vida da sessão do InstanceOrchestrator | God-class com 5k linhas; sessão merece domínio próprio | — Pending |
+| Extrair ciclo de vida da sessão do InstanceOrchestrator | God-class com 5k linhas; sessão merece domínio próprio | ✓ Completo — Phase 4 entregou ConversationSessionManager, SessionStateService, SessionLifecycleService, InstanceEventBus |
 | Admin identificado pelo número verificado no módulo aprendizadoContinuo | Já existe infraestrutura de verificação | — Pending |
 | Refatoração gradual (não big-bang) | Evitar quebrar funcionalidades existentes durante a finalização | — Pending |
 
 ## Evolution
+
+**Current State:** Phase 4 complete (2026-04-16) — session lifecycle formalized. Phase 5 (intent-detection-&-conversational-ai) is next.
 
 Este documento evolui a cada transição de fase e milestone.
 

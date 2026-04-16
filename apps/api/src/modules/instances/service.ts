@@ -3033,8 +3033,12 @@ if (event.status === "CONNECTED") {
         if (correctionQuestion) {
           console.log("[escalation] correcao detectada pelo admin", { question: correctionQuestion, instanceId: instance.id });
           await this.escalationService.processAdminCorrection(tenantId, instance.id, correctionQuestion, finalInputText);
-          void this.chatbotService.triggerKnowledgeSynthesis(tenantId, instance.id)
-            .catch((err) => console.warn("[knowledge-synthesis] erro na correcao:", err));
+          // Phase 5.4: setImmediate replaces void fire-and-forget — deferred but error-observable
+          setImmediate(() => {
+            this.chatbotService.triggerKnowledgeSynthesis(tenantId, instance.id).catch((err) =>
+              console.warn("[knowledge-synthesis] erro na correcao:", err)
+            );
+          });
           await this.sendAutomatedTextMessage(
             tenantId,
             instance.id,
@@ -3178,9 +3182,12 @@ if (event.status === "CONNECTED") {
               }
             }
 
-            // fire-and-forget: sintetiza conhecimento apos novo aprendizado
-            void this.chatbotService.triggerKnowledgeSynthesis(tenantId, instance.id)
-              .catch((err) => console.warn("[knowledge-synthesis] erro no fire-and-forget:", err));
+            // Phase 5.4: setImmediate replaces void fire-and-forget — deferred but error-observable
+            setImmediate(() => {
+              this.chatbotService.triggerKnowledgeSynthesis(tenantId, instance.id).catch((err) =>
+                console.warn("[knowledge-synthesis] erro no fire-and-forget:", err)
+              );
+            });
 
             return;
           }
@@ -3710,13 +3717,20 @@ if (event.status === "CONNECTED") {
 
       const memoriaModule = getMemoriaPersonalizadaModuleConfig(sanitizeChatbotModules(chatbotConfig?.modules));
       if (memoriaModule?.isEnabled === true && memoriaModule.fields.length > 0) {
-        void this.chatbotService.extractPersistentMemory(
-          tenantId,
-          instance.id,
-          resolvedContactNumber,
-          session.history
-        ).catch((err) => {
-          console.warn("[persistent-memory] erro no fire-and-forget:", err);
+        // Phase 5.4: setImmediate replaces void fire-and-forget — T-5-15: capture scalars only
+        const _pmTenantId = tenantId;
+        const _pmInstanceId = instance.id;
+        const _pmContactNumber = resolvedContactNumber;
+        const _pmHistory = session.history.slice();
+        setImmediate(() => {
+          this.chatbotService.extractPersistentMemory(
+            _pmTenantId,
+            _pmInstanceId,
+            _pmContactNumber,
+            _pmHistory
+          ).catch((err) => {
+            console.warn("[persistent-memory] deferred extraction failed:", err);
+          });
         });
       }
 
@@ -4856,13 +4870,20 @@ if (event.status === "CONNECTED") {
       sanitizeChatbotModules(params.chatbotConfig?.modules)
     );
     if (memoriaModule?.isEnabled === true && memoriaModule.fields.length > 0) {
-      void this.chatbotService.extractPersistentMemory(
-        params.tenantId,
-        params.instance.id,
-        params.resolvedContactNumber,
-        params.session.history
-      ).catch((err) => {
-        console.warn("[persistent-memory] erro no fire-and-forget:", err);
+      // Phase 5.4: setImmediate replaces void fire-and-forget — T-5-15: capture scalars only
+      const _pmTenantId = params.tenantId;
+      const _pmInstanceId = params.instance.id;
+      const _pmContactNumber = params.resolvedContactNumber;
+      const _pmHistory = params.session.history.slice();
+      setImmediate(() => {
+        this.chatbotService.extractPersistentMemory(
+          _pmTenantId,
+          _pmInstanceId,
+          _pmContactNumber,
+          _pmHistory
+        ).catch((err) => {
+          console.warn("[persistent-memory] deferred extraction failed:", err);
+        });
       });
     }
 

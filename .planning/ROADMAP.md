@@ -542,3 +542,16 @@ These items must be validated in staging before declaring the phase complete:
 *Roadmap created: 2026-04-10*
 *Covers: v1 Production milestone*
 *Next: `/gsd-plan-phase 1` to plan Phase 1: Security Hardening*
+
+---
+
+## Backlog
+
+### Phase 999.1: INTENT_CLASSIFIER_V2 ativável pelo painel como módulo (BACKLOG)
+
+**Goal:** Tornar o classificador de intenção LLM ativável por instância via painel, igual aos outros módulos do chatbot. Atualmente é controlado apenas por `process.env.INTENT_CLASSIFIER_V2=true` (ver `apps/api/src/modules/instances/service.ts:2230`).
+**Requirements:** TBD
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (promote with /gsd-review-backlog when ready)

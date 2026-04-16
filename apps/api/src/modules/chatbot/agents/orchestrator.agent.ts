@@ -4,6 +4,7 @@ import { GeneralAgent } from "./general.agent.js";
 import { IntentRouter } from "./intent-router.js";
 import { SchedulingAgent } from "./scheduling.agent.js";
 import type { AgentContext, RouterResult } from "./types.js";
+import type pino from "pino";
 
 /**
  * Orquestrador central dos sub-agents.
@@ -22,15 +23,20 @@ export class OrchestratorAgent {
   private readonly escalationAgent = new EscalationAgent();
   private readonly schedulingAgent = new SchedulingAgent();
   private readonly generalAgent = new GeneralAgent();
+  private readonly logger?: pino.Logger;
+
+  constructor(logger?: pino.Logger) {
+    this.logger = logger;
+  }
 
   public async process(ctx: AgentContext): Promise<string | null> {
     let routerResult: RouterResult;
 
     try {
       routerResult = await this.intentRouter.classify(ctx);
-      console.log(`[orchestrator] intent=${routerResult.intent} confidence=${routerResult.confidence.toFixed(2)}`);
+      this.logger?.debug({ intent: routerResult.intent, confidence: routerResult.confidence }, '[orchestrator] intent classified');
     } catch (err) {
-      console.warn("[orchestrator] IntentRouter falhou, usando GENERAL como fallback:", err);
+      this.logger?.warn({ err }, '[orchestrator] IntentRouter failed — falling back to GENERAL');
       routerResult = { intent: "GENERAL", confidence: 0.5 };
     }
 
@@ -54,11 +60,11 @@ export class OrchestratorAgent {
           return await this.generalAgent.respond(ctx);
       }
     } catch (err) {
-      console.warn(`[orchestrator] agent para intent="${routerResult.intent}" falhou, caindo no GeneralAgent:`, err);
+      this.logger?.warn({ err, intent: routerResult.intent }, '[orchestrator] sub-agent failed — falling back to GeneralAgent');
       try {
         return await this.generalAgent.respond(ctx);
       } catch (fallbackErr) {
-        console.error("[orchestrator] GeneralAgent também falhou:", fallbackErr);
+        this.logger?.error({ err: fallbackErr }, '[orchestrator] GeneralAgent also failed — returning null');
         return null; // IA-03: never return undefined — null signals "no response available"
       }
     }

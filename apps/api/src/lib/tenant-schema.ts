@@ -285,7 +285,6 @@ export const buildTenantSchemaSql = (schemaName: string): string[] => {
     `CREATE INDEX IF NOT EXISTS "idx_${schemaName}_session_remote_jid"
       ON ${schema}."ConversationSession" ("instanceId", "remoteJid");`,
     `ALTER TABLE ${schema}."ConversationSession" ADD COLUMN IF NOT EXISTS "firstResponseMs" INTEGER;`,
-    `ALTER TABLE ${schema}."ConversationSession" ADD COLUMN IF NOT EXISTS "conversationId" TEXT REFERENCES ${schema}."Conversation"("id") ON DELETE SET NULL;`,
-    `ALTER TABLE ${schema}."ConversationSession" ADD COLUMN IF NOT EXISTS "urgencyScore" INTEGER DEFAULT 0;`
+    `ALTER TABLE ${schema}."ConversationSession" ADD COLUMN IF NOT EXISTS "conversationId" TEXT REFERENCES ${schema}."Conversation"("id") ON DELETE SET NULL;`
   ];
 };

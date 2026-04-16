@@ -52,8 +52,6 @@ import type { PlatformAlertService } from "../platform/alert.service.js";
 import type { Queue } from "bullmq";
 import { InstanceEventBus } from '../../lib/instance-events.js';
 import { recognizeCloseIntent } from '../../lib/session-intents.js';
-import { classifyIntent } from '../../lib/intent-classifier.service.js';
-import type { AiCaller } from '../chatbot/agents/types.js';
 
 interface InstanceOrchestratorDeps {
   config: AppConfig;
@@ -2225,128 +2223,15 @@ if (event.status === "CONNECTED") {
         sessionId: '', // placeholder — full sessionId wiring comes in Phase 5
       });
 
-      // Phase 5: LLM intent pre-pass (replaces recognizeCloseIntent regex stub — Pitfall 1)
-      // Feature flag: INTENT_CLASSIFIER_V2=true enables LLM classifier; false keeps regex stub.
-      if (process.env.INTENT_CLASSIFIER_V2 === 'true') {
-        const sessionKey = this.sessionManager.buildKey(instance.id, event.remoteJid);
-        const session = this.sessionManager.get(sessionKey);
-        // Cache: skip re-classification if text is unchanged (Pitfall 2)
-        const needsClassify = rawTextInput &&
-          session?.lastIntentClassification?.text !== rawTextInput;
-
-        if (rawTextInput && needsClassify) {
-          try {
-            const classification = await classifyIntent(
-              rawTextInput,
-              this.makeAiCaller(tenantId, instance),
-              session?.history?.slice(-6)
-            );
-            if (session) {
-              session.lastIntentClassification = { text: rawTextInput, ...classification };
-            }
-
-            if (classification.label === 'ENCERRAMENTO') {
-              this.eventBus.emit('session.close_intent_detected', {
-                type: 'session.close_intent_detected',
-                tenantId,
-                instanceId: instance.id,
-                remoteJid: event.remoteJid,
-                sessionId: '',
-                intentLabel: 'ENCERRAMENTO',
-              });
-            }
-
-            // IA-02: URGENCIA_ALTA → emit session.urgency_detected + write urgencyScore to Redis
-            if (classification.label === 'URGENCIA_ALTA') {
-              this.eventBus.emit('session.urgency_detected', {
-                type: 'session.urgency_detected',
-                tenantId,
-                instanceId: instance.id,
-                remoteJid: event.remoteJid,
-                sessionId: '',
-                urgencyScore: 80,
-              });
-              // Persist urgencyScore in Redis hash (T-5-08: validate JID before using as key component)
-              const jidPattern = /^[^:@]+@(s\.whatsapp\.net|g\.us)$/;
-              if (jidPattern.test(event.remoteJid)) {
-                this.redis.hset(
-                  `session:${tenantId}:${instance.id}:${event.remoteJid}`,
-                  { urgencyScore: '80' }
-                ).catch((err: unknown) => console.warn('[intent] failed to set urgencyScore in Redis', err));
-              }
-            }
-
-            // IA-06: TRANSFERENCIA_HUMANO → setHumanTakeover + notify admin with conversation summary
-            if (classification.label === 'TRANSFERENCIA_HUMANO') {
-              try {
-                // Write humanTakeover=1 to Redis using same key pattern as SessionStateService
-                const jidPattern = /^[^:@]+@(s\.whatsapp\.net|g\.us)$/;
-                if (jidPattern.test(event.remoteJid)) {
-                  await this.redis.hset(
-                    `session:${tenantId}:${instance.id}:${event.remoteJid}`,
-                    { humanTakeover: '1' }
-                  );
-                }
-
-                // Mirror the HUMAN_HANDOFF clientMemory update (paused_by_human tag)
-                await this.clientMemoryService.upsert(tenantId, resolvedContactNumber, {
-                  lastContactAt: new Date(),
-                  tags: ['paused_by_human'],
-                });
-
-                // Build admin notification with last 5 conversation exchanges (T-5-06: limit to 10 msgs, 120 chars each)
-                const sessionKey = this.sessionManager.buildKey(instance.id, event.remoteJid);
-                const sessionForHandoff = this.sessionManager.get(sessionKey);
-                const recentExchanges = sessionForHandoff?.history?.slice(-10) ?? [];
-                const summaryLines = recentExchanges.map((msg) =>
-                  `${msg.role === 'user' ? 'Cliente' : 'Bot'}: ${msg.content.slice(0, 120)}`
-                );
-                const summaryText = summaryLines.length > 0
-                  ? summaryLines.join('\n')
-                  : '(sem histórico disponível)';
-
-                const adminPhone = this.resolveConfiguredPhone(
-                  chatbotConfig?.leadsPhoneNumber,
-                  platformConfig?.adminAlertPhone
-                );
-
-                if (adminPhone) {
-                  const adminJid = adminPhone.includes('@') ? adminPhone : `${adminPhone}@s.whatsapp.net`;
-                  this.sendAutomatedTextMessage(
-                    tenantId, instance.id, adminPhone, adminJid,
-                    [
-                      `Transferência solicitada pelo cliente ${remoteNumber || event.remoteJid}.`,
-                      '',
-                      'Últimas mensagens:',
-                      summaryText,
-                      '',
-                      'O bot foi pausado para este contato. Assuma o atendimento.',
-                    ].join('\n'),
-                    { action: 'intent_human_handoff_alert', kind: 'chatbot' }
-                  ).catch((err: unknown) => console.warn('[intent] falha ao notificar admin sobre TRANSFERENCIA_HUMANO', err));
-                } else {
-                  console.warn('[intent] TRANSFERENCIA_HUMANO: adminPhone não configurado', { tenantId, instanceId: instance.id });
-                }
-              } catch (err: unknown) {
-                console.warn('[intent] TRANSFERENCIA_HUMANO handling failed — pipeline continues', err);
-              }
-            }
-          } catch (err) {
-            console.warn('[intent-classifier] pre-pass failed, continuing pipeline', err);
-          }
-        }
-      } else {
-        // Fallback: regex stub (SESS-09 placeholder) — remove when INTENT_CLASSIFIER_V2 proven in staging
-        if (rawTextInput && recognizeCloseIntent(rawTextInput)) {
-          this.eventBus.emit('session.close_intent_detected', {
-            type: 'session.close_intent_detected',
-            tenantId,
-            instanceId: instance.id,
-            remoteJid: event.remoteJid,
-            sessionId: '',
-            intentLabel: 'ENCERRAMENTO',
-          });
-        }
+      if (rawTextInput && recognizeCloseIntent(rawTextInput)) {
+        this.eventBus.emit('session.close_intent_detected', {
+          type: 'session.close_intent_detected',
+          tenantId,
+          instanceId: instance.id,
+          remoteJid: event.remoteJid,
+          sessionId: '',
+          intentLabel: 'ENCERRAMENTO',
+        });
       }
     }
 
@@ -5097,45 +4982,6 @@ if (event.status === "CONNECTED") {
 
   private emitLog(key: string, event: InstanceLogEvent): void {
     this.logEmitter.emit(key, event);
-  }
-
-  /**
-   * Builds a lightweight AiCaller for the intent pre-pass classifier.
-   * Uses the same GroqKeyRotator pool managed by ChatbotService — no separate key config needed.
-   * Same Groq chat/completions endpoint used by other LLM calls in the pipeline.
-   */
-  private makeAiCaller(_tenantId: string, _instance: Instance): AiCaller {
-    return async (system, messages, opts) => {
-      const apiKey = this.chatbotService.getNextGroqApiKey() ?? this.config.GROQ_API_KEY;
-      const model = opts?.model ?? "llama-3.1-8b-instant";
-      const temperature = opts?.temperature ?? 0;
-
-      const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model,
-          temperature,
-          messages: [
-            { role: "system", content: system },
-            ...messages,
-          ],
-          max_tokens: 64,
-        }),
-      });
-
-      if (!response.ok) {
-        this.chatbotService.reportGroqKeyResult(apiKey, response.status);
-        return null;
-      }
-
-      this.chatbotService.reportGroqKeyResult(apiKey, "success");
-      const data = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
-      return data.choices?.[0]?.message?.content ?? null;
-    };
   }
 }
 

@@ -21,6 +21,15 @@ export interface SessionCloseIntentEvent {
   intentLabel: string; // e.g. 'ENCERRAMENTO' — static label from SESS-09 stub, LLM label in Phase 5
 }
 
+export interface SessionUrgencyDetectedEvent {
+  type: 'session.urgency_detected';
+  tenantId: string;
+  instanceId: string;
+  remoteJid: string;
+  sessionId: string;
+  urgencyScore: number; // 80 for URGENCIA_ALTA from intent pre-pass
+}
+
 export interface AdminCommandEvent {
   type: 'admin.command';
   tenantId: string;
@@ -32,6 +41,7 @@ export interface AdminCommandEvent {
 export type InstanceDomainEvent =
   | SessionActivityEvent
   | SessionCloseIntentEvent
+  | SessionUrgencyDetectedEvent   // NEW — Phase 5.2
   | AdminCommandEvent;
 
 // ---------------------------------------------------------------------------

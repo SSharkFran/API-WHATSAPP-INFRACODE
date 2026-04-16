@@ -2255,7 +2255,82 @@ if (event.status === "CONNECTED") {
                 intentLabel: 'ENCERRAMENTO',
               });
             }
-            // URGENCIA_ALTA and TRANSFERENCIA_HUMANO are handled in Plan 5.2
+
+            // IA-02: URGENCIA_ALTA → emit session.urgency_detected + write urgencyScore to Redis
+            if (classification.label === 'URGENCIA_ALTA') {
+              this.eventBus.emit('session.urgency_detected', {
+                type: 'session.urgency_detected',
+                tenantId,
+                instanceId: instance.id,
+                remoteJid: event.remoteJid,
+                sessionId: '',
+                urgencyScore: 80,
+              });
+              // Persist urgencyScore in Redis hash (T-5-08: validate JID before using as key component)
+              const jidPattern = /^[^:@]+@(s\.whatsapp\.net|g\.us)$/;
+              if (jidPattern.test(event.remoteJid)) {
+                this.redis.hset(
+                  `session:${tenantId}:${instance.id}:${event.remoteJid}`,
+                  { urgencyScore: '80' }
+                ).catch((err: unknown) => console.warn('[intent] failed to set urgencyScore in Redis', err));
+              }
+            }
+
+            // IA-06: TRANSFERENCIA_HUMANO → setHumanTakeover + notify admin with conversation summary
+            if (classification.label === 'TRANSFERENCIA_HUMANO') {
+              try {
+                // Write humanTakeover=1 to Redis using same key pattern as SessionStateService
+                const jidPattern = /^[^:@]+@(s\.whatsapp\.net|g\.us)$/;
+                if (jidPattern.test(event.remoteJid)) {
+                  await this.redis.hset(
+                    `session:${tenantId}:${instance.id}:${event.remoteJid}`,
+                    { humanTakeover: '1' }
+                  );
+                }
+
+                // Mirror the HUMAN_HANDOFF clientMemory update (paused_by_human tag)
+                await this.clientMemoryService.upsert(tenantId, resolvedContactNumber, {
+                  lastContactAt: new Date(),
+                  tags: ['paused_by_human'],
+                });
+
+                // Build admin notification with last 5 conversation exchanges (T-5-06: limit to 10 msgs, 120 chars each)
+                const sessionKey = this.sessionManager.buildKey(instance.id, event.remoteJid);
+                const sessionForHandoff = this.sessionManager.get(sessionKey);
+                const recentExchanges = sessionForHandoff?.history?.slice(-10) ?? [];
+                const summaryLines = recentExchanges.map((msg) =>
+                  `${msg.role === 'user' ? 'Cliente' : 'Bot'}: ${msg.content.slice(0, 120)}`
+                );
+                const summaryText = summaryLines.length > 0
+                  ? summaryLines.join('\n')
+                  : '(sem histórico disponível)';
+
+                const adminPhone = this.resolveConfiguredPhone(
+                  chatbotConfig?.leadsPhoneNumber,
+                  platformConfig?.adminAlertPhone
+                );
+
+                if (adminPhone) {
+                  const adminJid = adminPhone.includes('@') ? adminPhone : `${adminPhone}@s.whatsapp.net`;
+                  this.sendAutomatedTextMessage(
+                    tenantId, instance.id, adminPhone, adminJid,
+                    [
+                      `Transferência solicitada pelo cliente ${remoteNumber || event.remoteJid}.`,
+                      '',
+                      'Últimas mensagens:',
+                      summaryText,
+                      '',
+                      'O bot foi pausado para este contato. Assuma o atendimento.',
+                    ].join('\n'),
+                    { action: 'intent_human_handoff_alert', kind: 'chatbot' }
+                  ).catch((err: unknown) => console.warn('[intent] falha ao notificar admin sobre TRANSFERENCIA_HUMANO', err));
+                } else {
+                  console.warn('[intent] TRANSFERENCIA_HUMANO: adminPhone não configurado', { tenantId, instanceId: instance.id });
+                }
+              } catch (err: unknown) {
+                console.warn('[intent] TRANSFERENCIA_HUMANO handling failed — pipeline continues', err);
+              }
+            }
           } catch (err) {
             console.warn('[intent-classifier] pre-pass failed, continuing pipeline', err);
           }

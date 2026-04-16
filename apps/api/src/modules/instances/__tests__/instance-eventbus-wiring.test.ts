@@ -210,7 +210,7 @@ describe("InstanceOrchestrator — InstanceEventBus wiring", () => {
     vi.spyOn(eventBus, "emit");
 
     const deps = makeOrchestratorDeps({ eventBus });
-    orchestrator = new InstanceOrchestrator(deps as Parameters<typeof InstanceOrchestrator.prototype.constructor>[0]);
+    orchestrator = new InstanceOrchestrator(deps as ConstructorParameters<typeof InstanceOrchestrator>[0]);
   });
 
   // Test 1: session.activity NOT emitted for admin messages
@@ -221,7 +221,7 @@ describe("InstanceOrchestrator — InstanceEventBus wiring", () => {
     await (orchestrator as unknown as Record<string, (a: string, b: Instance, c: unknown) => Promise<void>>)
       .handleInboundMessage(tenantId, instance, event);
 
-    const activityCalls = (eventBus.emit as ReturnType<typeof vi.spyOn>).mock.calls.filter(
+    const activityCalls = vi.mocked(eventBus.emit).mock.calls.filter(
       ([name]) => name === "session.activity"
     );
     expect(activityCalls).toHaveLength(0);
@@ -294,7 +294,7 @@ describe("InstanceOrchestrator — InstanceEventBus wiring", () => {
     await (orchestrator as unknown as Record<string, (a: string, b: Instance, c: unknown) => Promise<void>>)
       .handleInboundMessage(tenantId, instance, event);
 
-    const closeCalls = (eventBus.emit as ReturnType<typeof vi.spyOn>).mock.calls.filter(
+    const closeCalls = vi.mocked(eventBus.emit).mock.calls.filter(
       ([name]) => name === "session.close_intent_detected"
     );
     expect(closeCalls).toHaveLength(0);

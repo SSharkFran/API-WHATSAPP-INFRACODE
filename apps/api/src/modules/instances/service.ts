@@ -4570,6 +4570,79 @@ if (event.status === "CONNECTED") {
       return;
     }
 
+    // IA-03/IA-04: Honest fallback when AI cannot produce a response
+    // Pitfall 5 guard: only fire when chatbot pipeline genuinely failed — not on intentional silence
+    if (!chatbotResult) {
+      // At this point isConversationAiBlocked was already checked at function entry.
+      // Re-check here to guard against state changes that occurred during the pipeline (T-5-04).
+      const stillBlocked = await this.isConversationAiBlocked(prisma, params.conversationId);
+      if (stillBlocked) {
+        // Intentional silence (humanTakeover, aiDisabledPermanent, awaitingAdminResponse) — do not disturb
+        return;
+      }
+
+      // Part A — always fires regardless of module status (IA-03)
+      const HONEST_FALLBACK_MESSAGE =
+        "Essa é uma ótima pergunta! Não tenho essa informação no momento. Vou verificar com nossa equipe e retorno em breve.";
+
+      await this.sendAutomatedTextMessage(
+        params.tenantId,
+        params.instance.id,
+        params.remoteNumber,
+        params.targetJid,
+        HONEST_FALLBACK_MESSAGE,
+        { action: "honest_fallback", kind: "chatbot" }
+      );
+      this.appendConversationHistory(params.session, "assistant", HONEST_FALLBACK_MESSAGE);
+
+      // Part B — only if aprendizadoContinuo is enabled and verified (IA-04)
+      // Source: existing ESCALATE_ADMIN pattern — same gate (T-5-10)
+      const aprendizadoContinuoModuleForFallback = getAprendizadoContinuoModuleConfig(params.chatbotConfig?.modules ?? undefined);
+      const shouldNotifyAdmin =
+        aprendizadoContinuoModuleForFallback?.isEnabled === true &&
+        aprendizadoContinuoModuleForFallback.verificationStatus === "VERIFIED";
+
+      if (shouldNotifyAdmin) {
+        const adminPhoneForFallback = this.resolveConfiguredPhone(
+          aprendizadoContinuoModuleForFallback?.verifiedPhone ?? null,
+          ...(aprendizadoContinuoModuleForFallback?.verifiedPhones ?? []),
+          ...(aprendizadoContinuoModuleForFallback?.additionalAdminPhones ?? []),
+          params.chatbotConfig?.leadsPhoneNumber,
+          platformConfig?.adminAlertPhone
+        );
+
+        if (adminPhoneForFallback) {
+          const adminJidForFallback = adminPhoneForFallback.includes("@")
+            ? adminPhoneForFallback
+            : `${adminPhoneForFallback}@s.whatsapp.net`;
+
+          const clientDisplayName = params.contactDisplayName ?? params.resolvedContactNumber;
+          const adminFallbackMessage = [
+            `❓ *${clientDisplayName}* fez uma pergunta que o bot não soube responder:`,
+            ``,
+            `"${params.inputText.slice(0, 300)}"`,
+            ``,
+            `Use /aprender para registrar uma resposta.`,
+          ].join("\n");
+
+          await this.sendAutomatedTextMessage(
+            params.tenantId,
+            params.instance.id,
+            adminPhoneForFallback,
+            adminJidForFallback,
+            adminFallbackMessage,
+            { action: "honest_fallback_admin_notify", kind: "chatbot" }
+          ).catch((err) =>
+            console.warn("[honest-fallback] falha ao notificar admin — continuando:", err)
+          );
+        } else {
+          console.warn("[honest-fallback] adminPhone não configurado, Part B skipped", { tenantId: params.tenantId });
+        }
+      }
+
+      return;
+    }
+
     const rawResponse = chatbotResult?.responseText ?? null;
 
     if (!rawResponse) {

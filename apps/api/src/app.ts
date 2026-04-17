@@ -10,6 +10,7 @@ import Fastify from "fastify";
 import { ZodTypeProvider } from "fastify-type-provider-zod";
 import { loadConfig } from "./config.js";
 import { createPlatformPrisma, TenantPrismaRegistry } from "./lib/database.js";
+import { runMigrations } from "./lib/run-migrations.js";
 import { createLogger } from "./lib/logger.js";
 import { MetricsService } from "./lib/metrics.js";
 import { EmailService } from "./lib/mail.js";
@@ -205,6 +206,38 @@ export const buildApp = async () => {
     logger,
     eventBus,
   });
+
+  // Run schema migrations for all registered tenants at startup
+  // Per D-MIGRATION-FAIL: errors are caught per-tenant; startup continues regardless
+  if (config.NODE_ENV !== "test") {
+    const tenants = await platformPrisma.tenant.findMany({ select: { id: true } });
+
+    const migrationResults: Array<{ tenantId: string; status: "success" | "skipped" | "failed" }> = [];
+
+    for (const tenant of tenants) {
+      const status = await runMigrations(platformPrisma, tenant.id, logger).catch((err) => {
+        logger.error({ tenantId: tenant.id, err }, "runMigrations threw unexpectedly");
+        return "failed" as const;
+      });
+      migrationResults.push({ tenantId: tenant.id, status });
+    }
+
+    logger.info(
+      { migrations: migrationResults },
+      `Schema migrations complete: ${migrationResults.filter((r) => r.status === "success").length} applied, ` +
+      `${migrationResults.filter((r) => r.status === "skipped").length} skipped, ` +
+      `${migrationResults.filter((r) => r.status === "failed").length} failed`
+    );
+
+    const failedTenants = migrationResults.filter((r) => r.status === "failed");
+    if (failedTenants.length > 0) {
+      logger.warn(
+        { failedTenants: failedTenants.map((r) => r.tenantId) },
+        "Some tenants have pending schema migrations — they may lack new columns"
+      );
+      // Do NOT exit — per D-MIGRATION-FAIL: startup continues
+    }
+  }
 
   app.decorate("config", config);
   app.decorate("platformPrisma", platformPrisma);

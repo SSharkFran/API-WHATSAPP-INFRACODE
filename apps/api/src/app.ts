@@ -18,6 +18,9 @@ import { normalizeError } from "./lib/errors.js";
 import { createSendMessageQueue } from "./queues/message-queue.js";
 import { createWebhookQueue } from "./queues/webhook-queue.js";
 import { createSessionTimeoutQueue } from "./queues/session-timeout-queue.js";
+import { createLidReconciliationQueue } from "./queues/lid-reconciliation-queue.js";
+import { Worker as BullWorker } from "bullmq";
+import { createLidReconciliationProcessor, type LidReconciliationJobPayload } from "./workers/lid-reconciliation.worker.js";
 import { SessionStateService } from "./modules/instances/session-state.service.js";
 import { SessionLifecycleService } from "./modules/instances/session-lifecycle.service.js";
 import { InstanceEventBus } from "./lib/instance-events.js";
@@ -133,6 +136,7 @@ export const buildApp = async () => {
   const sendMessageQueue = config.NODE_ENV === "test" ? createNoopQueue() : createSendMessageQueue(redis);
   const webhookDispatchQueue = config.NODE_ENV === "test" ? createNoopQueue() : createWebhookQueue(redis);
   const sessionTimeoutQueue = config.NODE_ENV === "test" ? createNoopQueue() : createSessionTimeoutQueue(redis);
+  const lidReconciliationQueue = config.NODE_ENV === "test" ? createNoopQueue() : createLidReconciliationQueue(redis);
   const webhookService = new WebhookService({
     config,
     metricsService,
@@ -164,6 +168,7 @@ export const buildApp = async () => {
     fiadoService,
     escalationService,
     sendMessageQueue,
+    lidReconciliationQueue,
     eventBus,
   });
   const platformAlertService = new PlatformAlertService(platformPrisma, instanceOrchestrator);
@@ -205,6 +210,24 @@ export const buildApp = async () => {
     logger,
     eventBus,
   });
+
+  // Plan 2.1: LID reconciliation worker — resolves @lid contacts to real phone numbers
+  // Worker uses a duplicate Redis connection (T-04-03-05 pattern from session-lifecycle)
+  let lidReconciliationWorker: InstanceType<typeof BullWorker<LidReconciliationJobPayload>> | undefined;
+  if (config.NODE_ENV !== "test") {
+    const lidWorkerConnection = redis.duplicate();
+    const lidProcessor = createLidReconciliationProcessor({
+      tenantPrismaRegistry,
+      platformPrisma,
+      instanceOrchestrator,
+      logger,
+    });
+    lidReconciliationWorker = new BullWorker<LidReconciliationJobPayload>(
+      "lid-reconciliation",
+      lidProcessor,
+      { autorun: true, connection: lidWorkerConnection as never, concurrency: 5 }
+    );
+  }
 
   app.decorate("config", config);
   app.decorate("platformPrisma", platformPrisma);
@@ -295,9 +318,13 @@ export const buildApp = async () => {
     await instanceOrchestrator.close();
     await messageService.close();
     await sessionLifecycleService.close();
+    if (lidReconciliationWorker) {
+      await lidReconciliationWorker.close();
+    }
     await sendMessageQueue.close();
     await webhookDispatchQueue.close();
     await sessionTimeoutQueue.close();
+    await lidReconciliationQueue.close();
     await redis.quit();
     await tenantPrismaRegistry.close();
     await platformPrisma.$disconnect();

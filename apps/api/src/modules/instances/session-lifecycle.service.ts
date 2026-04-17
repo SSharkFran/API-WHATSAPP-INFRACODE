@@ -111,6 +111,7 @@ export class SessionLifecycleService {
           { sessionId: event.sessionId, intentLabel: event.intentLabel },
           '[lifecycle] close intent detected'
         );
+        if (!event.remoteJid.endsWith('@s.whatsapp.net') && !event.remoteJid.endsWith('@g.us')) return;
         // Transition to CONFIRMACAO_ENVIADA — Phase 5 will complete this wiring
         await this.deps.sessionStateService
           .updateStatus(event.tenantId, event.instanceId, event.remoteJid, SessionStatus.CONFIRMACAO_ENVIADA)
@@ -132,6 +133,7 @@ export class SessionLifecycleService {
    */
   async recordActivity(params: SessionActivityParams): Promise<void> {
     if (!this.enabled) return;
+    if (!params.remoteJid.endsWith('@s.whatsapp.net') && !params.remoteJid.endsWith('@g.us')) return;
 
     const { sessionId, tenantId, instanceId, remoteJid } = params;
 

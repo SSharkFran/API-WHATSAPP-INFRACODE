@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
+import type { Prisma } from "../../../../../prisma/generated/tenant-client/index.js";
 import { requireTenantId } from "../../lib/request-auth.js";
 import { instanceParamsSchema } from "../instances/schemas.js";
 
@@ -63,7 +64,7 @@ export const registerCrmRoutes = async (app: FastifyInstance): Promise<void> => 
       take: (pageSize + skip) * 2,
       select: {
         id: true, status: true, humanTakeover: true, lastMessageAt: true, tags: true,
-        contact: { select: { id: true, phoneNumber: true, displayName: true, isBlacklisted: true } }
+        contact: { select: { id: true, phoneNumber: true, rawJid: true, displayName: true, isBlacklisted: true } }
       }
     });
 
@@ -74,24 +75,31 @@ export const registerCrmRoutes = async (app: FastifyInstance): Promise<void> => 
       .slice(skip, skip + pageSize);
 
     const memories = await Promise.all(
-      deduped.map(c =>
-        prisma.clientMemory
+      deduped.map(c => {
+        const phone8 = cleanPhone(c.contact.phoneNumber).slice(-8);
+        if (!phone8) return Promise.resolve(null);
+        return prisma.clientMemory
           .findFirst({
-            where: { phoneNumber: { contains: cleanPhone(c.contact.phoneNumber).slice(-8) } },
+            where: { phoneNumber: { contains: phone8 } },
             select: { name: true, serviceInterest: true, status: true, scheduledAt: true, notes: true }
           })
-          .catch(() => null)
-      )
+          .catch(() => null);
+      })
     );
 
     const contacts = deduped.map((c, i) => {
-      const cleaned = cleanPhone(c.contact.phoneNumber);
+      const rawJid = c.contact.rawJid ?? null;
+      const phoneNumber = c.contact.phoneNumber ?? null;
+      // displayName fallback: stored name > memory name > cleaned digits (never raw JID)
+      const cleaned = cleanPhone(phoneNumber);
+      const displayName = (c.contact.displayName ?? memories[i]?.name ?? (cleaned || null)) || null;
       return {
         conversationId:    c.id,
         contactId:         c.contact.id,
-        jid:               c.contact.phoneNumber ?? "",     // JID original (pode ser @lid)
-        phoneNumber:       cleaned,
-        displayName:       (c.contact.displayName ?? memories[i]?.name ?? cleaned) || null,
+        jid:               rawJid ?? phoneNumber ?? "",  // sendable identifier (rawJid preferred)
+        rawJid,                                           // explicit field for "Aguardando número" detection
+        phoneNumber,                                      // null for LID-only contacts
+        displayName,
         isBlacklisted:     c.contact.isBlacklisted,
         conversationStatus: c.status,
         humanTakeover:     c.humanTakeover,
@@ -119,23 +127,39 @@ export const registerCrmRoutes = async (app: FastifyInstance): Promise<void> => 
 
     const contact = await prisma.contact.findFirst({
       where: { id: contactId, instanceId },
-      select: { id: true, phoneNumber: true, displayName: true, isBlacklisted: true, notes: true }
+      select: { id: true, phoneNumber: true, rawJid: true, displayName: true, isBlacklisted: true, notes: true }
     });
     if (!contact) return reply.status(404).send({ message: "Contato não encontrado." });
 
-    const phone8 = cleanPhone(contact.phoneNumber).slice(-8);
+    // Build message query: prefer phoneNumber digits match, fall back to rawJid exact match
+    // (RESEARCH.md Pitfall 3 — rawJid fallback for LID-only contacts)
+    let messageWhere: Prisma.MessageWhereInput;
+    let memoryWhere: Prisma.ClientMemoryWhereInput | null = null;
+    if (contact.phoneNumber) {
+      const phone8 = cleanPhone(contact.phoneNumber).slice(-8);
+      messageWhere = { instanceId, remoteJid: { contains: phone8 } };
+      memoryWhere = { phoneNumber: { contains: phone8 } };
+    } else if (contact.rawJid) {
+      messageWhere = { instanceId, remoteJid: { equals: contact.rawJid } };
+      memoryWhere = null; // no useful phone digits for memory lookup
+    } else {
+      // No usable identifier — return empty messages
+      messageWhere = { instanceId, id: { in: [] } };
+    }
 
     const [messages, memory, conversation] = await Promise.all([
       prisma.message.findMany({
-        where: { instanceId, remoteJid: { contains: phone8 } },
+        where: messageWhere,
         orderBy: { createdAt: "asc" },
         take: limit,
         select: { id: true, direction: true, type: true, payload: true, status: true, createdAt: true }
       }),
-      prisma.clientMemory.findFirst({
-        where: { phoneNumber: { contains: phone8 } },
-        select: { name: true, serviceInterest: true, status: true, scheduledAt: true, notes: true, isExistingClient: true }
-      }).catch(() => null),
+      memoryWhere
+        ? prisma.clientMemory.findFirst({
+            where: memoryWhere,
+            select: { name: true, serviceInterest: true, status: true, scheduledAt: true, notes: true, isExistingClient: true }
+          }).catch(() => null)
+        : Promise.resolve(null),
       prisma.conversation.findFirst({
         where: { instanceId, contact: { id: contactId } },
         orderBy: { lastMessageAt: "desc" },
@@ -143,11 +167,13 @@ export const registerCrmRoutes = async (app: FastifyInstance): Promise<void> => 
       })
     ]);
 
+    const cleanedPhone = cleanPhone(contact.phoneNumber) || null;
     return {
       contact: {
         id:              contact.id,
-        phoneNumber:     cleanPhone(contact.phoneNumber),
-        displayName:     contact.displayName ?? memory?.name ?? cleanPhone(contact.phoneNumber),
+        phoneNumber:     cleanedPhone,
+        rawJid:          contact.rawJid ?? null,
+        displayName:     contact.displayName ?? memory?.name ?? cleanedPhone ?? null,
         isBlacklisted:   contact.isBlacklisted,
         notes:           contact.notes ?? memory?.notes ?? null,
         leadStatus:      memory?.status ?? null,

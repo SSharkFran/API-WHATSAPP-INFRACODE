@@ -1,0 +1,41 @@
+/**
+ * formatPhone — client-side mirror of apps/api/src/lib/format-phone.ts
+ *
+ * Locked contract (02-UI-SPEC.md decision D-FORMAT):
+ *   - +55 numbers → pt-BR format (+55 DDD NNNNN-NNNN or +55 DDD NNNN-NNNN)
+ *   - Other country codes → E.164 as-is
+ *   - null/undefined/LID → "Aguardando número"
+ *   - Unparseable garbage → "Contato desconhecido"
+ *   - No external dependencies (libphonenumber-js is prohibited)
+ *
+ * Identical logic to the server-side module. The panel is a separate Next.js
+ * app and cannot import from apps/api/src/.
+ */
+export function formatPhone(raw: string | null | undefined): string {
+  if (raw == null) return "Aguardando número";
+
+  // Strip JID suffixes (@s.whatsapp.net, @c.us, @lid, etc.)
+  const stripped = raw.replace(/@[^@]*$/, "");
+
+  const digits = stripped.replace(/\D/g, "");
+  if (!digits) return "Contato desconhecido";
+
+  // pt-BR: country code 55, total digits 12 (10-digit local) or 13 (11-digit local)
+  if (digits.startsWith("55") && (digits.length === 12 || digits.length === 13)) {
+    const local = digits.slice(2); // remove country code
+    if (local.length === 11) {
+      // Mobile: +55 DDD NNNNN-NNNN
+      return `+55 ${local.slice(0, 2)} ${local.slice(2, 7)}-${local.slice(7)}`;
+    }
+    if (local.length === 10) {
+      // Landline: +55 DDD NNNN-NNNN
+      return `+55 ${local.slice(0, 2)} ${local.slice(2, 6)}-${local.slice(6)}`;
+    }
+  }
+
+  // International E.164: more than 10 total digits → return with leading +
+  if (digits.length > 10) return `+${digits}`;
+
+  // Too short to be a real phone number (includes LID-style short numeric IDs)
+  return "Contato desconhecido";
+}

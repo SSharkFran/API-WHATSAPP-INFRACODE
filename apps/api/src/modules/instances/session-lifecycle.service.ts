@@ -101,7 +101,7 @@ export class SessionLifecycleService {
           instanceId: event.instanceId,
           remoteJid: event.remoteJid,
         }).catch(err =>
-          console.error('[lifecycle] session.activity ERROR:', (err as Error).message, (err as Error).stack)
+          this.logger.error({ err }, '[lifecycle] error handling session.activity')
         );
       });
 
@@ -112,10 +112,9 @@ export class SessionLifecycleService {
           '[lifecycle] close intent detected'
         );
         if (!event.remoteJid.endsWith('@s.whatsapp.net') && !event.remoteJid.endsWith('@g.us')) return;
-        // Transition to CONFIRMACAO_ENVIADA — Phase 5 will complete this wiring
         await this.deps.sessionStateService
           .updateStatus(event.tenantId, event.instanceId, event.remoteJid, SessionStatus.CONFIRMACAO_ENVIADA)
-          .catch(err => console.error('[lifecycle] close_intent ERROR:', (err as Error).message, (err as Error).stack));
+          .catch(err => this.logger.error({ err }, '[lifecycle] error handling close_intent_detected'));
       });
     }
   }

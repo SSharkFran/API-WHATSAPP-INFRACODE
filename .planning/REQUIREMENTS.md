@@ -44,7 +44,7 @@
 ### Detecção de Intenção e IA Conversacional
 
 - [ ] **IA-01**: Classificador de intenção via LLM (pré-processamento antes do chatbot principal) para pt-BR
-- [ ] **IA-02**: Intenções reconhecidas: `ENCERRAMENTO`, `TRANSFERENCIA_HUMANO`, `URGENCIA_ALTA`, `DUVIDA_GENERICA`
+- [ ] **IA-02**: Intenções reconhecidas: `ENCERRAMENTO`, `TRANSFERENCIA_HUMANO`, `URGENCIA_ALTA`, `PERGUNTA`, `CONTINUACAO`, `OUTRO`
 - [ ] **IA-03**: Chatbot não trava em situações inesperadas — contorna e informa quando não sabe responder
 - [ ] **IA-04**: Quando não sabe a resposta: informa o cliente claramente e (se módulo ativo) escala ao admin
 - [ ] **IA-05**: Conversa não linear: fluxo adapta-se ao contexto, não segue script fixo rígido

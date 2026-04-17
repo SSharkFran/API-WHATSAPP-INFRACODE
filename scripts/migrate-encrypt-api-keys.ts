@@ -64,7 +64,10 @@ async function main() {
   }
 
   // --- Platform DB: TenantAiProvider.apiKeyEncrypted ---
-  const platformPrisma = new PlatformPrismaClient({ datasources: { db: { url: platformUrl } } });
+  const platformUrlWithSchema = platformUrl.includes("?")
+    ? `${platformUrl}&schema=platform`
+    : `${platformUrl}?schema=platform`;
+  const platformPrisma = new PlatformPrismaClient({ datasources: { db: { url: platformUrlWithSchema } } });
 
   console.log("\n📦 Migrating TenantAiProvider.apiKeyEncrypted (platform DB)...");
   let platformUpdated = 0;
@@ -93,7 +96,7 @@ async function main() {
 
   // --- Tenant DB(s): ChatbotConfig.aiFallbackApiKey ---
   // Get all tenants from platform DB to iterate their schemas
-  const platformPrisma2 = new PlatformPrismaClient({ datasources: { db: { url: platformUrl } } });
+  const platformPrisma2 = new PlatformPrismaClient({ datasources: { db: { url: platformUrlWithSchema } } });
   const tenants = await platformPrisma2.tenant.findMany({ select: { id: true, slug: true } });
   await platformPrisma2.$disconnect();
 

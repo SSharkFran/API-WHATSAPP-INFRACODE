@@ -57,4 +57,8 @@ export const registerTenantRoutes = async (app: FastifyInstance): Promise<void> 
     await recordPlatformAuditLog(app.platformPrisma, request, "tenant.settings.update", "Tenant", request.auth.tenantId ?? "", body, app.config.JWT_SECRET);
     return response;
   });
+
+  app.get("/tenant/metrics/today", { config: { auth: "tenant", tenantRoles: ["ADMIN", "OPERATOR", "VIEWER"] }, schema: { tags: ["Tenant"], summary: "Retorna metricas de atendimento do dia corrente" } }, async (request) => app.tenantManagementService.getTodayMetrics(request.auth.tenantId ?? ""));
+
+  app.get("/tenant/metrics/queue", { config: { auth: "tenant", tenantRoles: ["ADMIN", "OPERATOR"] }, schema: { tags: ["Tenant"], summary: "Retorna fila de atendimentos ativos ordenada por urgencia" } }, async (request) => app.tenantManagementService.getActiveQueue(request.auth.tenantId ?? ""));
 };

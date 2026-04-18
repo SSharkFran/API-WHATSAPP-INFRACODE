@@ -11,7 +11,8 @@ import {
   Rocket,
   Users,
   Menu,
-  X
+  X,
+  BarChart2
 } from "lucide-react";
 import { Topbar } from "../../../components/layout/Topbar";
 
@@ -22,6 +23,7 @@ const navItems = [
   { href: "/tenant/instances",   label: "Instâncias", icon: Server },
   { href: "/tenant/chatbot",     label: "Chatbot",    icon: Bot },
   { href: "/tenant/crm",         label: "CRM",        icon: Users },
+  { href: "/tenant/metrics",     label: "Métricas",   icon: BarChart2 },
   { href: "/tenant/api-keys",    label: "API Keys",   icon: Key },
   { href: "/tenant/onboarding",  label: "Onboarding", icon: Rocket }
 ];

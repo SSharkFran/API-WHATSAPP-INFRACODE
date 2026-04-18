@@ -38,60 +38,11 @@ export interface AdminCommandEvent {
   fromJid: string; // admin JID
 }
 
-export interface SessionOpenedEvent {
-  type: 'session.opened';
-  tenantId: string;
-  instanceId: string;
-  remoteJid: string;
-  sessionId: string;
-  contactId?: string | null;
-}
-
-export interface SessionFirstResponseEvent {
-  type: 'session.first_response';
-  tenantId: string;
-  instanceId: string;
-  remoteJid: string;
-  sessionId: string;
-  firstResponseMs: number;
-}
-
-export interface SessionHandoffEvent {
-  type: 'session.handoff';
-  tenantId: string;
-  instanceId: string;
-  remoteJid: string;
-  sessionId: string;
-}
-
-export interface SessionClosedEvent {
-  type: 'session.closed';
-  tenantId: string;
-  instanceId: string;
-  remoteJid: string;
-  sessionId: string;
-  closedReason: string;
-  durationSeconds: number | null;
-}
-
-export interface DocumentSentEvent {
-  type: 'document.sent';
-  tenantId: string;
-  instanceId: string;
-  remoteJid: string;
-  sessionId: string | null;
-}
-
 export type InstanceDomainEvent =
   | SessionActivityEvent
   | SessionCloseIntentEvent
   | SessionUrgencyDetectedEvent   // NEW — Phase 5.2
-  | AdminCommandEvent
-  | SessionOpenedEvent
-  | SessionFirstResponseEvent
-  | SessionHandoffEvent
-  | SessionClosedEvent
-  | DocumentSentEvent;
+  | AdminCommandEvent;
 
 // ---------------------------------------------------------------------------
 // InstanceEventBus — typed EventEmitter wrapper

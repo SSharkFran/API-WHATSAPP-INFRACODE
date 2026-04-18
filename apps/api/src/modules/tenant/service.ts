@@ -6,6 +6,70 @@ import type { PlatformPrisma, TenantPrismaRegistry } from "../../lib/database.js
 import { ApiError } from "../../lib/errors.js";
 import type { EmailService } from "../../lib/mail.js";
 
+// ---------------------------------------------------------------------------
+// Public interfaces for metrics endpoints
+// ---------------------------------------------------------------------------
+
+export interface TodayMetricsSnapshot {
+  startedCount: number;
+  endedCount: number;
+  inactiveCount: number;
+  handoffCount: number;
+  avgDurationSeconds: number | null;
+  avgFirstResponseMs: number | null;
+  continuationRate: number | null; // percentage 0-100 or null if no closed sessions
+}
+
+export interface ActiveQueueEntry {
+  id: string;
+  instanceId: string;
+  remoteJid: string;
+  contactId: string | null;
+  startedAt: string;
+  urgencyScore: number;
+  elapsedSeconds: number;
+}
+
+// ---------------------------------------------------------------------------
+// Private row types for raw SQL queries
+// ---------------------------------------------------------------------------
+
+interface MetricsRow {
+  startedCount: unknown;
+  endedCount: unknown;
+  inactiveCount: unknown;
+  handoffCount: unknown;
+  avgDurationSeconds: unknown;
+  avgFirstResponseMs: unknown;
+}
+
+interface ContinuationRow {
+  timedOutCount: unknown;
+  totalClosedCount: unknown;
+}
+
+interface ActiveQueueRow {
+  id: string;
+  instanceId: string;
+  remoteJid: string;
+  contactId: string | null;
+  startedAt: unknown;
+  urgencyScore: number | null;
+  elapsedSeconds: number | null;
+}
+
+function emptyMetricsSnapshot(): TodayMetricsSnapshot {
+  return {
+    startedCount: 0,
+    endedCount: 0,
+    inactiveCount: 0,
+    handoffCount: 0,
+    avgDurationSeconds: null,
+    avgFirstResponseMs: null,
+    continuationRate: null,
+  };
+}
+
 interface TenantManagementServiceDeps {
   config: AppConfig;
   platformPrisma: PlatformPrisma;
@@ -393,6 +457,108 @@ export class TenantManagementService {
       usersLimit: tenant.usersLimit,
       usersUsed
     };
+  }
+
+  /**
+   * Retorna metricas de atendimento do dia corrente para o tenant.
+   */
+  public async getTodayMetrics(tenantId: string): Promise<TodayMetricsSnapshot> {
+    const prisma = await this.tenantPrismaRegistry.getClient(tenantId);
+    const instances = await this.platformPrisma.instance.findMany({
+      where: { tenantId, deletedAt: null },
+      select: { id: true }
+    });
+    const instanceIds = instances.map((i) => i.id);
+    if (instanceIds.length === 0) {
+      return emptyMetricsSnapshot();
+    }
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+
+    const [metricsRows, continuationRows] = await Promise.all([
+      prisma.$queryRawUnsafe<MetricsRow[]>(
+        `SELECT
+           COUNT(*) FILTER (WHERE "status" != 'INATIVA') AS "startedCount",
+           COUNT(*) FILTER (WHERE "status" = 'ENCERRADA') AS "endedCount",
+           COUNT(*) FILTER (WHERE "status" = 'INATIVA') AS "inactiveCount",
+           COUNT(*) FILTER (WHERE "handoffCount" > 0) AS "handoffCount",
+           ROUND(AVG("durationSeconds")::numeric, 0)::INTEGER AS "avgDurationSeconds",
+           ROUND(AVG("firstResponseMs")::numeric, 0)::INTEGER AS "avgFirstResponseMs"
+         FROM "ConversationSession"
+         WHERE "instanceId" = ANY($1::text[])
+           AND "startedAt" >= $2`,
+        instanceIds,
+        startOfToday
+      ),
+      prisma.$queryRawUnsafe<ContinuationRow[]>(
+        `SELECT
+           COUNT(*) FILTER (WHERE "closedReason" = 'timeout_no_response') AS "timedOutCount",
+           COUNT(*) FILTER (WHERE "closedReason" IS NOT NULL) AS "totalClosedCount"
+         FROM "ConversationSession"
+         WHERE "instanceId" = ANY($1::text[])
+           AND "startedAt" >= $2`,
+        instanceIds,
+        startOfToday
+      )
+    ]);
+
+    const m = metricsRows[0];
+    const c = continuationRows[0];
+    const timedOut = parseInt(String(c?.timedOutCount ?? 0), 10);
+    const totalClosed = parseInt(String(c?.totalClosedCount ?? 0), 10);
+    const continuationRate = totalClosed > 0
+      ? parseFloat(((1 - timedOut / totalClosed) * 100).toFixed(1))
+      : null;
+
+    return {
+      startedCount: parseInt(String(m?.startedCount ?? 0), 10),
+      endedCount: parseInt(String(m?.endedCount ?? 0), 10),
+      inactiveCount: parseInt(String(m?.inactiveCount ?? 0), 10),
+      handoffCount: parseInt(String(m?.handoffCount ?? 0), 10),
+      avgDurationSeconds: m?.avgDurationSeconds ? parseInt(String(m.avgDurationSeconds), 10) : null,
+      avgFirstResponseMs: m?.avgFirstResponseMs ? parseInt(String(m.avgFirstResponseMs), 10) : null,
+      continuationRate,
+    };
+  }
+
+  /**
+   * Retorna fila de atendimentos ativos ordenada por urgencia para o tenant.
+   */
+  public async getActiveQueue(tenantId: string): Promise<ActiveQueueEntry[]> {
+    const prisma = await this.tenantPrismaRegistry.getClient(tenantId);
+    const instances = await this.platformPrisma.instance.findMany({
+      where: { tenantId, deletedAt: null },
+      select: { id: true }
+    });
+    const instanceIds = instances.map((i) => i.id);
+    if (instanceIds.length === 0) return [];
+
+    const rows = await prisma.$queryRawUnsafe<ActiveQueueRow[]>(
+      `SELECT
+         cs."id",
+         cs."instanceId",
+         cs."remoteJid",
+         cs."contactId",
+         cs."startedAt",
+         cs."urgencyScore",
+         EXTRACT(EPOCH FROM (NOW() - cs."startedAt"))::INTEGER AS "elapsedSeconds"
+       FROM "ConversationSession" cs
+       WHERE cs."instanceId" = ANY($1::text[])
+         AND cs."status" = 'ATIVA'
+       ORDER BY cs."urgencyScore" DESC, cs."startedAt" ASC
+       LIMIT 50`,
+      instanceIds
+    );
+
+    return rows.map((r) => ({
+      id: r.id,
+      instanceId: r.instanceId,
+      remoteJid: r.remoteJid,
+      contactId: r.contactId ?? null,
+      startedAt: r.startedAt instanceof Date ? r.startedAt.toISOString() : String(r.startedAt),
+      urgencyScore: r.urgencyScore ?? 0,
+      elapsedSeconds: r.elapsedSeconds ?? 0,
+    }));
   }
 
   private async requireTenant(tenantId: string) {

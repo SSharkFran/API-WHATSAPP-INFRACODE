@@ -10,8 +10,7 @@ const listContactsQuerySchema = z.object({
   search:   z.string().optional(),
   status:   z.enum(["OPEN", "CLOSED", "all"]).default("all"),
   page:     z.coerce.number().int().min(1).default(1),
-  pageSize: z.coerce.number().int().min(1).max(100).default(40),
-  tags:     z.array(z.string().max(50)).optional()
+  pageSize: z.coerce.number().int().min(1).max(100).default(40)
 });
 
 const messagesQuerySchema = z.object({
@@ -42,7 +41,7 @@ export const registerCrmRoutes = async (app: FastifyInstance): Promise<void> => 
   }, async (request) => {
     const tenantId   = requireTenantId(request);
     const { id: instanceId } = instanceParamsSchema.parse(request.params);
-    const { search, status, page, pageSize, tags } = listContactsQuerySchema.parse(request.query);
+    const { search, status, page, pageSize } = listContactsQuerySchema.parse(request.query);
     const prisma = await app.tenantPrismaRegistry.getClient(tenantId);
     const skip   = (page - 1) * pageSize;
 
@@ -57,14 +56,11 @@ export const registerCrmRoutes = async (app: FastifyInstance): Promise<void> => 
         ]
       };
     }
-    if (tags && tags.length > 0) {
-      convWhere["tags"] = { hasSome: tags };
-    }
 
     const conversations = await prisma.conversation.findMany({
       where: convWhere,
       orderBy: { lastMessageAt: "desc" },
-      take: Math.min((pageSize + skip) * 2, 500),
+      take: (pageSize + skip) * 2,
       select: {
         id: true, status: true, humanTakeover: true, lastMessageAt: true, tags: true,
         contact: { select: { id: true, phoneNumber: true, displayName: true, isBlacklisted: true } }
@@ -77,41 +73,34 @@ export const registerCrmRoutes = async (app: FastifyInstance): Promise<void> => 
       .filter(c => { if (seen.has(c.contact.id)) return false; seen.add(c.contact.id); return true; })
       .slice(skip, skip + pageSize);
 
-    // Build phone8 list for batch lookup — O(1) DB round trips instead of O(N)
-    const phone8List = deduped
-      .map(c => cleanPhone(c.contact.phoneNumber).slice(-8))
-      .filter(Boolean);
-
-    const memoryRows = phone8List.length > 0
-      ? await prisma.clientMemory.findMany({
-          where: { OR: phone8List.map(p => ({ phoneNumber: { contains: p } })) },
-          select: { phoneNumber: true, name: true, serviceInterest: true, status: true, scheduledAt: true, notes: true }
-        })
-      : [];
-
-    // Build lookup map by last-8-digit suffix
-    const memoryMap = new Map(
-      memoryRows.map(m => [cleanPhone(m.phoneNumber ?? "").slice(-8), m])
+    const memories = await Promise.all(
+      deduped.map(c =>
+        prisma.clientMemory
+          .findFirst({
+            where: { phoneNumber: { contains: cleanPhone(c.contact.phoneNumber).slice(-8) } },
+            select: { name: true, serviceInterest: true, status: true, scheduledAt: true, notes: true }
+          })
+          .catch(() => null)
+      )
     );
 
-    const contacts = deduped.map((c) => {
+    const contacts = deduped.map((c, i) => {
       const cleaned = cleanPhone(c.contact.phoneNumber);
-      const memory = memoryMap.get(cleaned.slice(-8)) ?? null;
       return {
         conversationId:    c.id,
         contactId:         c.contact.id,
         jid:               c.contact.phoneNumber ?? "",     // JID original (pode ser @lid)
         phoneNumber:       cleaned,
-        displayName:       (c.contact.displayName ?? memory?.name ?? cleaned) || null,
+        displayName:       (c.contact.displayName ?? memories[i]?.name ?? cleaned) || null,
         isBlacklisted:     c.contact.isBlacklisted,
         conversationStatus: c.status,
         humanTakeover:     c.humanTakeover,
         lastMessageAt:     c.lastMessageAt?.toISOString() ?? null,
         tags:              c.tags,
-        leadStatus:        memory?.status ?? null,
-        serviceInterest:   memory?.serviceInterest ?? null,
-        scheduledAt:       memory?.scheduledAt?.toISOString() ?? null,
-        notes:             memory?.notes ?? null
+        leadStatus:        memories[i]?.status ?? null,
+        serviceInterest:   memories[i]?.serviceInterest ?? null,
+        scheduledAt:       memories[i]?.scheduledAt?.toISOString() ?? null,
+        notes:             memories[i]?.notes ?? null
       };
     });
 
@@ -140,7 +129,7 @@ export const registerCrmRoutes = async (app: FastifyInstance): Promise<void> => 
       prisma.message.findMany({
         where: { instanceId, remoteJid: { contains: phone8 } },
         orderBy: { createdAt: "asc" },
-        take: 500, // Show up to 500 messages — sufficient for cross-session history
+        take: limit,
         select: { id: true, direction: true, type: true, payload: true, status: true, createdAt: true }
       }),
       prisma.clientMemory.findFirst({

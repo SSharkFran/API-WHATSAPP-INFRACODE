@@ -464,11 +464,11 @@ export class TenantManagementService {
    */
   public async getTodayMetrics(tenantId: string): Promise<TodayMetricsSnapshot> {
     const prisma = await this.tenantPrismaRegistry.getClient(tenantId);
-    const instances = await this.platformPrisma.instance.findMany({
-      where: { tenantId, deletedAt: null },
+    const instances = await prisma.instance.findMany({
+      where: { deletedAt: null },
       select: { id: true }
     });
-    const instanceIds = instances.map((i) => i.id);
+    const instanceIds = instances.map((inst) => inst.id);
     if (instanceIds.length === 0) {
       return emptyMetricsSnapshot();
     }
@@ -526,11 +526,11 @@ export class TenantManagementService {
    */
   public async getActiveQueue(tenantId: string): Promise<ActiveQueueEntry[]> {
     const prisma = await this.tenantPrismaRegistry.getClient(tenantId);
-    const instances = await this.platformPrisma.instance.findMany({
-      where: { tenantId, deletedAt: null },
+    const instances = await prisma.instance.findMany({
+      where: { deletedAt: null },
       select: { id: true }
     });
-    const instanceIds = instances.map((i) => i.id);
+    const instanceIds = instances.map((inst) => inst.id);
     if (instanceIds.length === 0) return [];
 
     const rows = await prisma.$queryRawUnsafe<ActiveQueueRow[]>(

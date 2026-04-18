@@ -1294,13 +1294,13 @@ if (event.status === "CONNECTED") {
   ): Promise<void> {
     await this.tenantPrismaRegistry.ensureSchema(this.platformPrisma, tenantId);
     const prisma = await this.tenantPrismaRegistry.getClient(tenantId);
-    // T-02-01-02: verify instanceId belongs to this tenantId before acting
-    const instance = await this.platformPrisma.instance.findFirst({
-      where: { id: instanceId, tenantId },
+    // T-02-01-02: verify instanceId is registered in this tenant's schema before acting
+    const instance = await prisma.instance.findFirst({
+      where: { id: instanceId },
       select: { id: true }
     });
     if (!instance) {
-      console.warn("[lid-reconciliation] instanceId does not belong to tenantId — aborting", {
+      console.warn("[lid-reconciliation] instanceId not found in tenant schema — aborting", {
         instanceId,
         tenantId
       });

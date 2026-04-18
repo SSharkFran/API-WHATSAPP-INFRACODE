@@ -1014,7 +1014,7 @@ export class AdminCommandService {
         }
 
         const memory = await prisma.clientMemory.findFirst({
-          where: { phoneNumber: { contains: lastConv.contact.phoneNumber.slice(-8) } },
+          where: { phoneNumber: { contains: (lastConv.contact.phoneNumber ?? "").slice(-8) } },
           select: { serviceInterest: true, status: true, scheduledAt: true, notes: true }
         });
 
@@ -1110,7 +1110,7 @@ export class AdminCommandService {
         }
 
         const messages = await prisma.message.findMany({
-          where: { instanceId: ctx.instanceId, remoteJid: { contains: contact.phoneNumber.slice(-8) } },
+          where: { instanceId: ctx.instanceId, remoteJid: { contains: (contact.phoneNumber ?? "").slice(-8) } },
           orderBy: { createdAt: "desc" },
           take: limit,
           select: {
@@ -1243,7 +1243,7 @@ export class AdminCommandService {
 
         const messages = contact
           ? await prisma.message.findMany({
-              where: { instanceId: ctx.instanceId, remoteJid: { contains: contact.phoneNumber.slice(-8) } },
+              where: { instanceId: ctx.instanceId, remoteJid: { contains: (contact.phoneNumber ?? "").slice(-8) } },
               orderBy: { createdAt: "desc" },
               take: msgLimit,
               select: { direction: true, payload: true, createdAt: true }

@@ -97,7 +97,7 @@ interface LeadConversationRecord {
   leadSent: boolean;
   awaitingLeadExtraction: boolean;
   contact: {
-    phoneNumber: string;
+    phoneNumber: string | null;
     fields: Prisma.JsonValue | null;
   } | null;
 }

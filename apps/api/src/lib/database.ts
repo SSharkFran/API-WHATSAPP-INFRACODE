@@ -7,6 +7,7 @@ import type { PrismaClient as TenantPrismaClientType } from "../../../../prisma/
 import type { AppConfig } from "../config.js";
 import type { MetricsService } from "./metrics.js";
 import { buildTenantSchemaSql, resolveTenantSchemaName } from "./tenant-schema.js";
+import { runMigrations } from "./run-migrations.js";
 
 const require = createRequire(import.meta.url);
 const currentFileDirectory = dirname(fileURLToPath(import.meta.url));
@@ -97,6 +98,11 @@ export class TenantPrismaRegistry {
       for (const sql of buildTenantSchemaSql(schemaName)) {
         await platformPrisma.$executeRawUnsafe(sql);
       }
+
+      // Apply versioned migrations (idempotent — skips already-applied versions)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const noopLogger = { error: () => undefined, warn: () => undefined, info: () => undefined, debug: () => undefined } as any;
+      await runMigrations(platformPrisma, tenantId, noopLogger);
 
       this.ensuredSchemas.add(tenantId);
       return schemaName;

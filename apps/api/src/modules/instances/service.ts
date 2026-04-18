@@ -2365,6 +2365,22 @@ if (event.status === "CONNECTED") {
                   );
                 }
 
+                // MET-01: emit session.handoff for handoffCount metric
+                void (async () => {
+                  try {
+                    const sessionHashForHandoff = await this.redis.hgetall(`session:${tenantId}:${instance.id}:${event.remoteJid}`);
+                    this.eventBus.emit('session.handoff', {
+                      type: 'session.handoff',
+                      tenantId,
+                      instanceId: instance.id,
+                      remoteJid: event.remoteJid,
+                      sessionId: sessionHashForHandoff?.sessionId ?? '',
+                    });
+                  } catch (_err) {
+                    // Non-fatal
+                  }
+                })();
+
                 // Mirror the HUMAN_HANDOFF clientMemory update (paused_by_human tag)
                 await this.clientMemoryService.upsert(tenantId, resolvedContactNumber, {
                   lastContactAt: new Date(),
@@ -2461,6 +2477,28 @@ if (event.status === "CONNECTED") {
 
     const isFirstContact = !conversation;
     let resolvedConversation = conversation;
+
+    // MET-01: emit session.opened on first contact for new session tracking
+    // Read sessionId from Redis session hash (set by SessionStateService.openSession via lifecycle)
+    if (isFirstContact && !isAdminOrInstanceSender) {
+      void (async () => {
+        try {
+          const sessionHash = await this.redis.hgetall(`session:${tenantId}:${instance.id}:${event.remoteJid}`);
+          if (sessionHash?.sessionId) {
+            this.eventBus.emit('session.opened', {
+              type: 'session.opened',
+              tenantId,
+              instanceId: instance.id,
+              remoteJid: event.remoteJid,
+              sessionId: sessionHash.sessionId,
+              contactId: contact.id ?? null,
+            });
+          }
+        } catch (err) {
+          // Non-fatal — metrics write path must not break message pipeline
+        }
+      })();
+    }
 
     if (
       resolvedConversation?.awaitingLeadExtraction &&
@@ -2639,6 +2677,24 @@ if (event.status === "CONNECTED") {
       activeConversation.aiDisabledPermanent = true;
       activeConversation.humanTakeover = false;
       activeConversation.humanTakeoverAt = null;
+
+      // MET-01: emit session.closed when admin permanently disables AI (session ends)
+      void (async () => {
+        try {
+          const sessionHashForClose = await this.redis.hgetall(`session:${tenantId}:${instance.id}:${event.remoteJid}`);
+          this.eventBus.emit('session.closed', {
+            type: 'session.closed',
+            tenantId,
+            instanceId: instance.id,
+            remoteJid: event.remoteJid,
+            sessionId: sessionHashForClose?.sessionId ?? '',
+            closedReason: 'admin_permanent_disable',
+            durationSeconds: null, // already written by SessionStateService
+          });
+        } catch (_err) {
+          // Non-fatal
+        }
+      })();
 
       return;
     }
@@ -3773,6 +3829,27 @@ if (event.status === "CONNECTED") {
       }
 
       await new Promise((resolve) => setTimeout(resolve, initialAiResponseDelayMs));
+
+      // MET-03: emit session.first_response before first bot reply in this session
+      // SQL UPDATE uses AND "firstResponseMs" IS NULL guard — safe to emit on every reply
+      void (async () => {
+        try {
+          const sessionHashForFirstResponse = await this.redis.hgetall(`session:${tenantId}:${instance.id}:${event.remoteJid}`);
+          if (sessionHashForFirstResponse?.sessionId && sessionHashForFirstResponse?.startedAt) {
+            const firstResponseMs = Date.now() - new Date(sessionHashForFirstResponse.startedAt).getTime();
+            this.eventBus.emit('session.first_response', {
+              type: 'session.first_response',
+              tenantId,
+              instanceId: instance.id,
+              remoteJid: event.remoteJid,
+              sessionId: sessionHashForFirstResponse.sessionId,
+              firstResponseMs,
+            });
+          }
+        } catch (_err) {
+          // Non-fatal
+        }
+      })();
 
       const partes = splitBotResponse(clientText);
       for (let i = 0; i < partes.length; i++) {

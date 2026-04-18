@@ -24,6 +24,7 @@ import { Worker as BullWorker } from "bullmq";
 import { createLidReconciliationProcessor, type LidReconciliationJobPayload } from "./workers/lid-reconciliation.worker.js";
 import { SessionStateService } from "./modules/instances/session-state.service.js";
 import { SessionLifecycleService } from "./modules/instances/session-lifecycle.service.js";
+import { SessionMetricsCollector } from "./modules/instances/session-metrics-collector.js";
 import { InstanceEventBus } from "./lib/instance-events.js";
 import { authPlugin } from "./plugins/auth.js";
 import { swaggerPlugin } from "./plugins/swagger.js";
@@ -198,6 +199,9 @@ export const buildApp = async () => {
     webhookService
   });
   const sessionStateService = new SessionStateService({ redis, tenantPrismaRegistry, logger });
+  // MET-01/03/05: wire SessionMetricsCollector — constructor registers all event listeners
+  const sessionMetricsCollector = new SessionMetricsCollector({ eventBus, tenantPrismaRegistry, logger });
+  void sessionMetricsCollector; // suppress unused-variable lint — construction is the side effect
   const sessionLifecycleService = new SessionLifecycleService({
     redis,
     queue: sessionTimeoutQueue,

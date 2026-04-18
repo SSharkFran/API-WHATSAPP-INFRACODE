@@ -401,14 +401,32 @@ export const getTenantDashboard = async (): Promise<TenantDashboardSnapshot> => 
  * Carrega metricas de atendimento do dia corrente para o tenant.
  */
 export async function getTenantTodayMetrics(): Promise<TodayMetricsSnapshot> {
-  return request<TodayMetricsSnapshot>("/tenant/metrics/today", "tenant");
+  try {
+    return await request<TodayMetricsSnapshot>("/tenant/metrics/today", "tenant");
+  } catch (error) {
+    if (isRedirectError(error)) throw error;
+    return {
+      startedCount: 0,
+      endedCount: 0,
+      inactiveCount: 0,
+      handoffCount: 0,
+      avgDurationSeconds: null,
+      avgFirstResponseMs: null,
+      continuationRate: null,
+    };
+  }
 }
 
 /**
  * Carrega a fila de atendimentos ativos ordenada por urgencia.
  */
 export async function getTenantActiveQueue(): Promise<ActiveQueueEntry[]> {
-  return request<ActiveQueueEntry[]>("/tenant/metrics/queue", "tenant");
+  try {
+    return await request<ActiveQueueEntry[]>("/tenant/metrics/queue", "tenant");
+  } catch (error) {
+    if (isRedirectError(error)) throw error;
+    return [];
+  }
 }
 
 /**

@@ -50,6 +50,26 @@ export interface TenantDashboardSnapshot {
   resolutionRateLast7Days: number;
 }
 
+export interface TodayMetricsSnapshot {
+  startedCount: number;
+  endedCount: number;
+  inactiveCount: number;
+  handoffCount: number;
+  avgDurationSeconds: number | null;
+  avgFirstResponseMs: number | null;
+  continuationRate: number | null;
+}
+
+export interface ActiveQueueEntry {
+  id: string;
+  instanceId: string;
+  remoteJid: string;
+  contactId: string | null;
+  startedAt: string;
+  urgencyScore: number;
+  elapsedSeconds: number;
+}
+
 export interface OnboardingSnapshot {
   tenantId: string;
   tenantSlug: string;
@@ -376,6 +396,20 @@ export const getTenantDashboard = async (): Promise<TenantDashboardSnapshot> => 
     throw new Error("Falha ao carregar o dashboard do tenant.");
   }
 };
+
+/**
+ * Carrega metricas de atendimento do dia corrente para o tenant.
+ */
+export async function getTenantTodayMetrics(): Promise<TodayMetricsSnapshot> {
+  return request<TodayMetricsSnapshot>("/tenant/metrics/today", "tenant");
+}
+
+/**
+ * Carrega a fila de atendimentos ativos ordenada por urgencia.
+ */
+export async function getTenantActiveQueue(): Promise<ActiveQueueEntry[]> {
+  return request<ActiveQueueEntry[]>("/tenant/metrics/queue", "tenant");
+}
 
 /**
  * Carrega o estado do onboarding guiado do tenant.

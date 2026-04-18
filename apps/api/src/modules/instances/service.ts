@@ -54,6 +54,7 @@ import { InstanceEventBus } from '../../lib/instance-events.js';
 import { recognizeCloseIntent } from '../../lib/session-intents.js';
 import { classifyIntent } from '../../lib/intent-classifier.service.js';
 import type { AiCaller } from '../chatbot/agents/types.js';
+import { DailySummaryService } from './daily-summary.service.js';
 
 interface InstanceOrchestratorDeps {
   config: AppConfig;
@@ -72,6 +73,7 @@ interface InstanceOrchestratorDeps {
   platformAlertService?: PlatformAlertService;
   sendMessageQueue?: Queue;
   eventBus?: InstanceEventBus;
+  dailySummaryService: DailySummaryService;
 }
 
 interface StatusWorkerEvent {
@@ -255,6 +257,7 @@ export class InstanceOrchestrator {
   private readonly escalationService: EscalationService;
   private readonly platformAlertService?: PlatformAlertService;
   private readonly sendMessageQueue?: Queue;
+  private readonly dailySummaryService: DailySummaryService;
   private readonly adminIdentityService = new AdminIdentityService();
   private readonly eventBus: InstanceEventBus;
   private readonly logEmitter = new EventEmitter();
@@ -264,7 +267,6 @@ export class InstanceOrchestrator {
   private readonly workers = new Map<string, ManagedWorker>();
   private readonly workerStartLocks = new Map<string, Promise<InstanceSummary>>();
   private readonly automatedOutboundEchoIgnoreMap = new Map<string, NodeJS.Timeout>();
-  private readonly dailySummarySentDates = new Map<string, string>(); // key: tenantId:instanceId, value: YYYY-MM-DD
   private escalationCleanupInterval: NodeJS.Timeout | null = null;
   private dailySummaryInterval: NodeJS.Timeout | null = null;
   // RISCO-07: instancias cujo admin ja recebeu aviso de ambiguidade de escalacao;
@@ -296,6 +298,7 @@ export class InstanceOrchestrator {
     this.platformAlertService = deps.platformAlertService;
     this.sendMessageQueue = deps.sendMessageQueue;
     this.eventBus = deps.eventBus ?? new InstanceEventBus();
+    this.dailySummaryService = deps.dailySummaryService;
   }
 
   public setPlatformAlertService(service: PlatformAlertService): void {
@@ -360,59 +363,7 @@ export class InstanceOrchestrator {
   }
 
   private async runDailySummaryForAllInstances(): Promise<void> {
-    const today = new Date().toISOString().slice(0, 10);
-
-    for (const workerKey of this.workers.keys()) {
-      const [tenantId, instanceId] = workerKey.split(":");
-      if (!tenantId || !instanceId) continue;
-
-      const summaryKey = `${tenantId}:${instanceId}`;
-      const redisDedupeKey = `daily-summary:sent:${summaryKey}:${today}`;
-      const alreadySentRedis = await this.redis.get(redisDedupeKey).catch(() => null);
-      if (alreadySentRedis || this.dailySummarySentDates.get(summaryKey) === today) continue;
-
-      try {
-        const prisma = await this.tenantPrismaRegistry.getClient(tenantId);
-        const config = await prisma.chatbotConfig.findUnique({
-          where: { instanceId },
-          select: { modules: true }
-        });
-
-        const sanitizedModules = sanitizeChatbotModules(config?.modules);
-        const resumoDiarioModule = getResumoDiarioModuleConfig(sanitizedModules);
-        const aprendizadoModule = getAprendizadoContinuoModuleConfig(sanitizedModules);
-
-        // resumoDiario precisa estar ativo; se não configurado, usa comportamento legado (aprendizadoContinuo ativo)
-        const summaryEnabled = resumoDiarioModule?.isEnabled === true ||
-          (resumoDiarioModule == null && aprendizadoModule?.isEnabled === true);
-        if (!summaryEnabled) continue;
-
-        // Verifica se já passou da hora configurada (default: 8h UTC)
-        const sendHour = resumoDiarioModule?.horaEnvioUtc ?? 8;
-        if (new Date().getUTCHours() < sendHour) continue;
-
-        const adminPhone = aprendizadoModule?.verifiedPhone ?? aprendizadoModule?.configuredAdminPhone ?? null;
-        if (!adminPhone) continue;
-
-        const instance = await prisma.instance.findUnique({
-          where: { id: instanceId },
-          select: { id: true }
-        });
-        if (!instance) continue;
-
-        const summary = await this.adminCommandService.generateDailySummary(tenantId, instanceId);
-        await this.sendAutomatedTextMessage(
-          tenantId, instanceId, adminPhone,
-          `${adminPhone}@s.whatsapp.net`, summary,
-          { action: "daily_summary", kind: "chatbot" }
-        );
-
-        this.dailySummarySentDates.set(summaryKey, today);
-        await this.redis.set(redisDedupeKey, "1", "EX", 86400).catch(() => null);
-      } catch (err) {
-        console.warn(`[scheduler] erro ao enviar resumo diario para ${workerKey}:`, err);
-      }
-    }
+    await this.dailySummaryService.sendForAllInstances(this.workers);
   }
 
   private buildAutomatedOutboundEchoKey(instanceId: string, externalMessageId: string): string {
@@ -5008,7 +4959,7 @@ if (event.status === "CONNECTED") {
     await this.sendAutomatedTextMessage(tenantId, instanceId, remoteNumber, targetJid, text, { action: "admin_learning_reply", kind: "chatbot" });
   }
 
-  private async sendAutomatedTextMessage(
+  public async sendAutomatedTextMessage(
     tenantId: string,
     instanceId: string,
     remoteNumber: string,

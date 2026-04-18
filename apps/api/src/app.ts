@@ -34,6 +34,7 @@ import { FiadoService } from "./modules/chatbot/fiado.service.js";
 import { KnowledgeService } from "./modules/chatbot/knowledge.service.js";
 import { PersistentMemoryService } from "./modules/chatbot/persistent-memory.service.js";
 import { InstanceOrchestrator } from "./modules/instances/service.js";
+import { DailySummaryService } from "./modules/instances/daily-summary.service.js";
 import { MessageService } from "./modules/messages/service.js";
 import { PlanEnforcementService } from "./modules/platform/plan-enforcement.service.js";
 import { PlatformAlertService } from "./modules/platform/alert.service.js";
@@ -149,7 +150,20 @@ export const buildApp = async () => {
     redis,
     webhookService
   });
-  const instanceOrchestrator = new InstanceOrchestrator({
+  // DailySummaryService is constructed before instanceOrchestrator.
+  // The sendMessage closure captures instanceOrchestrator by reference —
+  // safe because sendMessage is only invoked at runtime (scheduler tick), never at construction time.
+  let instanceOrchestrator: InstanceOrchestrator;
+  const dailySummaryService = new DailySummaryService({
+    redis,
+    tenantPrismaRegistry,
+    adminCommandService,
+    sendMessage: async (tenantId, instanceId, adminPhone, adminJid, text, meta) => {
+      await instanceOrchestrator.sendAutomatedTextMessage(tenantId, instanceId, adminPhone, adminJid, text, meta);
+    },
+    logger,
+  });
+  instanceOrchestrator = new InstanceOrchestrator({
     config,
     metricsService,
     platformPrisma,
@@ -165,6 +179,7 @@ export const buildApp = async () => {
     escalationService,
     sendMessageQueue,
     eventBus,
+    dailySummaryService,
   });
   const platformAlertService = new PlatformAlertService(platformPrisma, instanceOrchestrator);
   chatbotService.setPlatformAlertService(platformAlertService);

@@ -288,7 +288,12 @@ Audit `OrchestratorAgent` and all sub-agents for rigid pipeline failures — pat
 
 **Requirements**: MET-01, MET-02, MET-03, MET-04, MET-05, MET-06, MET-07
 
-**Plans**:
+**Plans**: 3 plans
+
+Plans:
+- [ ] 06-01-PLAN.md — Wave 1: 5 new InstanceEventBus events + migration 038 + SessionMetricsCollector (MET-01, MET-02, MET-03, MET-05)
+- [ ] 06-02-PLAN.md — Wave 2: API endpoints /tenant/metrics/today + /tenant/metrics/queue + panel page (MET-02, MET-04, MET-07)
+- [ ] 06-03-PLAN.md — Wave 2: DailySummaryService extract + session metrics in summary (MET-04, MET-06)
 
 #### Plan 6.1 — ConversationMetric Table & SessionMetricsCollector
 Add the `ConversationMetric` table to the tenant schema migration system: `instanceId`, `contactId`, `startedAt`, `endedAt`, `durationSeconds`, `firstResponseMs`, `handoffCount`, `documentCount`, `closedReason`. Implement `SessionMetricsCollector` that subscribes to `InstanceEventBus` session events (`session.opened`, `session.first_response`, `session.handoff`, `session.closed`, `document.sent`) and writes/updates `ConversationMetric` rows via `setImmediate()` — deferred, never blocking the message pipeline. Add index on `(instanceId, startedAt)`.

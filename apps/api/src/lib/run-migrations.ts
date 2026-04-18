@@ -310,7 +310,8 @@ export async function runMigrations(
       try {
         await platformPrisma.$executeRawUnsafe(migration.sql(schema));
         await platformPrisma.$executeRawUnsafe(
-          `INSERT INTO ${quoteSchema(schema)}."schema_migrations" ("version") VALUES ('${migration.version}');`
+          `INSERT INTO ${quoteSchema(schema)}."schema_migrations" ("version") VALUES ($1)`,
+          migration.version
         );
       } catch (err) {
         // Per D-MIGRATION-FAIL: log structured error, return "failed"

@@ -107,7 +107,7 @@ export class SessionMetricsCollector {
     }
     const prisma = await this.deps.tenantPrismaRegistry.getClient(event.tenantId);
     const rowsAffected = await prisma.$executeRawUnsafe(
-      `UPDATE "ConversationSession" SET "documentCount" = "documentCount" + 1, "updatedAt" = NOW() WHERE "id" = $1`,
+      `UPDATE "ConversationSession" SET "documentCount" = COALESCE("documentCount", 0) + 1, "updatedAt" = NOW() WHERE "id" = $1`,
       event.sessionId
     );
     if ((rowsAffected as number) === 0) {

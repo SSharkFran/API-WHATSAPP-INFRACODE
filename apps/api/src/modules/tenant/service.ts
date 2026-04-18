@@ -374,7 +374,7 @@ export class TenantManagementService {
     const prisma = await this.tenantPrismaRegistry.getClient(tenantId);
 
     const startOfToday = new Date();
-    startOfToday.setHours(0, 0, 0, 0);
+    startOfToday.setUTCHours(0, 0, 0, 0);
 
     const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
 
@@ -473,7 +473,7 @@ export class TenantManagementService {
       return emptyMetricsSnapshot();
     }
     const startOfToday = new Date();
-    startOfToday.setHours(0, 0, 0, 0);
+    startOfToday.setUTCHours(0, 0, 0, 0);
 
     const [metricsRows, continuationRows] = await Promise.all([
       prisma.$queryRawUnsafe<MetricsRow[]>(

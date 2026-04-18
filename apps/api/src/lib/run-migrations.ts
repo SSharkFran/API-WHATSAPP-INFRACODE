@@ -247,6 +247,12 @@ export const MIGRATIONS: Migration[] = [
     description: "Add urgencyScore column to ConversationSession table",
     sql: (schema) =>
       `ALTER TABLE ${quoteSchema(schema)}."ConversationSession" ADD COLUMN IF NOT EXISTS "urgencyScore" INTEGER DEFAULT 0;`
+  },
+  {
+    version: "2026-04-17-038-session-document-count",
+    description: "Add documentCount column to ConversationSession table",
+    sql: (schema) =>
+      `ALTER TABLE ${quoteSchema(schema)}."ConversationSession" ADD COLUMN IF NOT EXISTS "documentCount" INTEGER NOT NULL DEFAULT 0;`
   }
 ];
 

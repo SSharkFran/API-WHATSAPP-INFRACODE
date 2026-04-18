@@ -10,6 +10,7 @@ import Fastify from "fastify";
 import { ZodTypeProvider } from "fastify-type-provider-zod";
 import { loadConfig } from "./config.js";
 import { createPlatformPrisma, TenantPrismaRegistry } from "./lib/database.js";
+import { runMigrations } from "./lib/run-migrations.js";
 import { createLogger } from "./lib/logger.js";
 import { MetricsService } from "./lib/metrics.js";
 import { EmailService } from "./lib/mail.js";
@@ -18,8 +19,12 @@ import { normalizeError } from "./lib/errors.js";
 import { createSendMessageQueue } from "./queues/message-queue.js";
 import { createWebhookQueue } from "./queues/webhook-queue.js";
 import { createSessionTimeoutQueue } from "./queues/session-timeout-queue.js";
+import { createLidReconciliationQueue } from "./queues/lid-reconciliation-queue.js";
+import { Worker as BullWorker } from "bullmq";
+import { createLidReconciliationProcessor, type LidReconciliationJobPayload } from "./workers/lid-reconciliation.worker.js";
 import { SessionStateService } from "./modules/instances/session-state.service.js";
 import { SessionLifecycleService } from "./modules/instances/session-lifecycle.service.js";
+import { SessionMetricsCollector } from "./modules/instances/session-metrics-collector.js";
 import { InstanceEventBus } from "./lib/instance-events.js";
 import { authPlugin } from "./plugins/auth.js";
 import { swaggerPlugin } from "./plugins/swagger.js";
@@ -134,6 +139,7 @@ export const buildApp = async () => {
   const sendMessageQueue = config.NODE_ENV === "test" ? createNoopQueue() : createSendMessageQueue(redis);
   const webhookDispatchQueue = config.NODE_ENV === "test" ? createNoopQueue() : createWebhookQueue(redis);
   const sessionTimeoutQueue = config.NODE_ENV === "test" ? createNoopQueue() : createSessionTimeoutQueue(redis);
+  const lidReconciliationQueue = config.NODE_ENV === "test" ? createNoopQueue() : createLidReconciliationQueue(redis);
   const webhookService = new WebhookService({
     config,
     metricsService,
@@ -178,6 +184,7 @@ export const buildApp = async () => {
     fiadoService,
     escalationService,
     sendMessageQueue,
+    lidReconciliationQueue,
     eventBus,
     dailySummaryService,
   });
@@ -207,6 +214,9 @@ export const buildApp = async () => {
     webhookService
   });
   const sessionStateService = new SessionStateService({ redis, tenantPrismaRegistry, logger });
+  // MET-01/03/05: wire SessionMetricsCollector — constructor registers all event listeners
+  const sessionMetricsCollector = new SessionMetricsCollector({ eventBus, tenantPrismaRegistry, logger });
+  void sessionMetricsCollector; // suppress unused-variable lint — construction is the side effect
   const sessionLifecycleService = new SessionLifecycleService({
     redis,
     queue: sessionTimeoutQueue,
@@ -220,6 +230,56 @@ export const buildApp = async () => {
     logger,
     eventBus,
   });
+
+  // Run schema migrations for all registered tenants at startup
+  // Per D-MIGRATION-FAIL: errors are caught per-tenant; startup continues regardless
+  if (config.NODE_ENV !== "test") {
+    const tenants = await platformPrisma.tenant.findMany({ select: { id: true } });
+
+    const migrationResults: Array<{ tenantId: string; status: "success" | "skipped" | "failed" }> = [];
+
+    for (const tenant of tenants) {
+      const status = await runMigrations(platformPrisma, tenant.id, logger).catch((err) => {
+        logger.error({ tenantId: tenant.id, err }, "runMigrations threw unexpectedly");
+        return "failed" as const;
+      });
+      migrationResults.push({ tenantId: tenant.id, status });
+    }
+
+    logger.info(
+      { migrations: migrationResults },
+      `Schema migrations complete: ${migrationResults.filter((r) => r.status === "success").length} applied, ` +
+      `${migrationResults.filter((r) => r.status === "skipped").length} skipped, ` +
+      `${migrationResults.filter((r) => r.status === "failed").length} failed`
+    );
+
+    const failedTenants = migrationResults.filter((r) => r.status === "failed");
+    if (failedTenants.length > 0) {
+      logger.warn(
+        { failedTenants: failedTenants.map((r) => r.tenantId) },
+        "Some tenants have pending schema migrations — they may lack new columns"
+      );
+      // Do NOT exit — per D-MIGRATION-FAIL: startup continues
+    }
+  }
+
+  // LID reconciliation worker — resolves @lid contacts to real phone numbers
+  // Worker uses a duplicate Redis connection (T-04-03-05 pattern from session-lifecycle)
+  let lidReconciliationWorker: InstanceType<typeof BullWorker<LidReconciliationJobPayload>> | undefined;
+  if (config.NODE_ENV !== "test") {
+    const lidWorkerConnection = redis.duplicate();
+    const lidProcessor = createLidReconciliationProcessor({
+      tenantPrismaRegistry,
+      platformPrisma,
+      instanceOrchestrator,
+      logger,
+    });
+    lidReconciliationWorker = new BullWorker<LidReconciliationJobPayload>(
+      "lid-reconciliation",
+      lidProcessor,
+      { autorun: true, connection: lidWorkerConnection as never, concurrency: 5 }
+    );
+  }
 
   app.decorate("config", config);
   app.decorate("platformPrisma", platformPrisma);
@@ -310,9 +370,13 @@ export const buildApp = async () => {
     await instanceOrchestrator.close();
     await messageService.close();
     await sessionLifecycleService.close();
+    if (lidReconciliationWorker) {
+      await lidReconciliationWorker.close();
+    }
     await sendMessageQueue.close();
     await webhookDispatchQueue.close();
     await sessionTimeoutQueue.close();
+    await lidReconciliationQueue.close();
     await redis.quit();
     await tenantPrismaRegistry.close();
     await platformPrisma.$disconnect();

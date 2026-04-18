@@ -108,8 +108,7 @@ model WebhookDelivery {
 model Contact {
   id            String         @id @default(cuid())
   instanceId    String
-  phoneNumber   String?
-  rawJid        String?
+  phoneNumber   String
   displayName   String?
   fields        Json?
   notes         String?
@@ -120,7 +119,6 @@ model Contact {
   conversations Conversation[]
 
   @@unique([instanceId, phoneNumber])
-  @@unique([instanceId, rawJid])
 }
 
 model Conversation {

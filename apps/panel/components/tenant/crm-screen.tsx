@@ -39,14 +39,6 @@ interface CrmMessage {
   createdAt: string;
 }
 
-interface ContactMemory {
-  name?: string | null;
-  serviceInterest?: string | null;
-  status?: string | null;
-  scheduledAt?: string | null;
-  notes?: string | null;
-}
-
 interface ContactDetail {
   id: string;
   phoneNumber: string;
@@ -57,7 +49,6 @@ interface ContactDetail {
   serviceInterest: string | null;
   scheduledAt: string | null;
   isExistingClient: boolean;
-  memory?: ContactMemory | null;
 }
 
 interface ConversationDetail {
@@ -676,52 +667,6 @@ export function CrmScreen({ initialInstances }: { initialInstances: InstanceSumm
                   </span>
                 ))}
               </div>
-
-              {/* AI-captured client data — read-only display */}
-              {detail?.memory && (
-                <div className="mt-4 space-y-2">
-                  <p className="text-xs font-semibold text-[var(--text-secondary)] uppercase tracking-wide">
-                    Dados capturados
-                  </p>
-                  {detail.memory.name && (
-                    <div>
-                      <span className="text-xs text-[var(--text-tertiary)]">Nome</span>
-                      <p className="text-sm text-[var(--text-primary)]">{detail.memory.name}</p>
-                    </div>
-                  )}
-                  {detail.memory.serviceInterest && (
-                    <div>
-                      <span className="text-xs text-[var(--text-tertiary)]">Interesse</span>
-                      <p className="text-sm text-[var(--text-primary)]">{detail.memory.serviceInterest}</p>
-                    </div>
-                  )}
-                  {detail.memory.status && (
-                    <div>
-                      <span className="text-xs text-[var(--text-tertiary)]">Status</span>
-                      <p className="text-sm text-[var(--text-primary)]">{detail.memory.status}</p>
-                    </div>
-                  )}
-                  {detail.memory.scheduledAt && (
-                    <div>
-                      <span className="text-xs text-[var(--text-tertiary)]">Agendamento</span>
-                      <p className="text-sm text-[var(--text-primary)]">
-                        {new Date(detail.memory.scheduledAt).toLocaleString("pt-BR")}
-                      </p>
-                    </div>
-                  )}
-                  {detail.memory.notes && (
-                    <div>
-                      <span className="text-xs text-[var(--text-tertiary)]">Observações</span>
-                      <p className="text-sm text-[var(--text-primary)]">{detail.memory.notes}</p>
-                    </div>
-                  )}
-                </div>
-              )}
-              {detail && !detail.memory && (
-                <p className="mt-4 text-xs text-[var(--text-tertiary)] italic">
-                  Nenhum dado capturado ainda
-                </p>
-              )}
 
               {/* Notes */}
               <div className="mt-1.5">

@@ -99,7 +99,8 @@ export const buildTenantSchemaSql = (schemaName: string): string[] => {
     `CREATE TABLE IF NOT EXISTS ${schema}."Contact" (
       "id" TEXT PRIMARY KEY,
       "instanceId" TEXT NOT NULL REFERENCES ${schema}."Instance"("id") ON DELETE CASCADE,
-      "phoneNumber" TEXT NOT NULL,
+      "phoneNumber" TEXT,
+      "rawJid" TEXT,
       "displayName" TEXT,
       "fields" JSONB,
       "notes" TEXT,
@@ -108,6 +109,7 @@ export const buildTenantSchemaSql = (schemaName: string): string[] => {
       "updatedAt" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       CONSTRAINT "uniq_${schemaName}_instance_phone" UNIQUE ("instanceId", "phoneNumber")
     );`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS "Contact_instanceId_rawJid_key" ON ${schema}."Contact" ("instanceId", "rawJid");`,
     `CREATE TABLE IF NOT EXISTS ${schema}."Conversation" (
       "id" TEXT PRIMARY KEY,
       "instanceId" TEXT NOT NULL REFERENCES ${schema}."Instance"("id") ON DELETE CASCADE,

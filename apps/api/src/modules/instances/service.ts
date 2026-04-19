@@ -1250,7 +1250,7 @@ if (event.status === "CONNECTED") {
             "reconcile",
             { tenantId, instanceId: instance.id },
             {
-              jobId: `lid-reconcile:${instance.id}`,
+              jobId: `lid-reconcile-${instance.id}`,
               removeOnComplete: 10,
               removeOnFail: 100
             }

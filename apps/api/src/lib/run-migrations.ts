@@ -253,6 +253,25 @@ export const MIGRATIONS: Migration[] = [
     description: "Add documentCount column to ConversationSession table",
     sql: (schema) =>
       `ALTER TABLE ${quoteSchema(schema)}."ConversationSession" ADD COLUMN IF NOT EXISTS "documentCount" INTEGER NOT NULL DEFAULT 0;`
+  },
+  // Contact table: rawJid support (Phase 02)
+  {
+    version: "2026-04-19-039-contact-raw-jid",
+    description: "Add rawJid column to Contact table for @lid JID storage",
+    sql: (schema) =>
+      `ALTER TABLE ${quoteSchema(schema)}."Contact" ADD COLUMN IF NOT EXISTS "rawJid" TEXT;`
+  },
+  {
+    version: "2026-04-19-040-contact-raw-jid-unique",
+    description: "Add unique index on (instanceId, rawJid) to Contact table",
+    sql: (schema) =>
+      `CREATE UNIQUE INDEX IF NOT EXISTS "Contact_instanceId_rawJid_key" ON ${quoteSchema(schema)}."Contact" ("instanceId", "rawJid");`
+  },
+  {
+    version: "2026-04-19-041-contact-phone-nullable",
+    description: "Make phoneNumber nullable on Contact table to support @lid-only contacts",
+    sql: (schema) =>
+      `ALTER TABLE ${quoteSchema(schema)}."Contact" ALTER COLUMN "phoneNumber" DROP NOT NULL;`
   }
 ];
 

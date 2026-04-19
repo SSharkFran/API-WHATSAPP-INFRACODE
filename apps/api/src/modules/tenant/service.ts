@@ -465,7 +465,6 @@ export class TenantManagementService {
   public async getTodayMetrics(tenantId: string): Promise<TodayMetricsSnapshot> {
     const prisma = await this.tenantPrismaRegistry.getClient(tenantId);
     const instances = await prisma.instance.findMany({
-      where: { deletedAt: null },
       select: { id: true }
     });
     const instanceIds = instances.map((inst) => inst.id);
@@ -527,7 +526,6 @@ export class TenantManagementService {
   public async getActiveQueue(tenantId: string): Promise<ActiveQueueEntry[]> {
     const prisma = await this.tenantPrismaRegistry.getClient(tenantId);
     const instances = await prisma.instance.findMany({
-      where: { deletedAt: null },
       select: { id: true }
     });
     const instanceIds = instances.map((inst) => inst.id);

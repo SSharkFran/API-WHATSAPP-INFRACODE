@@ -180,7 +180,14 @@ export const registerCrmRoutes = async (app: FastifyInstance): Promise<void> => 
         leadStatus:      memory?.status ?? null,
         serviceInterest: memory?.serviceInterest ?? null,
         scheduledAt:     memory?.scheduledAt?.toISOString() ?? null,
-        isExistingClient: memory?.isExistingClient ?? false
+        isExistingClient: memory?.isExistingClient ?? false,
+        memory: memory ? {
+          name:            memory.name ?? null,
+          serviceInterest: memory.serviceInterest ?? null,
+          status:          memory.status ?? null,
+          scheduledAt:     memory.scheduledAt?.toISOString() ?? null,
+          notes:           memory.notes ?? null
+        } : null
       },
       conversation: conversation ? {
         id:            conversation.id,

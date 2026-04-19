@@ -15,7 +15,9 @@ export const resolveTenantSchemaName = (tenantId: string): string => {
 };
 
 /**
- * Retorna o conjunto de comandos SQL necessario para provisionar um schema de tenant.
+ * Retorna o conjunto de comandos SQL necessario para provisionar um schema de tenant (baseline).
+ * Inclui apenas CREATE TABLE / CREATE SCHEMA / CREATE INDEX — sem ALTER TABLE.
+ * ALTER TABLE migrations are now managed via run-migrations.ts MIGRATIONS[].
  */
 export const buildTenantSchemaSql = (schemaName: string): string[] => {
   const schema = quoteIdentifier(schemaName);
@@ -132,16 +134,6 @@ export const buildTenantSchemaSql = (schemaName: string): string[] => {
       "createdAt" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       "updatedAt" TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );`,
-    `ALTER TABLE ${schema}."Conversation" ADD COLUMN IF NOT EXISTS "phoneNumber" TEXT;`,
-    `ALTER TABLE ${schema}."Conversation" ADD COLUMN IF NOT EXISTS "leadSent" BOOLEAN NOT NULL DEFAULT FALSE;`,
-    `ALTER TABLE ${schema}."Conversation" ADD COLUMN IF NOT EXISTS "awaitingLeadExtraction" BOOLEAN NOT NULL DEFAULT FALSE;`,
-    `ALTER TABLE ${schema}."Conversation" ADD COLUMN IF NOT EXISTS "humanTakeover" BOOLEAN NOT NULL DEFAULT FALSE;`,
-    `ALTER TABLE ${schema}."Conversation" ADD COLUMN IF NOT EXISTS "humanTakeoverAt" TIMESTAMPTZ;`,
-    `ALTER TABLE ${schema}."Conversation" ADD COLUMN IF NOT EXISTS "aiDisabledPermanent" BOOLEAN NOT NULL DEFAULT FALSE;`,
-    `ALTER TABLE ${schema}."Conversation" ADD COLUMN IF NOT EXISTS "awaitingAdminResponse" BOOLEAN NOT NULL DEFAULT FALSE;`,
-    `ALTER TABLE ${schema}."Conversation" ADD COLUMN IF NOT EXISTS "pendingClientQuestion" TEXT;`,
-    `ALTER TABLE ${schema}."Conversation" ADD COLUMN IF NOT EXISTS "pendingClientJid" TEXT;`,
-    `ALTER TABLE ${schema}."Conversation" ADD COLUMN IF NOT EXISTS "pendingClientConversationId" TEXT;`,
     `CREATE INDEX IF NOT EXISTS "idx_${schemaName}_conversation_status" ON ${schema}."Conversation" ("status");`,
     `CREATE TABLE IF NOT EXISTS ${schema}."MessageTemplate" (
       "id" TEXT PRIMARY KEY,
@@ -179,32 +171,11 @@ export const buildTenantSchemaSql = (schemaName: string): string[] => {
       "leadPriceTable" JSONB NOT NULL DEFAULT '{}'::JSONB,
       "leadSurchargeTable" JSONB NOT NULL DEFAULT '{}'::JSONB,
       "modules" JSONB NOT NULL DEFAULT '{}'::JSONB,
+      "knowledgeSynthesis" TEXT,
+      "knowledgeSynthesisUpdatedAt" TIMESTAMPTZ,
       "createdAt" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       "updatedAt" TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );`,
-    `ALTER TABLE ${schema}."ChatbotConfig" ADD COLUMN IF NOT EXISTS "aiSettings" JSONB NOT NULL DEFAULT '{}'::JSONB;`,
-    `ALTER TABLE ${schema}."ChatbotConfig" ADD COLUMN IF NOT EXISTS "humanTakeoverStartMessage" TEXT;`,
-    `ALTER TABLE ${schema}."ChatbotConfig" ADD COLUMN IF NOT EXISTS "humanTakeoverEndMessage" TEXT;`,
-    `ALTER TABLE ${schema}."ChatbotConfig" ADD COLUMN IF NOT EXISTS "aiApiKeyEncrypted" TEXT;`,
-    `ALTER TABLE ${schema}."ChatbotConfig" ADD COLUMN IF NOT EXISTS "aiFallbackProvider" TEXT;`,
-    `ALTER TABLE ${schema}."ChatbotConfig" ADD COLUMN IF NOT EXISTS "aiFallbackApiKey" TEXT;`,
-    `ALTER TABLE ${schema}."ChatbotConfig" ADD COLUMN IF NOT EXISTS "aiFallbackModel" TEXT;`,
-    `ALTER TABLE ${schema}."ChatbotConfig" ADD COLUMN IF NOT EXISTS "leadsGroupJid" TEXT;`,
-    `ALTER TABLE ${schema}."ChatbotConfig" ADD COLUMN IF NOT EXISTS "leadsGroupName" TEXT;`,
-    `ALTER TABLE ${schema}."ChatbotConfig" ADD COLUMN IF NOT EXISTS "leadsPhoneNumber" TEXT;`,
-    `ALTER TABLE ${schema}."ChatbotConfig" ADD COLUMN IF NOT EXISTS "leadsEnabled" BOOLEAN NOT NULL DEFAULT TRUE;`,
-    `ALTER TABLE ${schema}."ChatbotConfig" ADD COLUMN IF NOT EXISTS "fiadoEnabled" BOOLEAN NOT NULL DEFAULT FALSE;`,
-    `ALTER TABLE ${schema}."ChatbotConfig" ADD COLUMN IF NOT EXISTS "audioEnabled" BOOLEAN NOT NULL DEFAULT FALSE;`,
-    `ALTER TABLE ${schema}."ChatbotConfig" ADD COLUMN IF NOT EXISTS "visionEnabled" BOOLEAN NOT NULL DEFAULT FALSE;`,
-    `ALTER TABLE ${schema}."ChatbotConfig" ADD COLUMN IF NOT EXISTS "visionPrompt" TEXT;`,
-    `ALTER TABLE ${schema}."ChatbotConfig" ADD COLUMN IF NOT EXISTS "responseDelayMs" INTEGER NOT NULL DEFAULT 3000;`,
-    `ALTER TABLE ${schema}."ChatbotConfig" ADD COLUMN IF NOT EXISTS "leadAutoExtract" BOOLEAN NOT NULL DEFAULT FALSE;`,
-    `ALTER TABLE ${schema}."ChatbotConfig" ADD COLUMN IF NOT EXISTS "leadVehicleTable" JSONB NOT NULL DEFAULT '{}'::JSONB;`,
-    `ALTER TABLE ${schema}."ChatbotConfig" ADD COLUMN IF NOT EXISTS "leadPriceTable" JSONB NOT NULL DEFAULT '{}'::JSONB;`,
-    `ALTER TABLE ${schema}."ChatbotConfig" ADD COLUMN IF NOT EXISTS "leadSurchargeTable" JSONB NOT NULL DEFAULT '{}'::JSONB;`,
-    `ALTER TABLE ${schema}."ChatbotConfig" ADD COLUMN IF NOT EXISTS "modules" JSONB NOT NULL DEFAULT '{}'::JSONB;`,
-    `ALTER TABLE ${schema}."ChatbotConfig" ADD COLUMN IF NOT EXISTS "knowledgeSynthesis" TEXT;`,
-    `ALTER TABLE ${schema}."ChatbotConfig" ADD COLUMN IF NOT EXISTS "knowledgeSynthesisUpdatedAt" TIMESTAMPTZ;`,
     `CREATE TABLE IF NOT EXISTS ${schema}."AuditLog" (
       "id" TEXT PRIMARY KEY,
       "actorType" TEXT NOT NULL,
@@ -239,10 +210,10 @@ export const buildTenantSchemaSql = (schemaName: string): string[] => {
       "answer" TEXT NOT NULL,
       "rawAnswer" TEXT,
       "taughtBy" TEXT,
+      "updatedAt" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       "createdAt" TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );`,
     `CREATE INDEX IF NOT EXISTS "idx_${schemaName}_knowledge_instance" ON ${schema}."TenantKnowledge" ("instanceId");`,
-    `ALTER TABLE ${schema}."TenantKnowledge" ADD COLUMN IF NOT EXISTS "updatedAt" TIMESTAMPTZ NOT NULL DEFAULT NOW();`,
     `CREATE TABLE IF NOT EXISTS ${schema}."FiadoTab" (
       "id" TEXT PRIMARY KEY,
       "instanceId" TEXT NOT NULL REFERENCES ${schema}."Instance"("id") ON DELETE CASCADE,
@@ -279,15 +250,14 @@ export const buildTenantSchemaSql = (schemaName: string): string[] => {
       "handoffCount" INTEGER NOT NULL DEFAULT 0,
       "closedReason" TEXT,
       "conversationId" TEXT REFERENCES ${schema}."Conversation"("id") ON DELETE SET NULL,
+      "urgencyScore" INTEGER DEFAULT 0,
+      "documentCount" INTEGER NOT NULL DEFAULT 0,
       "createdAt" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       "updatedAt" TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );`,
     `CREATE INDEX IF NOT EXISTS "idx_${schemaName}_session_instance_started"
       ON ${schema}."ConversationSession" ("instanceId", "startedAt");`,
     `CREATE INDEX IF NOT EXISTS "idx_${schemaName}_session_remote_jid"
-      ON ${schema}."ConversationSession" ("instanceId", "remoteJid");`,
-    `ALTER TABLE ${schema}."ConversationSession" ADD COLUMN IF NOT EXISTS "firstResponseMs" INTEGER;`,
-    `ALTER TABLE ${schema}."ConversationSession" ADD COLUMN IF NOT EXISTS "conversationId" TEXT REFERENCES ${schema}."Conversation"("id") ON DELETE SET NULL;`,
-    `ALTER TABLE ${schema}."ConversationSession" ADD COLUMN IF NOT EXISTS "urgencyScore" INTEGER DEFAULT 0;`
+      ON ${schema}."ConversationSession" ("instanceId", "remoteJid");`
   ];
 };

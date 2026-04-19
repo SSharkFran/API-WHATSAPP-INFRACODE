@@ -1,4 +1,5 @@
 import type { FastifyInstance } from "fastify";
+import type { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { requireTenantId } from "../../lib/request-auth.js";
 import { instanceParamsSchema } from "../instances/schemas.js";
@@ -63,7 +64,7 @@ export const registerCrmRoutes = async (app: FastifyInstance): Promise<void> => 
       take: (pageSize + skip) * 2,
       select: {
         id: true, status: true, humanTakeover: true, lastMessageAt: true, tags: true,
-        contact: { select: { id: true, phoneNumber: true, displayName: true, isBlacklisted: true } }
+        contact: { select: { id: true, phoneNumber: true, rawJid: true, displayName: true, isBlacklisted: true } }
       }
     });
 
@@ -89,8 +90,9 @@ export const registerCrmRoutes = async (app: FastifyInstance): Promise<void> => 
       return {
         conversationId:    c.id,
         contactId:         c.contact.id,
-        jid:               c.contact.phoneNumber ?? "",     // JID original (pode ser @lid)
-        phoneNumber:       cleaned,
+        jid:               c.contact.rawJid ?? c.contact.phoneNumber ?? "",  // prefer rawJid as the sendable identifier
+        rawJid:            c.contact.rawJid ?? null,
+        phoneNumber:       c.contact.phoneNumber ?? null,  // null when LID not yet resolved
         displayName:       (c.contact.displayName ?? memories[i]?.name ?? cleaned) || null,
         isBlacklisted:     c.contact.isBlacklisted,
         conversationStatus: c.status,
@@ -119,21 +121,33 @@ export const registerCrmRoutes = async (app: FastifyInstance): Promise<void> => 
 
     const contact = await prisma.contact.findFirst({
       where: { id: contactId, instanceId },
-      select: { id: true, phoneNumber: true, displayName: true, isBlacklisted: true, notes: true }
+      select: { id: true, phoneNumber: true, rawJid: true, displayName: true, isBlacklisted: true, notes: true }
     });
     if (!contact) return reply.status(404).send({ message: "Contato não encontrado." });
 
-    const phone8 = cleanPhone(contact.phoneNumber).slice(-8);
+    // Fallback to rawJid when phoneNumber is null (LID contacts — Plan 2.1 Pitfall 3)
+    let messageWhere: Prisma.MessageWhereInput;
+    if (contact.phoneNumber) {
+      const phone8 = cleanPhone(contact.phoneNumber).slice(-8);
+      messageWhere = { instanceId, remoteJid: { contains: phone8 } };
+    } else if (contact.rawJid) {
+      messageWhere = { instanceId, remoteJid: { equals: contact.rawJid } };
+    } else {
+      // No usable identifier — return empty messages
+      messageWhere = { instanceId, id: { in: [] } };
+    }
+
+    const phone8ForMemory = cleanPhone(contact.phoneNumber).slice(-8);
 
     const [messages, memory, conversation] = await Promise.all([
       prisma.message.findMany({
-        where: { instanceId, remoteJid: { contains: phone8 } },
+        where: messageWhere,
         orderBy: { createdAt: "asc" },
         take: limit,
         select: { id: true, direction: true, type: true, payload: true, status: true, createdAt: true }
       }),
       prisma.clientMemory.findFirst({
-        where: { phoneNumber: { contains: phone8 } },
+        where: { phoneNumber: { contains: phone8ForMemory } },
         select: { name: true, serviceInterest: true, status: true, scheduledAt: true, notes: true, isExistingClient: true }
       }).catch(() => null),
       prisma.conversation.findFirst({
@@ -146,8 +160,9 @@ export const registerCrmRoutes = async (app: FastifyInstance): Promise<void> => 
     return {
       contact: {
         id:              contact.id,
-        phoneNumber:     cleanPhone(contact.phoneNumber),
-        displayName:     contact.displayName ?? memory?.name ?? cleanPhone(contact.phoneNumber),
+        rawJid:          contact.rawJid ?? null,
+        phoneNumber:     contact.phoneNumber ?? null,  // null when LID not yet resolved
+        displayName:     contact.displayName ?? memory?.name ?? cleanPhone(contact.phoneNumber) || null,
         isBlacklisted:   contact.isBlacklisted,
         notes:           contact.notes ?? memory?.notes ?? null,
         leadStatus:      memory?.status ?? null,

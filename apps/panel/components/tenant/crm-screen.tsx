@@ -41,6 +41,14 @@ interface CrmMessage {
   createdAt: string;
 }
 
+interface ContactMemory {
+  name: string | null;
+  serviceInterest: string | null;
+  status: string | null;
+  scheduledAt: string | null;
+  notes: string | null;
+}
+
 interface ContactDetail {
   id: string;
   rawJid?: string | null;
@@ -52,6 +60,7 @@ interface ContactDetail {
   serviceInterest: string | null;
   scheduledAt: string | null;
   isExistingClient: boolean;
+  memory?: ContactMemory | null;
 }
 
 interface ConversationDetail {
@@ -676,6 +685,55 @@ export function CrmScreen({ initialInstances }: { initialInstances: InstanceSumm
                   </span>
                 ))}
               </div>
+
+              {/* AI-captured client data — read-only display */}
+              {(detail?.memory?.name || detail?.memory?.serviceInterest || detail?.memory?.status || detail?.memory?.scheduledAt || detail?.leadStatus || detail?.serviceInterest || detail?.scheduledAt) ? (
+                <div className="mt-2 pt-2 border-t border-[var(--border-subtle)]">
+                  <p className="text-xs font-semibold text-[var(--text-secondary)] uppercase tracking-wide mb-1.5">
+                    Dados capturados
+                  </p>
+                  <div className="flex flex-wrap gap-x-4 gap-y-1">
+                    {detail?.memory?.name && (
+                      <div>
+                        <span className="text-[10px] text-[var(--text-tertiary)]">Nome</span>
+                        <p className="text-xs text-[var(--text-primary)]">{detail.memory.name}</p>
+                      </div>
+                    )}
+                    {(detail?.memory?.serviceInterest ?? detail?.serviceInterest) && (
+                      <div>
+                        <span className="text-[10px] text-[var(--text-tertiary)]">Interesse</span>
+                        <p className="text-xs text-[var(--text-primary)]">{detail.memory?.serviceInterest ?? detail.serviceInterest}</p>
+                      </div>
+                    )}
+                    {(detail?.memory?.status ?? detail?.leadStatus) && (
+                      <div>
+                        <span className="text-[10px] text-[var(--text-tertiary)]">Status</span>
+                        <p className="text-xs text-[var(--text-primary)]">
+                          {(() => { const s = detail.memory?.status ?? detail.leadStatus ?? ""; return LEAD_LABEL[s] ?? s; })()}
+                        </p>
+                      </div>
+                    )}
+                    {(detail?.memory?.scheduledAt ?? detail?.scheduledAt) && (
+                      <div>
+                        <span className="text-[10px] text-[var(--text-tertiary)]">Agendamento</span>
+                        <p className="text-xs text-[var(--text-primary)]">
+                          {new Date((detail.memory?.scheduledAt ?? detail.scheduledAt)!).toLocaleString("pt-BR")}
+                        </p>
+                      </div>
+                    )}
+                    {detail?.memory?.notes && (
+                      <div>
+                        <span className="text-[10px] text-[var(--text-tertiary)]">Observações</span>
+                        <p className="text-xs text-[var(--text-primary)]">{detail.memory.notes}</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <p className="mt-2 text-xs text-[var(--text-tertiary)] italic">
+                  Nenhum dado capturado ainda
+                </p>
+              )}
 
               {/* Notes */}
               <div className="mt-1.5">

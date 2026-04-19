@@ -11,7 +11,8 @@ const listContactsQuerySchema = z.object({
   search:   z.string().optional(),
   status:   z.enum(["OPEN", "CLOSED", "all"]).default("all"),
   page:     z.coerce.number().int().min(1).default(1),
-  pageSize: z.coerce.number().int().min(1).max(100).default(40)
+  pageSize: z.coerce.number().int().min(1).max(100).default(40),
+  tags:     z.array(z.string().max(50)).optional()
 });
 
 const messagesQuerySchema = z.object({
@@ -42,7 +43,7 @@ export const registerCrmRoutes = async (app: FastifyInstance): Promise<void> => 
   }, async (request) => {
     const tenantId   = requireTenantId(request);
     const { id: instanceId } = instanceParamsSchema.parse(request.params);
-    const { search, status, page, pageSize } = listContactsQuerySchema.parse(request.query);
+    const { search, status, page, pageSize, tags } = listContactsQuerySchema.parse(request.query);
     const prisma = await app.tenantPrismaRegistry.getClient(tenantId);
     const skip   = (page - 1) * pageSize;
 
@@ -57,11 +58,14 @@ export const registerCrmRoutes = async (app: FastifyInstance): Promise<void> => 
         ]
       };
     }
+    if (tags && tags.length > 0) {
+      convWhere["tags"] = { hasSome: tags };
+    }
 
     const conversations = await prisma.conversation.findMany({
       where: convWhere,
       orderBy: { lastMessageAt: "desc" },
-      take: (pageSize + skip) * 2,
+      take: Math.min((pageSize + skip) * 2, 500),
       select: {
         id: true, status: true, humanTakeover: true, lastMessageAt: true, tags: true,
         contact: { select: { id: true, phoneNumber: true, rawJid: true, displayName: true, isBlacklisted: true } }
@@ -74,35 +78,58 @@ export const registerCrmRoutes = async (app: FastifyInstance): Promise<void> => 
       .filter(c => { if (seen.has(c.contact.id)) return false; seen.add(c.contact.id); return true; })
       .slice(skip, skip + pageSize);
 
-    const memories = await Promise.all(
-      deduped.map(c =>
-        prisma.clientMemory
-          .findFirst({
-            where: { phoneNumber: { contains: cleanPhone(c.contact.phoneNumber).slice(-8) } },
-            select: { name: true, serviceInterest: true, status: true, scheduledAt: true, notes: true }
-          })
-          .catch(() => null)
-      )
+    // Build phone8 list for batch lookup — O(1) DB round trips instead of O(N)
+    const phone8List = deduped
+      .map(c => cleanPhone(c.contact.phoneNumber).slice(-8))
+      .filter(Boolean);
+
+    type MemoryRow = {
+      phoneNumber: string | null;
+      name: string | null;
+      serviceInterest: string | null;
+      status: string | null;
+      scheduledAt: Date | null;
+      notes: string | null;
+    };
+
+    const memoryRows: MemoryRow[] = phone8List.length > 0
+      ? await prisma.clientMemory.findMany({
+          where: { OR: phone8List.map((p: string) => ({ phoneNumber: { contains: p } })) },
+          select: {
+            phoneNumber: true,
+            name: true,
+            serviceInterest: true,
+            status: true,
+            scheduledAt: true,
+            notes: true
+          }
+        })
+      : [];
+
+    // Build lookup map by last-8-digit suffix
+    const memoryMap = new Map<string, MemoryRow>(
+      memoryRows.map((m: MemoryRow) => [cleanPhone(m.phoneNumber ?? "").slice(-8), m])
     );
 
-    const contacts = deduped.map((c, i) => {
+    const contacts = deduped.map((c) => {
       const cleaned = cleanPhone(c.contact.phoneNumber);
+      const memory = memoryMap.get(cleaned.slice(-8)) ?? null;
       return {
         conversationId:    c.id,
         contactId:         c.contact.id,
-        jid:               c.contact.rawJid ?? c.contact.phoneNumber ?? "",  // prefer rawJid as the sendable identifier
+        jid:               c.contact.rawJid ?? c.contact.phoneNumber ?? "",
         rawJid:            c.contact.rawJid ?? null,
-        phoneNumber:       c.contact.phoneNumber ?? null,  // null when LID not yet resolved
-        displayName:       (c.contact.displayName ?? memories[i]?.name ?? cleaned) || null,
+        phoneNumber:       c.contact.phoneNumber ?? null,
+        displayName:       (c.contact.displayName ?? memory?.name ?? cleaned) || null,
         isBlacklisted:     c.contact.isBlacklisted,
         conversationStatus: c.status,
         humanTakeover:     c.humanTakeover,
         lastMessageAt:     c.lastMessageAt?.toISOString() ?? null,
         tags:              c.tags,
-        leadStatus:        memories[i]?.status ?? null,
-        serviceInterest:   memories[i]?.serviceInterest ?? null,
-        scheduledAt:       memories[i]?.scheduledAt?.toISOString() ?? null,
-        notes:             memories[i]?.notes ?? null
+        leadStatus:        memory?.status ?? null,
+        serviceInterest:   memory?.serviceInterest ?? null,
+        scheduledAt:       memory?.scheduledAt?.toISOString() ?? null,
+        notes:             memory?.notes ?? null
       };
     });
 
@@ -143,7 +170,7 @@ export const registerCrmRoutes = async (app: FastifyInstance): Promise<void> => 
       prisma.message.findMany({
         where: messageWhere,
         orderBy: { createdAt: "asc" },
-        take: limit,
+        take: 500,
         select: { id: true, direction: true, type: true, payload: true, status: true, createdAt: true }
       }),
       prisma.clientMemory.findFirst({
@@ -168,7 +195,14 @@ export const registerCrmRoutes = async (app: FastifyInstance): Promise<void> => 
         leadStatus:      memory?.status ?? null,
         serviceInterest: memory?.serviceInterest ?? null,
         scheduledAt:     memory?.scheduledAt?.toISOString() ?? null,
-        isExistingClient: memory?.isExistingClient ?? false
+        isExistingClient: memory?.isExistingClient ?? false,
+        memory: memory ? {
+          name:            memory.name ?? null,
+          serviceInterest: memory.serviceInterest ?? null,
+          status:          memory.status ?? null,
+          scheduledAt:     memory.scheduledAt?.toISOString() ?? null,
+          notes:           memory.notes ?? null
+        } : null
       },
       conversation: conversation ? {
         id:            conversation.id,

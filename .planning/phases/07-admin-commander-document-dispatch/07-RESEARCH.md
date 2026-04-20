@@ -373,22 +373,19 @@ None — no existing runtime state, stored keys, or OS-registered state referenc
 
 ---
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Where are document templates stored?**
    - What we know: `chatbotConfig.aiSettings` is a JSONB field; instance config has JSONB columns
-   - What's unclear: Is there an existing `documentTemplates` config key, or does Plan 7.2 define the schema?
-   - Recommendation: Plan 7.2 should define the config structure (e.g., `chatbotConfig.modules.documentDispatch.templates: [{name, filePath, caption}]`) and add a migration to persist it.
+   - RESOLVED: `chatbotConfig` is a flexible JSONB field — it accepts arbitrary nested keys without a schema migration. Plan 7.2 defines the structure as `chatbotConfig.modules.documentDispatch.templates: [{name, filePath, caption}]`. No migration is needed to add this key; operators populate it via the existing config update API. If the key is absent, `DocumentDispatchService` falls back to `DATA_DIR/{documentType}.pdf`. No chatbotConfig migration required.
 
 2. **Should `AdminCommandHandler` run in-process or as a separate module?**
    - What we know: All other services (`SessionLifecycleService`, `SessionMetricsCollector`) are in-process event bus subscribers
-   - What's unclear: Nothing — follow the established pattern
-   - Recommendation: In-process, same as all other event bus subscribers.
+   - RESOLVED: In-process, same as all other event bus subscribers. No separate module or process needed.
 
 3. **Should `/status` and `/resumo` bypass the Groq call and respond directly?**
    - What we know: `status_instancia` tool exists in `AdminCommandService`; calling Groq for a simple status command adds ~500ms latency
-   - What's unclear: Whether the admin prefers the Groq-mediated response (with nicer formatting) or a direct response
-   - Recommendation: Tier 1 prefix commands (`/status`, `/resumo`) skip Groq and call the data layer directly. This matches the CMD-01 design intent ("explicit commands").
+   - RESOLVED: Tier 1 prefix commands (`/status`, `/resumo`) skip Groq and call the data layer directly. This matches the CMD-01 design intent ("explicit commands") and eliminates unnecessary latency.
 
 ---
 

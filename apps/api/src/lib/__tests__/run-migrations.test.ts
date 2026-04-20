@@ -79,12 +79,14 @@ describe("runMigrations", () => {
     await runMigrations(db as never, "partial-tenant", logger);
     // CREATE TABLE call + (MIGRATIONS.length - 1) migrations applied + inserts
     const migrationApplyCalls = executeRaw.mock.calls.filter(
-      ([sql]: [string]) =>
-        sql.includes("ADD COLUMN") ||
-        sql.includes("CREATE INDEX") ||
-        sql.includes("CREATE UNIQUE INDEX") ||
-        sql.includes("ALTER COLUMN") ||
-        sql.includes("DROP NOT NULL")
+      (args: unknown[]) => {
+        const sql = args[0] as string;
+        return sql.includes("ADD COLUMN") ||
+          sql.includes("CREATE INDEX") ||
+          sql.includes("CREATE UNIQUE INDEX") ||
+          sql.includes("ALTER COLUMN") ||
+          sql.includes("DROP NOT NULL");
+      }
     );
     expect(migrationApplyCalls.length).toBe(Math.max(0, MIGRATIONS.length - 1));
   });

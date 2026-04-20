@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { formatPhone } from "../../../lib/format-phone";
+import { formatPhone } from "../../../lib/format-phone.js";
 
 // All test cases derived from 02-UI-SPEC.md formatPhone() Output Contract
 

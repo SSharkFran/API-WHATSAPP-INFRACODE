@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import type { Prisma } from "@prisma/client";
+import type { Prisma } from "../../../../../prisma/generated/tenant-client/index.js";
 import { z } from "zod";
 import { requireTenantId } from "../../lib/request-auth.js";
 import { instanceParamsSchema } from "../instances/schemas.js";
@@ -189,7 +189,7 @@ export const registerCrmRoutes = async (app: FastifyInstance): Promise<void> => 
         id:              contact.id,
         rawJid:          contact.rawJid ?? null,
         phoneNumber:     contact.phoneNumber ?? null,  // null when LID not yet resolved
-        displayName:     contact.displayName ?? memory?.name ?? cleanPhone(contact.phoneNumber) || null,
+        displayName:     (contact.displayName ?? memory?.name ?? cleanPhone(contact.phoneNumber)) || null,
         isBlacklisted:   contact.isBlacklisted,
         notes:           contact.notes ?? memory?.notes ?? null,
         leadStatus:      memory?.status ?? null,

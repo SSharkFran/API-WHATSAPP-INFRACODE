@@ -1,6 +1,12 @@
-import type pino from 'pino';
 import type { InstanceEventBus, AdminCommandEvent, InstanceDomainEvent } from '../../lib/instance-events.js';
 import type { AdminCommandService } from '../chatbot/admin-command.service.js';
+
+// Minimal logger interface — compatible with pino.Logger and console-wrapper shims
+export interface AdminCommandHandlerLogger {
+  warn(obj: Record<string, unknown>, msg?: string): void;
+  warn(msg: string): void;
+  info?(obj: Record<string, unknown>, msg?: string): void;
+}
 
 export interface AdminCommandHandlerDeps {
   eventBus: InstanceEventBus;
@@ -13,7 +19,7 @@ export interface AdminCommandHandlerDeps {
     text: string,
     meta: { action: string; kind: string }
   ) => Promise<void>;
-  logger: pino.Logger;
+  logger: AdminCommandHandlerLogger;
 }
 
 export class AdminCommandHandler {

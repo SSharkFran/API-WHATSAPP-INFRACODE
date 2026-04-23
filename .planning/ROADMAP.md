@@ -329,7 +329,13 @@ Implement the daily summary sender as a standalone function (extracted from the 
 
 **Requirements**: CMD-01, CMD-02, CMD-03, CMD-04, CMD-05, CMD-06, DOC-01, DOC-02, DOC-03, DOC-04
 
-**Plans**:
+**Plans**: 5 plans
+
+- [ ] 07-00-PLAN.md — Wave 0: Test scaffolds for all Phase 7 behaviors (CMD-01..CMD-06, DOC-01..DOC-04)
+- [ ] 07-01-PLAN.md — Wave 1: AdminCommandHandler + legacy call removal (CMD-01, CMD-02, CMD-06)
+- [ ] 07-02-PLAN.md — Wave 2: Document dispatch pipeline (CMD-03, CMD-04, DOC-01..DOC-04)
+- [ ] 07-03-PLAN.md — Wave 2: AdminActionLog migrations + audit service + panel page (CMD-05)
+- [ ] 07-04-PLAN.md — Wave 3: Status/resumo query responses + StatusQueryService (CMD-06, CMD-02)
 
 #### Plan 7.1 — AdminCommandHandler: Prefix Parser + LLM Fallback
 Implement `AdminCommandHandler` at `apps/api/src/modules/instances/admin-command.handler.ts`. Tier 1: prefix matching for explicit commands — `/contrato [nome]`, `/proposta [nome]`, `/status`, `/resumo`, `/encerrar [nome]`. Tier 2: Groq LLM classification for free-text queries when no prefix matches — classifies into `SYSTEM_STATUS_QUERY`, `DOCUMENT_SEND`, `METRICS_QUERY`, or `UNRECOGNIZED`. Wire to `InstanceOrchestrator` via `InstanceEventBus` `admin.command` event. Admin messages never enter `ChatbotService.process()`.
@@ -425,7 +431,7 @@ Compute `urgencyScore` (0–100) on `ConversationSession` from Phase 5 intent si
 | 4. Session Lifecycle Formalization | 0/4 | Not started | - |
 | 5. Intent Detection & Conversational AI | 0/4 | Not started | - |
 | 6. Metrics & Daily Summary | 0/3 | Not started | - |
-| 7. Admin Commander & Document Dispatch | 0/4 | Not started | - |
+| 7. Admin Commander & Document Dispatch | 0/5 | Planned | - |
 | 8. Continuous Learning Polish & Advanced Features | 0/4 | Not started | - |
 
 ---

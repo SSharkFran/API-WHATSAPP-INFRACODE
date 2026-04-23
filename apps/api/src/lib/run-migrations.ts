@@ -272,7 +272,30 @@ export const MIGRATIONS: Migration[] = [
     description: "Make phoneNumber nullable on Contact table to support @lid-only contacts",
     sql: (schema) =>
       `ALTER TABLE ${quoteSchema(schema)}."Contact" ALTER COLUMN "phoneNumber" DROP NOT NULL;`
-  }
+  },
+  {
+    version: "2026-04-20-042-admin-action-log",
+    description: "Create AdminActionLog table for Phase 7 audit trail",
+    sql: (schema) => `
+      CREATE TABLE IF NOT EXISTS ${quoteSchema(schema)}."AdminActionLog" (
+        "id" TEXT PRIMARY KEY,
+        "triggeredByJid" TEXT NOT NULL,
+        "actionType" TEXT NOT NULL,
+        "targetContactJid" TEXT,
+        "documentName" TEXT,
+        "messageText" TEXT,
+        "deliveryStatus" TEXT NOT NULL DEFAULT 'pending',
+        "createdAt" TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+    `
+  },
+  {
+    version: "2026-04-20-043-admin-action-log-index",
+    description: "Index AdminActionLog by createdAt DESC for panel queries",
+    sql: (schema) =>
+      `CREATE INDEX IF NOT EXISTS "idx_${schema}_admin_action_log_created"
+       ON ${quoteSchema(schema)}."AdminActionLog" ("createdAt" DESC);`
+  },
 ];
 
 interface PrismaLike {

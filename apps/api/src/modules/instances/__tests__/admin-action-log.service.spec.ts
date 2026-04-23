@@ -1,22 +1,4 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-
-// Mock the future AdminActionLogService module — it does not exist yet.
-// This prevents "Cannot find module" from aborting the whole suite.
-vi.mock("../admin-action-log.service.js", () => ({
-  AdminActionLogService: class {
-    constructor(_deps: unknown) {}
-    async writeLog(_opts: {
-      tenantId: string;
-      instanceId: string;
-      adminJid: string;
-      command: string;
-      result: string;
-    }): Promise<void> {
-      return Promise.resolve();
-    }
-  },
-}));
-
 import { AdminActionLogService } from "../admin-action-log.service.js";
 
 // ---------------------------------------------------------------------------
@@ -73,28 +55,24 @@ describe("AdminActionLogService", () => {
 
   // CMD-05: writes a row to AdminActionLog after every command
   it("writes a row to AdminActionLog after every command", async () => {
-    // When AdminActionLogService is implemented, it should:
-    // 1. Call $executeRawUnsafe with INSERT into "AdminActionLog" table
-    expect(true).toBe(false); // TODO: implement after AdminActionLogService is built
-    // Stub: await service.writeLog({ tenantId: TENANT_ID, instanceId: INSTANCE_ID, adminJid: ADMIN_JID, command: '/contrato João', result: 'sent' });
-    // await flushSetImmediate();
-    // expect(prismaMock.$executeRawUnsafe).toHaveBeenCalledOnce();
-    // const [sql] = prismaMock.$executeRawUnsafe.mock.calls[0] as [string, ...unknown[]];
-    // expect(sql).toContain('"AdminActionLog"');
+    await service.writeLog({ tenantId: TENANT_ID, instanceId: INSTANCE_ID, adminJid: ADMIN_JID, command: '/contrato João', result: 'sent' });
+    await flushSetImmediate();
+    expect(prismaMock.$executeRawUnsafe).toHaveBeenCalledOnce();
+    const [sql] = prismaMock.$executeRawUnsafe.mock.calls[0] as [string, ...unknown[]];
+    expect(sql).toContain('"AdminActionLog"');
   });
 
   // CMD-05: does not throw when DB write fails — logs warn and continues
   it("does not throw when DB write fails — logs warn and continues", async () => {
     prismaMock.$executeRawUnsafe.mockRejectedValueOnce(new Error("DB connection failed"));
 
-    expect(true).toBe(false); // TODO: implement after AdminActionLogService is built
-    // Stub: let thrownError: unknown = null;
-    // try {
-    //   await service.writeLog({ tenantId: TENANT_ID, instanceId: INSTANCE_ID, adminJid: ADMIN_JID, command: '/status', result: 'ok' });
-    // } catch (err) { thrownError = err; }
-    // await flushSetImmediate();
-    // expect(thrownError).toBeNull();
-    // expect(logger._inner.warn).toHaveBeenCalled();
+    let thrownError: unknown = null;
+    try {
+      await service.writeLog({ tenantId: TENANT_ID, instanceId: INSTANCE_ID, adminJid: ADMIN_JID, command: '/status', result: 'ok' });
+    } catch (err) { thrownError = err; }
+    await flushSetImmediate();
+    expect(thrownError).toBeNull();
+    expect(logger._inner.warn).toHaveBeenCalled();
   });
 
   // CMD-05: uses setImmediate for deferred write — does not block caller
@@ -105,15 +83,12 @@ describe("AdminActionLogService", () => {
       return 1;
     });
 
-    expect(true).toBe(false); // TODO: implement after AdminActionLogService is built
-    // Stub: const callPromise = service.writeLog({ tenantId: TENANT_ID, instanceId: INSTANCE_ID, adminJid: ADMIN_JID, command: '/status', result: 'ok' });
+    const callPromise = service.writeLog({ tenantId: TENANT_ID, instanceId: INSTANCE_ID, adminJid: ADMIN_JID, command: '/status', result: 'ok' });
     // Synchronous resolution should happen before DB write
-    // expect(dbCallHappened).toBe(false); // setImmediate deferred
-    // await callPromise;
-    // expect(dbCallHappened).toBe(false); // still not run until setImmediate fires
-    // await flushSetImmediate();
-    // expect(dbCallHappened).toBe(true);
+    expect(dbCallHappened).toBe(false); // setImmediate deferred
+    await callPromise;
+    expect(dbCallHappened).toBe(false); // still not run until setImmediate fires
+    await flushSetImmediate();
+    expect(dbCallHappened).toBe(true);
   });
 });
-
-// Wave 0 — RED state intentional

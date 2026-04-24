@@ -331,11 +331,11 @@ Implement the daily summary sender as a standalone function (extracted from the 
 
 **Plans**: 5 plans
 
-- [ ] 07-00-PLAN.md — Wave 0: Test scaffolds for all Phase 7 behaviors (CMD-01..CMD-06, DOC-01..DOC-04)
-- [ ] 07-01-PLAN.md — Wave 1: AdminCommandHandler + legacy call removal (CMD-01, CMD-02, CMD-06)
-- [ ] 07-02-PLAN.md — Wave 2: Document dispatch pipeline (CMD-03, CMD-04, DOC-01..DOC-04)
-- [ ] 07-03-PLAN.md — Wave 2: AdminActionLog migrations + audit service + panel page (CMD-05)
-- [ ] 07-04-PLAN.md — Wave 3: Status/resumo query responses + StatusQueryService (CMD-06, CMD-02)
+- [x] 07-00-PLAN.md — Wave 0: Test scaffolds for all Phase 7 behaviors (CMD-01..CMD-06, DOC-01..DOC-04)
+- [x] 07-01-PLAN.md — Wave 1: AdminCommandHandler + legacy call removal (CMD-01, CMD-02, CMD-06)
+- [x] 07-02-PLAN.md — Wave 2: Document dispatch pipeline (CMD-03, CMD-04, DOC-01..DOC-04)
+- [x] 07-03-PLAN.md — Wave 2: AdminActionLog migrations + audit service + panel page (CMD-05)
+- [x] 07-04-PLAN.md — Wave 3: Status/resumo query responses + StatusQueryService (CMD-06, CMD-02)
 
 #### Plan 7.1 — AdminCommandHandler: Prefix Parser + LLM Fallback
 Implement `AdminCommandHandler` at `apps/api/src/modules/instances/admin-command.handler.ts`. Tier 1: prefix matching for explicit commands — `/contrato [nome]`, `/proposta [nome]`, `/status`, `/resumo`, `/encerrar [nome]`. Tier 2: Groq LLM classification for free-text queries when no prefix matches — classifies into `SYSTEM_STATUS_QUERY`, `DOCUMENT_SEND`, `METRICS_QUERY`, or `UNRECOGNIZED`. Wire to `InstanceOrchestrator` via `InstanceEventBus` `admin.command` event. Admin messages never enter `ChatbotService.process()`.
@@ -382,7 +382,14 @@ Implement the `/status` command response: aggregate instance health (connected/d
 
 **Requirements**: APR-01, APR-02, APR-03, APR-04, APR-05, APR-06, URG-01, URG-02, FOL-01, FOL-02
 
-**Plans**:
+**Plans**: 5 plans
+
+Plans:
+- [ ] 08-00-PLAN.md — Wave 0: Test scaffolds for all Phase 8 behaviors (APR-01, APR-02, APR-04, APR-05, URG-01, FOL-01, FOL-02)
+- [ ] 08-01-PLAN.md — Wave 1: IAprendizadoContinuoModule Null Object + remove 14 isEnabled guards (APR-01)
+- [ ] 08-02-PLAN.md — Wave 2: Confirmation gate before knowledge ingestion (APR-02, APR-04)
+- [ ] 08-03-PLAN.md — Wave 2: TenantKnowledge audit columns + panel UI (APR-05, APR-06)
+- [ ] 08-04-PLAN.md — Wave 3: Secondary urgency signals + FollowUpService + ScheduledFollowUp table (URG-01, URG-02, FOL-01, FOL-02)
 
 #### Plan 8.1 — Null Object Pattern for aprendizadoContinuo
 Define `IAprendizadoContinuoModule` interface: `isEnabled()`, `isVerified()`, `getAdminPhones()`, `getAdminJids()`, `processLearningReply()`, `shouldSendDailySummary()`, `buildDailySummary()`. Implement `DisabledAprendizadoContinuoModule` as a no-op that returns `false`, `[]`, and no-ops for all methods. Implement `ActiveAprendizadoContinuoModule` with real behavior. Wire in `app.ts`: if `chatbotConfig.modules?.aprendizadoContinuo?.isEnabled`, instantiate `Active`; else `Disabled`. Remove all `if (module?.isEnabled)` guards from `InstanceOrchestrator` and all other services — they now call the interface and the disabled implementation does nothing.
@@ -432,7 +439,7 @@ Compute `urgencyScore` (0–100) on `ConversationSession` from Phase 5 intent si
 | 5. Intent Detection & Conversational AI | 0/4 | Not started | - |
 | 6. Metrics & Daily Summary | 0/3 | Not started | - |
 | 7. Admin Commander & Document Dispatch | 0/5 | Planned | - |
-| 8. Continuous Learning Polish & Advanced Features | 0/4 | Not started | - |
+| 8. Continuous Learning Polish & Advanced Features | 0/5 | Planned | - |
 
 ---
 

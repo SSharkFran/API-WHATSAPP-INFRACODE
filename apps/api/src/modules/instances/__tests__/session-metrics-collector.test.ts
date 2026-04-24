@@ -187,3 +187,7 @@ describe("SessionMetricsCollector", () => {
     expect(logger._inner.warn).toHaveBeenCalled();
   });
 });
+
+describe("SessionMetricsCollector — urgency_detected (URG-01)", () => {
+  it.todo("session.urgency_detected event writes urgencyScore to ConversationSession DB row via $executeRawUnsafe");
+});

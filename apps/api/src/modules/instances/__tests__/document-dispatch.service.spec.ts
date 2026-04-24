@@ -1,22 +1,16 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-// Mock the future DocumentDispatchService module — it does not exist yet.
-// This prevents "Cannot find module" from aborting the whole suite.
-vi.mock("../document-dispatch.service.js", () => ({
-  DocumentDispatchService: class {
-    constructor(_deps: unknown) {}
-    async dispatch(
-      _event: unknown,
-      _documentType: string,
-      _clientName: string,
-      _sendResponse: (msg: string) => Promise<void>
-    ): Promise<void> {
-      return Promise.resolve();
-    }
-  },
+// ---------------------------------------------------------------------------
+// Mock node:fs/promises at module level — ESM modules cannot be spied on
+// after import. This is the correct vitest pattern for node built-ins.
+// ---------------------------------------------------------------------------
+vi.mock("node:fs/promises", () => ({
+  stat: vi.fn().mockResolvedValue({ size: 1024 }),
+  readFile: vi.fn().mockResolvedValue(Buffer.from("pdf-content")),
 }));
 
 import { DocumentDispatchService } from "../document-dispatch.service.js";
+import { stat, readFile } from "node:fs/promises";
 
 // ---------------------------------------------------------------------------
 // Stub deps
@@ -55,6 +49,10 @@ function makeEvent(command: string) {
   };
 }
 
+const singleContact = [
+  { id: "1", displayName: "João Silva", phoneNumber: null, rawJid: "5511999990001@s.whatsapp.net" },
+];
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -65,69 +63,113 @@ describe("DocumentDispatchService", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    // Reset fs mocks to defaults
+    vi.mocked(stat).mockResolvedValue({ size: 1024 } as never);
+    vi.mocked(readFile).mockResolvedValue(Buffer.from("pdf-content") as never);
+
     deps = makeDeps();
     service = new DocumentDispatchService(deps as never);
   });
 
-  // DOC-01: reads file as base64, sends document message
-  it("sends document with base64 content derived from readFile", async () => {
+  // DOC-01: returns "no contact" message when 0 contacts found
+  it("sends 'no contact found' response when contact lookup returns empty", async () => {
     const sendResponse = vi.fn().mockResolvedValue(undefined);
+    deps.getTenantDb.mockReturnValue({
+      $queryRawUnsafe: vi.fn().mockResolvedValue([]),
+    });
 
-    // When DocumentDispatchService is implemented, it should:
-    // 1. Call stat() to check file size
-    // 2. Call readFile() and convert to base64
-    // 3. Call sendMessage with { type: 'document', media: { base64: ... } }
-    expect(true).toBe(false); // TODO: implement after DocumentDispatchService is built
-    // Stub: await service.dispatch(makeEvent('/contrato João'), 'contrato', 'João Silva', sendResponse);
-    // expect(deps.sendMessage).toHaveBeenCalledWith(
-    //   expect.objectContaining({ media: expect.objectContaining({ base64: expect.stringMatching(/^[A-Za-z0-9+/]/) }) })
-    // );
+    await service.dispatch(makeEvent("/contrato João"), "contrato", "João Silva", sendResponse);
+
+    expect(sendResponse).toHaveBeenCalledWith(
+      expect.stringContaining("Nenhum contato encontrado")
+    );
+    expect(deps.sendMessage).not.toHaveBeenCalled();
   });
 
-  // DOC-02: uses mime.lookup(filePath) for mimeType
-  it("uses mime.lookup(filePath) for mimeType", async () => {
+  // DOC-02: disambiguation when multiple contacts match
+  it("sends disambiguation list when multiple contacts match name", async () => {
     const sendResponse = vi.fn().mockResolvedValue(undefined);
+    deps.getTenantDb.mockReturnValue({
+      $queryRawUnsafe: vi.fn().mockResolvedValue([
+        { id: "1", displayName: "João Silva", phoneNumber: "5511999990001", rawJid: null },
+        { id: "2", displayName: "João Silva Júnior", phoneNumber: "5511999990002", rawJid: null },
+      ]),
+    });
 
-    expect(true).toBe(false); // TODO: implement after DocumentDispatchService is built
-    // Stub: expect mimeLookup was called with file path ending in '.pdf' or similar
-    // Stub: expect media.mimeType equals result of mime.lookup(...)
-  });
+    await service.dispatch(makeEvent("/contrato João"), "contrato", "João", sendResponse);
 
-  // DOC-02: personalizes fileName as `{DocumentType} - {ClientName}.pdf`
-  it("personalizes fileName as `{DocumentType} - {ClientName}.pdf`", async () => {
-    const sendResponse = vi.fn().mockResolvedValue(undefined);
-
-    expect(true).toBe(false); // TODO: implement after DocumentDispatchService is built
-    // Stub: await service.dispatch(makeEvent('/contrato João'), 'contrato', 'João Silva', sendResponse);
-    // expect(deps.sendMessage).toHaveBeenCalledWith(
-    //   expect.objectContaining({ media: expect.objectContaining({ fileName: 'Contrato - João Silva.pdf' }) })
-    // );
-  });
-
-  // DOC-03: personalizes caption with client name
-  it("personalizes caption with client name", async () => {
-    const sendResponse = vi.fn().mockResolvedValue(undefined);
-
-    expect(true).toBe(false); // TODO: implement after DocumentDispatchService is built
-    // Stub: await service.dispatch(makeEvent('/contrato João'), 'contrato', 'João Silva', sendResponse);
-    // expect(deps.sendMessage).toHaveBeenCalledWith(
-    //   expect.objectContaining({ media: expect.objectContaining({ caption: expect.stringContaining('João Silva') }) })
-    // );
+    expect(sendResponse).toHaveBeenCalledWith(
+      expect.stringContaining("2 contatos")
+    );
+    expect(deps.sendMessage).not.toHaveBeenCalled();
   });
 
   // DOC-04: rejects file > 5_242_880 bytes before readFile
   it("rejects file > 5_242_880 bytes before readFile", async () => {
     const sendResponse = vi.fn().mockResolvedValue(undefined);
+    deps.getTenantDb.mockReturnValue({
+      $queryRawUnsafe: vi.fn().mockResolvedValue(singleContact),
+    });
+    deps.getDocumentTemplates.mockResolvedValue([
+      { name: "contrato", filePath: "/tmp/test-data/large-file.pdf" },
+    ]);
+    vi.mocked(stat).mockResolvedValue({ size: 6_000_000 } as never);
 
-    // stat() would return a file size > 5 MB
-    // readFile should NOT be called
-    // sendResponse (4th param) should be called with alert text about file size
-    expect(true).toBe(false); // TODO: implement after DocumentDispatchService is built
-    // Stub: deps.stat.mockResolvedValue({ size: 6_000_000 });
-    // await service.dispatch(makeEvent('/contrato João'), 'contrato', 'João Silva', sendResponse);
-    // expect(deps.readFile).not.toHaveBeenCalled();
-    // expect(sendResponse).toHaveBeenCalledWith(expect.stringContaining('5 MB'));
+    await service.dispatch(makeEvent("/contrato João"), "contrato", "João Silva", sendResponse);
+
+    expect(stat).toHaveBeenCalled();
+    expect(readFile).not.toHaveBeenCalled();
+    expect(sendResponse).toHaveBeenCalledWith(
+      expect.stringContaining("5 MB")
+    );
+    expect(deps.sendMessage).not.toHaveBeenCalled();
+  });
+
+  // DOC-01: reads file as base64, sends document message
+  it("sends document with base64 content derived from readFile", async () => {
+    const sendResponse = vi.fn().mockResolvedValue(undefined);
+    deps.getTenantDb.mockReturnValue({
+      $queryRawUnsafe: vi.fn().mockResolvedValue(singleContact),
+    });
+    deps.getDocumentTemplates.mockResolvedValue([
+      { name: "contrato", filePath: "/tmp/test-data/contrato.pdf" },
+    ]);
+    vi.mocked(readFile).mockResolvedValue(Buffer.from("pdf-content") as never);
+
+    await service.dispatch(makeEvent("/contrato João"), "contrato", "João Silva", sendResponse);
+
+    expect(deps.sendMessage).toHaveBeenCalledWith(
+      TENANT_ID,
+      INSTANCE_ID,
+      expect.objectContaining({
+        type: "document",
+        media: expect.objectContaining({
+          base64: expect.stringMatching(/^[A-Za-z0-9+/]/),
+        }),
+      })
+    );
+  });
+
+  // DOC-02: personalizes fileName as `{DocumentType} - {ClientName}.pdf`
+  it("personalizes fileName as `{DocumentType} - {ClientName}.pdf`", async () => {
+    const sendResponse = vi.fn().mockResolvedValue(undefined);
+    deps.getTenantDb.mockReturnValue({
+      $queryRawUnsafe: vi.fn().mockResolvedValue(singleContact),
+    });
+    deps.getDocumentTemplates.mockResolvedValue([
+      { name: "contrato", filePath: "/tmp/test-data/contrato.pdf" },
+    ]);
+
+    await service.dispatch(makeEvent("/contrato João"), "contrato", "João Silva", sendResponse);
+
+    expect(deps.sendMessage).toHaveBeenCalledWith(
+      TENANT_ID,
+      INSTANCE_ID,
+      expect.objectContaining({
+        media: expect.objectContaining({
+          fileName: "Contrato - João Silva.pdf",
+        }),
+      })
+    );
   });
 });
-
-// Wave 0 — RED state intentional

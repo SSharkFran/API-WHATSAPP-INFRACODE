@@ -55,7 +55,6 @@ import { recognizeCloseIntent } from '../../lib/session-intents.js';
 import { classifyIntent } from '../../lib/intent-classifier.service.js';
 import type { AiCaller } from '../chatbot/agents/types.js';
 import { DailySummaryService } from './daily-summary.service.js';
-import { AdminCommandHandler } from './admin-command.handler.js';
 
 interface InstanceOrchestratorDeps {
   config: AppConfig;
@@ -252,7 +251,6 @@ export class InstanceOrchestrator {
   private readonly clientMemoryService: ClientMemoryService;
   private readonly adminMemoryService: AdminMemoryService;
   private readonly adminCommandService: AdminCommandService;
-  private readonly adminCommandHandler: AdminCommandHandler;
   private readonly chatbotService: ChatbotService;
   private readonly memoryAgent: MemoryAgent;
   private readonly conversationAgent: ConversationAgent;
@@ -304,20 +302,6 @@ export class InstanceOrchestrator {
     this.lidReconciliationQueue = deps.lidReconciliationQueue;
     this.dailySummaryService = deps.dailySummaryService;
     this.eventBus = deps.eventBus ?? new InstanceEventBus();
-    this.adminCommandHandler = new AdminCommandHandler({
-      eventBus: this.eventBus,
-      adminCommandService: this.adminCommandService,
-      sendAutomatedTextMessage: this.sendAutomatedTextMessage.bind(this),
-      logger: {
-        warn: (objOrMsg: Record<string, unknown> | string, msg?: string) => {
-          if (typeof objOrMsg === 'string') {
-            console.warn('[AdminCommandHandler]', objOrMsg);
-          } else {
-            console.warn('[AdminCommandHandler]', msg, objOrMsg);
-          }
-        },
-      },
-    });
   }
 
   public setPlatformAlertService(service: PlatformAlertService): void {
@@ -3399,6 +3383,63 @@ if (event.status === "CONNECTED") {
           }
           return;
         }
+      }
+
+      // Comando livre do admin verificado — não é reply de aprendizado nem correção
+      if (finalInputText && isVerifiedAprendizadoContinuoAdminSender) {
+        const handled = await this.adminCommandService.handleCommand({
+          tenantId,
+          instanceId: instance.id,
+          text: finalInputText,
+          adminPhone: remoteNumber,
+          sendResponse: async (text) => {
+            await this.sendAutomatedTextMessage(
+              tenantId,
+              instance.id,
+              remoteNumber,
+              event.remoteJid,
+              text,
+              { action: "admin_command_response", kind: "chatbot" }
+            );
+          },
+          sendMessageToClient: async (jid, normalizedPhone, text) => {
+            try {
+              await this.sendAutomatedTextMessage(
+                tenantId,
+                instance.id,
+                normalizedPhone,
+                jid,
+                text,
+                { action: "admin_command_send_client", kind: "chatbot" }
+              );
+              return true;
+            } catch {
+              return false;
+            }
+          }
+        });
+        if (handled) return;
+
+        // PENDING_REVIEW: verifica se admin esta corrigindo conhecimento recem-aprendido
+        if (finalInputText && resolvedContactNumber) {
+          const correctionConsumed = await this.escalationService.consumePendingKnowledgeCorrection(
+            instance.id,
+            resolvedContactNumber,
+            finalInputText
+          );
+          if (correctionConsumed) {
+            await this.sendAutomatedTextMessage(
+              tenantId,
+              instance.id,
+              remoteNumber,
+              event.remoteJid,
+              "Conhecimento atualizado!",
+              { action: "admin_knowledge_correction_ack", kind: "chatbot" }
+            );
+            return;
+          }
+        }
+
       }
 
       if (finalInputText && activeConversation.awaitingAdminResponse && !canProcessAprendizadoContinuoReply) {

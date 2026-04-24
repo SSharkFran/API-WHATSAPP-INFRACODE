@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { AdminIdentityService } from "../admin-identity.service.js";
 import type { AdminIdentityInput } from "../admin-identity.service.js";
+import { ActiveAprendizadoContinuoModule, DisabledAprendizadoContinuoModule } from "../aprendizado-continuo.disabled.js";
 
 function buildInput(overrides: Partial<AdminIdentityInput> = {}): AdminIdentityInput {
   return {
@@ -67,16 +68,7 @@ describe("AdminIdentityService", () => {
       const input = buildInput({
         remoteJid: "5511999990002@s.whatsapp.net",
         adminCandidatePhones: ["5511999990002"],
-        aprendizadoContinuoModule: {
-          isEnabled: false,
-          verificationStatus: "PENDING",
-          configuredAdminPhone: null,
-          verifiedPhone: null,
-          verifiedPhones: [],
-          additionalAdminPhones: null,
-          verifiedRemoteJids: [],
-          verifiedSenderJids: []
-        },
+        aprendizadoContinuoModule: new DisabledAprendizadoContinuoModule(),
         fromMe: false,
         remoteChatNumber: "5511999990002"
       });
@@ -92,16 +84,16 @@ describe("AdminIdentityService", () => {
       const input = buildInput({
         remoteJid: "5511999990001@s.whatsapp.net",
         adminCandidatePhones: ["5511999990001"],
-        aprendizadoContinuoModule: {
+        aprendizadoContinuoModule: new ActiveAprendizadoContinuoModule({
           isEnabled: true,
           verificationStatus: "VERIFIED",
           configuredAdminPhone: "5511999990001",
           verifiedPhone: "5511999990001",
           verifiedPhones: ["5511999990001"],
-          additionalAdminPhones: null,
+          additionalAdminPhones: [],
           verifiedRemoteJids: [],
           verifiedSenderJids: []
-        },
+        }),
         fromMe: true,
         remoteChatNumber: "5511999990001"
       });

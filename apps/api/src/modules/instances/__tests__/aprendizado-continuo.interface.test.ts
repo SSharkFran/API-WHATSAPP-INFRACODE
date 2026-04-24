@@ -1,46 +1,75 @@
-import { describe, it, expect } from 'vitest';
-// These imports will fail until Plan 01 creates the files — that is intentional.
-// Wave 0: stubs exist so the verify command in Plan 01 has a target.
-import {
-  DisabledAprendizadoContinuoModule,
-  ActiveAprendizadoContinuoModule,
-} from '../aprendizado-continuo.disabled.js';
+import { describe, it, expect } from "vitest";
+import { DisabledAprendizadoContinuoModule, ActiveAprendizadoContinuoModule } from "../aprendizado-continuo.disabled.js";
+import type { AprendizadoContinuoConfig } from "../aprendizado-continuo.interface.js";
 
-describe('DisabledAprendizadoContinuoModule — APR-01 Null Object', () => {
-  const mod = new DisabledAprendizadoContinuoModule();
+const enabledConfig: AprendizadoContinuoConfig = {
+  isEnabled: true,
+  verificationStatus: "VERIFIED",
+  configuredAdminPhone: "5511999990001",
+  verifiedPhone: "5511999990001",
+  verifiedPhones: ["5511999990002"],
+  verifiedRemoteJids: ["5511999990001@s.whatsapp.net"],
+  verifiedSenderJids: ["5511999990001@s.whatsapp.net"],
+  additionalAdminPhones: ["5511999990003"]
+};
 
-  it('isEnabled() returns false', () => {
-    expect(mod.isEnabled()).toBe(false);
+describe("DisabledAprendizadoContinuoModule", () => {
+  const disabled = new DisabledAprendizadoContinuoModule();
+
+  it("isEnabled() returns false", () => {
+    expect(disabled.isEnabled()).toBe(false);
   });
-  it('getAdminPhones() returns []', () => {
-    expect(mod.getAdminPhones()).toEqual([]);
+
+  it("getAdminPhones() returns []", () => {
+    expect(disabled.getAdminPhones()).toEqual([]);
   });
-  it('getAdminJids() returns []', () => {
-    expect(mod.getAdminJids()).toEqual([]);
+
+  it("getAdminJids() returns []", () => {
+    expect(disabled.getAdminJids()).toEqual([]);
   });
-  it('processLearningReply() resolves to null', async () => {
-    await expect(mod.processLearningReply('t1', 'i1', 'any')).resolves.toBeNull();
+
+  it("processLearningReply() resolves to null", async () => {
+    const result = await disabled.processLearningReply("t1", "i1", "answer");
+    expect(result).toBeNull();
   });
-  it('shouldSendDailySummary() returns false', () => {
-    expect(mod.shouldSendDailySummary('t1', 'i1')).toBe(false);
+
+  it("shouldSendDailySummary() returns false", () => {
+    expect(disabled.shouldSendDailySummary("t1", "i1")).toBe(false);
   });
-  it('buildDailySummary() resolves to empty string', async () => {
-    await expect(mod.buildDailySummary('t1', 'i1')).resolves.toBe('');
+
+  it("buildDailySummary() resolves to empty string", async () => {
+    const result = await disabled.buildDailySummary("t1", "i1");
+    expect(result).toBe("");
+  });
+
+  it("getConfig() returns null", () => {
+    expect(disabled.getConfig()).toBeNull();
   });
 });
 
-describe('ActiveAprendizadoContinuoModule — APR-01 active path', () => {
-  it('isEnabled() returns true', () => {
-    const mod = new ActiveAprendizadoContinuoModule({
-      isEnabled: true,
-      verificationStatus: 'VERIFIED',
-      configuredAdminPhone: '+5511999990000',
-      verifiedPhone: '+5511999990000',
-      verifiedPhones: [],
-      verifiedRemoteJids: [],
-      verifiedSenderJids: [],
-      additionalAdminPhones: [],
-    });
-    expect(mod.isEnabled()).toBe(true);
+describe("ActiveAprendizadoContinuoModule", () => {
+  it("isEnabled() returns true with enabled config", () => {
+    const active = new ActiveAprendizadoContinuoModule(enabledConfig);
+    expect(active.isEnabled()).toBe(true);
+  });
+
+  it("getAdminPhones() returns all verified phones when verified", () => {
+    const active = new ActiveAprendizadoContinuoModule(enabledConfig);
+    const phones = active.getAdminPhones();
+    expect(phones).toContain("5511999990001");
+    expect(phones).toContain("5511999990002");
+    expect(phones).toContain("5511999990003");
+  });
+
+  it("getAdminJids() returns verified jids when verified", () => {
+    const active = new ActiveAprendizadoContinuoModule(enabledConfig);
+    const jids = active.getAdminJids();
+    expect(jids).toContain("5511999990001@s.whatsapp.net");
+  });
+
+  it("isEnabled() returns false when config.isEnabled is false", () => {
+    const disabledConfig: AprendizadoContinuoConfig = { ...enabledConfig, isEnabled: false };
+    const active = new ActiveAprendizadoContinuoModule(disabledConfig);
+    expect(active.isEnabled()).toBe(false);
   });
 });

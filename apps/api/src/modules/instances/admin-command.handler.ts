@@ -1,5 +1,6 @@
 import type { InstanceEventBus, AdminCommandEvent, InstanceDomainEvent } from '../../lib/instance-events.js';
 import type { AdminCommandService } from '../chatbot/admin-command.service.js';
+import type { AdminActionLogEntry } from './admin-action-log.service.js';
 
 // Minimal logger interface — compatible with pino.Logger and console-wrapper shims
 export interface AdminCommandHandlerLogger {
@@ -27,6 +28,9 @@ export interface AdminCommandHandlerDeps {
       clientName: string,
       sendResponse: (text: string) => Promise<void>
     ) => Promise<void>;
+  };
+  actionLog: {
+    write: (tenantId: string, entry: AdminActionLogEntry) => void;
   };
 }
 
@@ -92,6 +96,12 @@ export class AdminCommandHandler {
       sendResponse,
       sendMessageToClient: async (_jid, _phone, _msg) => false, // wired in Plan 7.2
     });
+    this.deps.actionLog.write(event.tenantId, {
+      triggeredByJid: event.fromJid,
+      actionType: 'metrics_query',
+      messageText: text,
+      deliveryStatus: 'sent',
+    });
   }
 
   // Stub implementations — real bodies added in Plan 7.2 (document) and Plan 7.4 (status/resumo)
@@ -99,12 +109,22 @@ export class AdminCommandHandler {
     await this.makeSendResponse(event)(
       'Status: comando /status será implementado no Plano 7.4.'
     );
+    this.deps.actionLog.write(event.tenantId, {
+      triggeredByJid: event.fromJid,
+      actionType: 'status_query',
+      deliveryStatus: 'sent',
+    });
   }
 
   protected async handleResumoCommand(event: AdminCommandEvent): Promise<void> {
     await this.makeSendResponse(event)(
       'Resumo: comando /resumo será implementado no Plano 7.4.'
     );
+    this.deps.actionLog.write(event.tenantId, {
+      triggeredByJid: event.fromJid,
+      actionType: 'metrics_query',
+      deliveryStatus: 'sent',
+    });
   }
 
   protected async handleDocumentCommand(
@@ -112,12 +132,20 @@ export class AdminCommandHandler {
     documentType: string,
     clientName: string
   ): Promise<void> {
+    const text = (event.command ?? '').trim();
     await this.deps.documentDispatch.dispatch(
       event,
       documentType,
       clientName,
       this.makeSendResponse(event)   // sendResponse bound per-event — 4th param
     );
+    this.deps.actionLog.write(event.tenantId, {
+      triggeredByJid: event.fromJid,
+      actionType: 'document_send',
+      messageText: text,
+      documentName: clientName,
+      deliveryStatus: 'pending', // updated to 'sent' by DocumentDispatchService on success
+    });
   }
 
   protected async handleEncerrarCommand(
@@ -129,5 +157,11 @@ export class AdminCommandHandler {
     await this.makeSendResponse(event)(
       `Encerrando sessão com "${clientName}"... (verificar contato no CRM)`
     );
+    this.deps.actionLog.write(event.tenantId, {
+      triggeredByJid: event.fromJid,
+      actionType: 'session_close',
+      messageText: clientName,
+      deliveryStatus: 'pending',
+    });
   }
 }

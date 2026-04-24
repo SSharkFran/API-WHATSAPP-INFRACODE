@@ -57,6 +57,7 @@ import type { AiCaller } from '../chatbot/agents/types.js';
 import { DailySummaryService } from './daily-summary.service.js';
 import { AdminCommandHandler } from './admin-command.handler.js';
 import { DocumentDispatchService } from './document-dispatch.service.js';
+import { AdminActionLogService } from './admin-action-log.service.js';
 
 interface InstanceOrchestratorDeps {
   config: AppConfig;
@@ -319,6 +320,13 @@ export class InstanceOrchestrator {
       },
     });
 
+    const adminActionLogService = new AdminActionLogService({
+      logger: console as never,
+      tenantPrismaRegistry: {
+        getClient: (tid) => this.tenantPrismaRegistry.getClient(tid) as never,
+      },
+    });
+
     this.adminCommandHandler = new AdminCommandHandler({
       eventBus: this.eventBus,
       adminCommandService: this.adminCommandService,
@@ -335,6 +343,9 @@ export class InstanceOrchestrator {
       documentDispatch: {
         dispatch: (ev, docType, name, sendResp) =>
           documentDispatchService.dispatch(ev, docType, name, sendResp),
+      },
+      actionLog: {
+        write: (tenantId, entry) => adminActionLogService.write(tenantId, entry),
       },
     });
   }

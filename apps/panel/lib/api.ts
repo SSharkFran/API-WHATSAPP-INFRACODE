@@ -429,6 +429,29 @@ export async function getTenantActiveQueue(): Promise<ActiveQueueEntry[]> {
   }
 }
 
+export interface AdminActionLogEntry {
+  id: string;
+  triggeredByJid: string;
+  actionType: string;
+  targetContactJid: string | null;
+  documentName: string | null;
+  messageText: string | null;
+  deliveryStatus: string;
+  createdAt: string; // ISO timestamp
+}
+
+/**
+ * Carrega o historico de acoes administrativas do tenant.
+ */
+export async function getTenantActionHistory(limit = 100): Promise<AdminActionLogEntry[]> {
+  try {
+    return await request<AdminActionLogEntry[]>(`/tenant/action-history?limit=${limit}`, "tenant");
+  } catch (error) {
+    if (isRedirectError(error)) throw error;
+    return [];
+  }
+}
+
 /**
  * Carrega o estado do onboarding guiado do tenant.
  */

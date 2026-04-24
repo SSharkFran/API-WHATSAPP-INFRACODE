@@ -1,6 +1,8 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { recordPlatformAuditLog } from "../../lib/audit.js";
+import { resolveTenantSchemaName } from "../../lib/tenant-schema.js";
+import type { AdminActionLogEntry } from "../instances/admin-action-log.service.js";
 import {
   createTenantApiKeyBodySchema,
   inviteTenantUserBodySchema,
@@ -61,4 +63,31 @@ export const registerTenantRoutes = async (app: FastifyInstance): Promise<void> 
   app.get("/tenant/metrics/today", { config: { auth: "tenant", tenantRoles: ["ADMIN", "OPERATOR", "VIEWER"] }, schema: { tags: ["Tenant"], summary: "Retorna metricas de atendimento do dia corrente" } }, async (request) => app.tenantManagementService.getTodayMetrics(request.auth.tenantId ?? ""));
 
   app.get("/tenant/metrics/queue", { config: { auth: "tenant", tenantRoles: ["ADMIN", "OPERATOR"] }, schema: { tags: ["Tenant"], summary: "Retorna fila de atendimentos ativos ordenada por urgencia" } }, async (request) => app.tenantManagementService.getActiveQueue(request.auth.tenantId ?? ""));
+
+  // GET /tenant/action-history?limit=N
+  // Returns AdminActionLog rows for the requesting tenant, ordered by createdAt DESC
+  app.get("/tenant/action-history", {
+    config: { auth: "tenant", tenantRoles: ["ADMIN", "OPERATOR", "VIEWER"] },
+    schema: {
+      tags: ["Tenant"],
+      summary: "Retorna historico de acoes administrativas do tenant",
+      querystring: {
+        type: "object",
+        properties: { limit: { type: "integer", default: 100, maximum: 500 } },
+      },
+    },
+  }, async (request) => {
+    const tenantId = request.auth.tenantId ?? "";
+    const { limit = 100 } = request.query as { limit?: number };
+    const db = await app.tenantPrismaRegistry.getClient(tenantId);
+    const schema = resolveTenantSchemaName(tenantId);
+    const rows = await db.$queryRawUnsafe<AdminActionLogEntry[]>(
+      `SELECT id, "triggeredByJid", "actionType", "targetContactJid", "documentName", "messageText", "deliveryStatus", "createdAt"
+       FROM "${schema}"."AdminActionLog"
+       ORDER BY "createdAt" DESC
+       LIMIT $1`,
+      limit
+    );
+    return rows;
+  });
 };

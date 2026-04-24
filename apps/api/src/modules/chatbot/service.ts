@@ -35,6 +35,8 @@ import { chatbotAiConfigSchema, chatbotRuleSchema, googleCalendarModuleSchema, u
 import { GoogleCalendarTool } from "./tools/google-calendar.tool.js";
 import type { PlatformAlertService } from "../platform/alert.service.js";
 import type { KnowledgeService } from "./knowledge.service.js";
+import { ActiveAprendizadoContinuoModule, DisabledAprendizadoContinuoModule } from "../instances/aprendizado-continuo.disabled.js";
+import type { IAprendizadoContinuoModule } from "../instances/aprendizado-continuo.interface.js";
 
 interface ChatbotServiceDeps {
   config: AppConfig;
@@ -678,9 +680,12 @@ export class ChatbotService {
       } as Prisma.ChatbotConfigUncheckedUpdateInput
     });
 
-    const aprendizadoContinuoModule = getAprendizadoContinuoModuleConfig(preparedModules.modules);
+    const aprendizadoContinuoModuleRaw683 = getAprendizadoContinuoModuleConfig(preparedModules.modules);
+    const aprendizadoContinuoModule683: IAprendizadoContinuoModule = aprendizadoContinuoModuleRaw683?.isEnabled
+      ? new ActiveAprendizadoContinuoModule(aprendizadoContinuoModuleRaw683)
+      : new DisabledAprendizadoContinuoModule();
 
-    if (aprendizadoContinuoModule?.isEnabled !== true) {
+    if (!aprendizadoContinuoModule683.isEnabled()) {
       await prisma.conversation.updateMany({
         where: {
           instanceId,
@@ -1274,12 +1279,14 @@ private async evaluateConfig(
 
     traceSteps.push({ step: "ai_response", result: "no_match" });
 
-    const aprendizadoContinuoModule = getAprendizadoContinuoModuleConfig(config.modules);
+    const aprendizadoContinuoModuleRaw1282 = getAprendizadoContinuoModuleConfig(config.modules);
+    const aprendizadoContinuoModule1282: IAprendizadoContinuoModule = aprendizadoContinuoModuleRaw1282?.isEnabled
+      ? new ActiveAprendizadoContinuoModule(aprendizadoContinuoModuleRaw1282)
+      : new DisabledAprendizadoContinuoModule();
 
     if (
       normalizedInput &&
-      aprendizadoContinuoModule?.isEnabled === true &&
-      aprendizadoContinuoModule.verificationStatus === "VERIFIED" &&
+      aprendizadoContinuoModule1282.isVerified() &&
       this.isInstitutionalQuestion(input.text ?? "")
     ) {
       traceSteps.push({ step: "escalate_admin", result: "match", detail: "pergunta institucional sem resposta da IA" });
@@ -1303,7 +1310,7 @@ private async evaluateConfig(
       });
     }
 
-    if (normalizedInput && aprendizadoContinuoModule?.isEnabled !== true) {
+    if (normalizedInput && !aprendizadoContinuoModule1282.isEnabled()) {
       traceSteps.push({ step: "fallback", result: "match", detail: "aprendizadoContinuo desativado" });
       return withTrace({
         action: "FALLBACK",
@@ -1437,6 +1444,9 @@ private async evaluateConfig(
     const sanitizedExistingModules = sanitizeChatbotModules(existingModules);
     const sanitizedModules = sanitizeChatbotModules(nextModules ?? sanitizedExistingModules);
     const aprendizadoContinuoModule = getAprendizadoContinuoModuleConfig(sanitizedModules);
+    const aprendizadoModulePersist: IAprendizadoContinuoModule = aprendizadoContinuoModule?.isEnabled
+      ? new ActiveAprendizadoContinuoModule(aprendizadoContinuoModule)
+      : new DisabledAprendizadoContinuoModule();
 
     if (!aprendizadoContinuoModule) {
       return {
@@ -1445,7 +1455,7 @@ private async evaluateConfig(
       };
     }
 
-    if (!aprendizadoContinuoModule.isEnabled) {
+    if (!aprendizadoModulePersist.isEnabled()) {
       return {
         modules: sanitizeChatbotModules({
           ...sanitizedModules,
@@ -2164,17 +2174,15 @@ private async evaluateConfig(
       return null;
     }
 
-    const aprendizadoContinuoModule = getAprendizadoContinuoModuleConfig(config.modules);
+    const aprendizadoContinuoModuleRaw2177 = getAprendizadoContinuoModuleConfig(config.modules);
+    const aprendizadoContinuoModule2177: IAprendizadoContinuoModule = aprendizadoContinuoModuleRaw2177?.isEnabled
+      ? new ActiveAprendizadoContinuoModule(aprendizadoContinuoModuleRaw2177)
+      : new DisabledAprendizadoContinuoModule();
     const hasAdminPhone = !!(
-      aprendizadoContinuoModule?.verifiedPhone?.trim() ||
-      (aprendizadoContinuoModule?.verifiedPhones ?? []).some(Boolean) ||
-      (aprendizadoContinuoModule?.additionalAdminPhones ?? []).some(Boolean) ||
+      aprendizadoContinuoModule2177.getAdminPhones().length > 0 ||
       config.leadsPhoneNumber?.trim()
     );
-    const allowAdminEscalation =
-      aprendizadoContinuoModule?.isEnabled === true &&
-      aprendizadoContinuoModule.verificationStatus === "VERIFIED" &&
-      hasAdminPhone;
+    const allowAdminEscalation = aprendizadoContinuoModule2177.isVerified() && hasAdminPhone;
 
     if (
       !managedAiProvider.isConfigured ||

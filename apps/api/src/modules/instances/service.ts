@@ -59,6 +59,8 @@ import { AdminCommandHandler } from './admin-command.handler.js';
 import { DocumentDispatchService } from './document-dispatch.service.js';
 import { AdminActionLogService } from './admin-action-log.service.js';
 import { StatusQueryService } from './status-query.service.js';
+import { ActiveAprendizadoContinuoModule, DisabledAprendizadoContinuoModule } from './aprendizado-continuo.disabled.js';
+import type { IAprendizadoContinuoModule } from './aprendizado-continuo.interface.js';
 
 interface InstanceOrchestratorDeps {
   config: AppConfig;
@@ -1583,11 +1585,11 @@ if (event.status === "CONNECTED") {
     });
     const sanitizedModules = sanitizeChatbotModules(chatbotConfig?.modules);
     const aprendizadoContinuoModule = getAprendizadoContinuoModuleConfig(sanitizedModules);
+    const aprendizadoModuleAlias: IAprendizadoContinuoModule = aprendizadoContinuoModule?.isEnabled
+      ? new ActiveAprendizadoContinuoModule(aprendizadoContinuoModule)
+      : new DisabledAprendizadoContinuoModule();
 
-    if (
-      !aprendizadoContinuoModule?.isEnabled ||
-      aprendizadoContinuoModule.verificationStatus !== "VERIFIED"
-    ) {
+    if (!aprendizadoModuleAlias.isVerified()) {
       return;
     }
 
@@ -1598,19 +1600,11 @@ if (event.status === "CONNECTED") {
     ];
     const shouldLinkAlias =
       this.adminIdentityService.matchesAnyExpectedPhones(
-        [
-          aprendizadoContinuoModule.configuredAdminPhone,
-          aprendizadoContinuoModule.verifiedPhone,
-          ...aprendizadoContinuoModule.verifiedPhones,
-          ...(aprendizadoContinuoModule.additionalAdminPhones ?? [])
-        ],
+        aprendizadoModuleAlias.getAdminPhones(),
         candidatePhones
       ) ||
       this.adminIdentityService.matchesAnyExpectedJids(
-        [
-          ...aprendizadoContinuoModule.verifiedRemoteJids,
-          ...aprendizadoContinuoModule.verifiedSenderJids
-        ],
+        aprendizadoModuleAlias.getAdminJids(),
         [jid, lid]
       );
 
@@ -1674,11 +1668,14 @@ if (event.status === "CONNECTED") {
     contactFields: Record<string, unknown> | null;
   }): Promise<boolean> {
     const aprendizadoContinuoModule = getAprendizadoContinuoModuleConfig(params.chatbotConfigModules);
+    const aprendizadoModuleVerify: IAprendizadoContinuoModule = aprendizadoContinuoModule?.isEnabled
+      ? new ActiveAprendizadoContinuoModule(aprendizadoContinuoModule)
+      : new DisabledAprendizadoContinuoModule();
 
     if (
-      !aprendizadoContinuoModule?.isEnabled ||
-      aprendizadoContinuoModule.verificationStatus !== "PENDING" ||
-      !aprendizadoContinuoModule.pendingCode
+      !aprendizadoModuleVerify.isEnabled() ||
+      aprendizadoContinuoModule?.verificationStatus !== "PENDING" ||
+      !aprendizadoContinuoModule?.pendingCode
     ) {
       return false;
     }
@@ -2162,6 +2159,9 @@ if (event.status === "CONNECTED") {
       "Olá! Estou de volta para te ajudar. Como posso te atender?";
     const sanitizedChatbotModules = sanitizeChatbotModules(chatbotConfig?.modules);
     const aprendizadoContinuoModule = getAprendizadoContinuoModuleConfig(sanitizedChatbotModules);
+    const aprendizadoModule: IAprendizadoContinuoModule = aprendizadoContinuoModule?.isEnabled
+      ? new ActiveAprendizadoContinuoModule(aprendizadoContinuoModule)
+      : new DisabledAprendizadoContinuoModule();
     const senderJid = event.senderJid?.trim() || event.remoteJid;
     const senderNumber =
       normalizeWhatsAppPhoneNumber(senderJid) ??
@@ -2237,18 +2237,7 @@ if (event.status === "CONNECTED") {
       fromMe: event.messageKey?.fromMe,
       rawTextInput,
       adminCandidatePhones,
-      aprendizadoContinuoModule: aprendizadoContinuoModule
-        ? {
-            isEnabled: aprendizadoContinuoModule.isEnabled,
-            verificationStatus: aprendizadoContinuoModule.verificationStatus,
-            configuredAdminPhone: aprendizadoContinuoModule.configuredAdminPhone ?? null,
-            verifiedPhone: aprendizadoContinuoModule.verifiedPhone ?? null,
-            verifiedPhones: aprendizadoContinuoModule.verifiedPhones ?? [],
-            additionalAdminPhones: aprendizadoContinuoModule.additionalAdminPhones ?? null,
-            verifiedRemoteJids: aprendizadoContinuoModule.verifiedRemoteJids ?? [],
-            verifiedSenderJids: aprendizadoContinuoModule.verifiedSenderJids ?? []
-          }
-        : null,
+      aprendizadoContinuoModule: aprendizadoModule,
       instanceOwnPhone,
       contactPhoneNumber: contact.phoneNumber ?? null,
       sharedPhoneJid: typeof contactFields?.sharedPhoneJid === "string" ? contactFields.sharedPhoneJid : null,
@@ -2278,15 +2267,7 @@ if (event.status === "CONNECTED") {
     } = adminCtx;
     // matchedVerifiedAdminPhone: the verified admin phone that matched the sender (used for fallback/logging).
     // Computed once after service call for downstream usage.
-    const verifiedAdminPhonesForMatch =
-      aprendizadoContinuoModule?.isEnabled && aprendizadoContinuoModule.verificationStatus === "VERIFIED"
-        ? [
-            aprendizadoContinuoModule.configuredAdminPhone ?? null,
-            aprendizadoContinuoModule.verifiedPhone ?? null,
-            ...aprendizadoContinuoModule.verifiedPhones,
-            ...(aprendizadoContinuoModule.additionalAdminPhones ?? [])
-          ]
-        : [];
+    const verifiedAdminPhonesForMatch = aprendizadoModule.getAdminPhones();
     const matchedVerifiedAdminPhone = this.adminIdentityService.findMatchingExpectedPhone(
       verifiedAdminPhonesForMatch,
       adminSenderCandidates
@@ -2632,7 +2613,7 @@ if (event.status === "CONNECTED") {
 
     if (
       activeConversation.awaitingAdminResponse &&
-      aprendizadoContinuoModule?.isEnabled !== true
+      !aprendizadoModule.isEnabled()
     ) {
       await prisma.conversation.update({
         where: {
@@ -4668,10 +4649,11 @@ if (event.status === "CONNECTED") {
         return;
       }
 
-      const aprendizadoContinuoModule = getAprendizadoContinuoModuleConfig(params.chatbotConfig?.modules ?? undefined);
-      const allowAprendizadoContinuoEscalation =
-        aprendizadoContinuoModule?.isEnabled === true &&
-        aprendizadoContinuoModule.verificationStatus === "VERIFIED";
+      const aprendizadoContinuoModuleRaw = getAprendizadoContinuoModuleConfig(params.chatbotConfig?.modules ?? undefined);
+      const aprendizadoContinuoModule: IAprendizadoContinuoModule = aprendizadoContinuoModuleRaw?.isEnabled
+        ? new ActiveAprendizadoContinuoModule(aprendizadoContinuoModuleRaw)
+        : new DisabledAprendizadoContinuoModule();
+      const allowAprendizadoContinuoEscalation = aprendizadoContinuoModule.isVerified();
 
       if (!allowAprendizadoContinuoEscalation) {
         const fallbackText =
@@ -4701,9 +4683,7 @@ if (event.status === "CONNECTED") {
       this.appendConversationHistory(params.session, "assistant", pauseMessage);
 
       const adminPhone = this.resolveConfiguredPhone(
-        aprendizadoContinuoModule?.verifiedPhone ?? null,
-        ...(aprendizadoContinuoModule?.verifiedPhones ?? []),
-        ...(aprendizadoContinuoModule?.additionalAdminPhones ?? []),
+        ...aprendizadoContinuoModule.getAdminPhones(),
         params.chatbotConfig?.leadsPhoneNumber,
         platformConfig?.adminAlertPhone
       );
@@ -4796,16 +4776,15 @@ if (event.status === "CONNECTED") {
 
       // Part B — only if aprendizadoContinuo is enabled and verified (IA-04)
       // Source: existing ESCALATE_ADMIN pattern — same gate (T-5-10)
-      const aprendizadoContinuoModuleForFallback = getAprendizadoContinuoModuleConfig(params.chatbotConfig?.modules ?? undefined);
-      const shouldNotifyAdmin =
-        aprendizadoContinuoModuleForFallback?.isEnabled === true &&
-        aprendizadoContinuoModuleForFallback.verificationStatus === "VERIFIED";
+      const aprendizadoContinuoModuleForFallbackRaw = getAprendizadoContinuoModuleConfig(params.chatbotConfig?.modules ?? undefined);
+      const aprendizadoContinuoModuleForFallback: IAprendizadoContinuoModule = aprendizadoContinuoModuleForFallbackRaw?.isEnabled
+        ? new ActiveAprendizadoContinuoModule(aprendizadoContinuoModuleForFallbackRaw)
+        : new DisabledAprendizadoContinuoModule();
+      const shouldNotifyAdmin = aprendizadoContinuoModuleForFallback.isVerified();
 
       if (shouldNotifyAdmin) {
         const adminPhoneForFallback = this.resolveConfiguredPhone(
-          aprendizadoContinuoModuleForFallback?.verifiedPhone ?? null,
-          ...(aprendizadoContinuoModuleForFallback?.verifiedPhones ?? []),
-          ...(aprendizadoContinuoModuleForFallback?.additionalAdminPhones ?? []),
+          ...aprendizadoContinuoModuleForFallback.getAdminPhones(),
           params.chatbotConfig?.leadsPhoneNumber,
           platformConfig?.adminAlertPhone
         );

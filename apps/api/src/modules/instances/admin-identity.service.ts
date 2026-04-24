@@ -1,4 +1,5 @@
 import { normalizePhoneNumber } from "../../lib/phone.js";
+import type { IAprendizadoContinuoModule } from "./aprendizado-continuo.interface.js";
 
 export interface AdminIdentityContext {
   isAdmin: boolean;
@@ -20,16 +21,7 @@ export interface AdminIdentityInput {
   fromMe: boolean | null | undefined;
   rawTextInput: string;
   adminCandidatePhones: Array<string | null>;
-  aprendizadoContinuoModule: {
-    isEnabled: boolean;
-    verificationStatus: string;
-    configuredAdminPhone?: string | null;
-    verifiedPhone?: string | null;
-    verifiedPhones: string[];
-    additionalAdminPhones?: string[] | null;
-    verifiedRemoteJids: string[];
-    verifiedSenderJids: string[];
-  } | null;
+  aprendizadoContinuoModule: IAprendizadoContinuoModule | null;
   instanceOwnPhone: string | null;
   contactPhoneNumber: string | null;
   sharedPhoneJid: string | null;
@@ -70,23 +62,11 @@ export class AdminIdentityService {
       senderJid
     } = input;
 
-    const verifiedAdminPhones: Array<string | null> =
-      aprendizadoContinuoModule?.isEnabled && aprendizadoContinuoModule.verificationStatus === "VERIFIED"
-        ? [
-            aprendizadoContinuoModule.configuredAdminPhone ?? null,
-            aprendizadoContinuoModule.verifiedPhone ?? null,
-            ...aprendizadoContinuoModule.verifiedPhones,
-            ...(aprendizadoContinuoModule.additionalAdminPhones ?? [])
-          ]
-        : [];
+    const verifiedAdminPhones: string[] =
+      aprendizadoContinuoModule?.getAdminPhones() ?? [];
 
-    const verifiedAdminJids: Array<string | null> =
-      aprendizadoContinuoModule?.isEnabled && aprendizadoContinuoModule.verificationStatus === "VERIFIED"
-        ? [
-            ...aprendizadoContinuoModule.verifiedRemoteJids,
-            ...aprendizadoContinuoModule.verifiedSenderJids
-          ]
-        : [];
+    const verifiedAdminJids: string[] =
+      aprendizadoContinuoModule?.getAdminJids() ?? [];
 
     // LID resolution: if the remoteJid is a @lid JID and we have a Redis-cached admin JID,
     // check if they match. If so, inject the primary admin phone as a synthetic candidate.

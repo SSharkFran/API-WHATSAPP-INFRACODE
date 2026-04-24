@@ -1,6 +1,7 @@
 import type { InstanceEventBus, AdminCommandEvent, InstanceDomainEvent } from '../../lib/instance-events.js';
 import type { AdminCommandService } from '../chatbot/admin-command.service.js';
 import type { AdminActionLogEntry } from './admin-action-log.service.js';
+import type { StatusSnapshot } from './status-query.service.js';
 
 // Minimal logger interface — compatible with pino.Logger and console-wrapper shims
 export interface AdminCommandHandlerLogger {
@@ -31,6 +32,11 @@ export interface AdminCommandHandlerDeps {
   };
   actionLog: {
     write: (tenantId: string, entry: AdminActionLogEntry) => void;
+  };
+  statusQuery: {
+    getSnapshot: (tenantId: string, instanceId: string) => Promise<StatusSnapshot>;
+    formatStatusMessage: (snapshot: StatusSnapshot) => string;
+    formatResumoMessage: (snapshot: StatusSnapshot) => string;
   };
 }
 
@@ -104,11 +110,10 @@ export class AdminCommandHandler {
     });
   }
 
-  // Stub implementations — real bodies added in Plan 7.2 (document) and Plan 7.4 (status/resumo)
   protected async handleStatusCommand(event: AdminCommandEvent): Promise<void> {
-    await this.makeSendResponse(event)(
-      'Status: comando /status será implementado no Plano 7.4.'
-    );
+    const snapshot = await this.deps.statusQuery.getSnapshot(event.tenantId, event.instanceId);
+    const message = this.deps.statusQuery.formatStatusMessage(snapshot);
+    await this.makeSendResponse(event)(message);
     this.deps.actionLog.write(event.tenantId, {
       triggeredByJid: event.fromJid,
       actionType: 'status_query',
@@ -117,9 +122,9 @@ export class AdminCommandHandler {
   }
 
   protected async handleResumoCommand(event: AdminCommandEvent): Promise<void> {
-    await this.makeSendResponse(event)(
-      'Resumo: comando /resumo será implementado no Plano 7.4.'
-    );
+    const snapshot = await this.deps.statusQuery.getSnapshot(event.tenantId, event.instanceId);
+    const message = this.deps.statusQuery.formatResumoMessage(snapshot);
+    await this.makeSendResponse(event)(message);
     this.deps.actionLog.write(event.tenantId, {
       triggeredByJid: event.fromJid,
       actionType: 'metrics_query',

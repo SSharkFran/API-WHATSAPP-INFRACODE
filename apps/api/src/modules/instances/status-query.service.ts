@@ -10,7 +10,7 @@ export interface StatusSnapshot {
 
 export interface StatusQueryDeps {
   logger: pino.Logger;
-  getInstanceStatus: (instanceId: string) => 'connected' | 'disconnected' | 'unknown';
+  getInstanceStatus: (tenantId: string, instanceId: string) => 'connected' | 'disconnected' | 'unknown';
   getActiveSessionCount: (tenantId: string, instanceId: string) => Promise<number>;
   getTodayMessageCount: (tenantId: string, instanceId: string) => Promise<number>;
   getLastSummaryAt: (tenantId: string, instanceId: string) => Promise<Date | null>;
@@ -22,7 +22,7 @@ export class StatusQueryService {
   async getSnapshot(tenantId: string, instanceId: string): Promise<StatusSnapshot> {
     const [instanceStatus, activeSessionCount, todayMessageCount, lastSummaryAt] =
       await Promise.all([
-        Promise.resolve(this.deps.getInstanceStatus(instanceId)),
+        Promise.resolve(this.deps.getInstanceStatus(tenantId, instanceId)),
         this.deps.getActiveSessionCount(tenantId, instanceId).catch((err) => {
           this.deps.logger.warn({ err }, '[StatusQueryService] getActiveSessionCount failed');
           return 0;

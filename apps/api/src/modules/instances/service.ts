@@ -58,6 +58,7 @@ import { DailySummaryService } from './daily-summary.service.js';
 import { AdminCommandHandler } from './admin-command.handler.js';
 import { DocumentDispatchService } from './document-dispatch.service.js';
 import { AdminActionLogService } from './admin-action-log.service.js';
+import { StatusQueryService } from './status-query.service.js';
 
 interface InstanceOrchestratorDeps {
   config: AppConfig;
@@ -327,6 +328,38 @@ export class InstanceOrchestrator {
       },
     });
 
+    const statusQueryService = new StatusQueryService({
+      logger: console as never,
+      getInstanceStatus: (tenantId, instanceId) => {
+        const key = buildWorkerKey(tenantId, instanceId);
+        const worker = this.workers.get(key);
+        const s = worker?.currentStatus;
+        if (s === 'CONNECTED') return 'connected';
+        if (s === 'DISCONNECTED') return 'disconnected';
+        return 'unknown';
+      },
+      getActiveSessionCount: async (tenantId, instanceId) => {
+        const prisma = await this.tenantPrismaRegistry.getClient(tenantId);
+        const count = await (prisma as unknown as { conversationSession: { count: (args: unknown) => Promise<number> } }).conversationSession.count({
+          where: { instanceId, endedAt: null },
+        });
+        return count;
+      },
+      getTodayMessageCount: async (tenantId, instanceId) => {
+        const prisma = await this.tenantPrismaRegistry.getClient(tenantId);
+        const hoje = new Date();
+        hoje.setHours(0, 0, 0, 0);
+        const count = await prisma.conversation.count({
+          where: { instanceId, lastMessageAt: { gte: hoje } },
+        });
+        return count;
+      },
+      getLastSummaryAt: async (_tenantId, instanceId) => {
+        const raw = await this.redis.get(`instance:${instanceId}:last_summary_at`);
+        return raw ? new Date(raw) : null;
+      },
+    });
+
     this.adminCommandHandler = new AdminCommandHandler({
       eventBus: this.eventBus,
       adminCommandService: this.adminCommandService,
@@ -347,6 +380,7 @@ export class InstanceOrchestrator {
       actionLog: {
         write: (tenantId, entry) => adminActionLogService.write(tenantId, entry),
       },
+      statusQuery: statusQueryService,
     });
   }
 

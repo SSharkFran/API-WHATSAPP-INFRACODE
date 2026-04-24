@@ -55,6 +55,8 @@ import { recognizeCloseIntent } from '../../lib/session-intents.js';
 import { classifyIntent } from '../../lib/intent-classifier.service.js';
 import type { AiCaller } from '../chatbot/agents/types.js';
 import { DailySummaryService } from './daily-summary.service.js';
+import { AdminCommandHandler } from './admin-command.handler.js';
+import { DocumentDispatchService } from './document-dispatch.service.js';
 
 interface InstanceOrchestratorDeps {
   config: AppConfig;
@@ -251,6 +253,7 @@ export class InstanceOrchestrator {
   private readonly clientMemoryService: ClientMemoryService;
   private readonly adminMemoryService: AdminMemoryService;
   private readonly adminCommandService: AdminCommandService;
+  private readonly adminCommandHandler: AdminCommandHandler;
   private readonly chatbotService: ChatbotService;
   private readonly memoryAgent: MemoryAgent;
   private readonly conversationAgent: ConversationAgent;
@@ -302,6 +305,38 @@ export class InstanceOrchestrator {
     this.lidReconciliationQueue = deps.lidReconciliationQueue;
     this.dailySummaryService = deps.dailySummaryService;
     this.eventBus = deps.eventBus ?? new InstanceEventBus();
+
+    const documentDispatchService = new DocumentDispatchService({
+      eventBus: this.eventBus,
+      logger: console as never,
+      dataDir: this.config.DATA_DIR ?? process.cwd(),
+      getTenantDb: (tid) => this.tenantPrismaRegistry.getClient(tid) as never,
+      sendMessage: async (tid, iid, payload) => { await this.sendMessage(tid, iid, payload as never); },
+      getDocumentTemplates: async (tid, iid) => {
+        const prisma = await this.tenantPrismaRegistry.getClient(tid);
+        const cfg = await prisma.chatbotConfig.findFirst({ where: { instanceId: iid } });
+        return (cfg?.modules as { documentDispatch?: { templates?: Array<{ name: string; filePath: string; caption?: string }> } } | undefined)?.documentDispatch?.templates ?? [];
+      },
+    });
+
+    this.adminCommandHandler = new AdminCommandHandler({
+      eventBus: this.eventBus,
+      adminCommandService: this.adminCommandService,
+      sendAutomatedTextMessage: this.sendAutomatedTextMessage.bind(this),
+      logger: {
+        warn: (objOrMsg: Record<string, unknown> | string, msg?: string) => {
+          if (typeof objOrMsg === 'string') {
+            console.warn('[AdminCommandHandler]', objOrMsg);
+          } else {
+            console.warn('[AdminCommandHandler]', msg, objOrMsg);
+          }
+        },
+      },
+      documentDispatch: {
+        dispatch: (ev, docType, name, sendResp) =>
+          documentDispatchService.dispatch(ev, docType, name, sendResp),
+      },
+    });
   }
 
   public setPlatformAlertService(service: PlatformAlertService): void {

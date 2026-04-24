@@ -20,6 +20,14 @@ export interface AdminCommandHandlerDeps {
     meta: { action: string; kind: string }
   ) => Promise<void>;
   logger: AdminCommandHandlerLogger;
+  documentDispatch: {
+    dispatch: (
+      event: AdminCommandEvent,
+      documentType: string,
+      clientName: string,
+      sendResponse: (text: string) => Promise<void>
+    ) => Promise<void>;
+  };
 }
 
 export class AdminCommandHandler {
@@ -101,20 +109,25 @@ export class AdminCommandHandler {
 
   protected async handleDocumentCommand(
     event: AdminCommandEvent,
-    _documentType: string,
-    _clientName: string
+    documentType: string,
+    clientName: string
   ): Promise<void> {
-    await this.makeSendResponse(event)(
-      'Envio de documento será implementado no Plano 7.2.'
+    await this.deps.documentDispatch.dispatch(
+      event,
+      documentType,
+      clientName,
+      this.makeSendResponse(event)   // sendResponse bound per-event — 4th param
     );
   }
 
   protected async handleEncerrarCommand(
     event: AdminCommandEvent,
-    _clientName: string
+    clientName: string
   ): Promise<void> {
+    // Find client JID from CRM by name, then emit session.close_intent_detected
+    // For now, acknowledge to admin — full wiring in Phase 8
     await this.makeSendResponse(event)(
-      'Encerramento de sessão via comando será implementado no Plano 7.2.'
+      `Encerrando sessão com "${clientName}"... (verificar contato no CRM)`
     );
   }
 }

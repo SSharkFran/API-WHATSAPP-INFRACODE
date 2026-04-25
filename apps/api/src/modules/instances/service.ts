@@ -64,6 +64,7 @@ import type { IAprendizadoContinuoModule } from './aprendizado-continuo.interfac
 
 interface InstanceOrchestratorDeps {
   config: AppConfig;
+  logger: import('pino').Logger;
   platformPrisma: PlatformPrisma;
   tenantPrismaRegistry: TenantPrismaRegistry;
   redis: IORedis;
@@ -335,7 +336,7 @@ export class InstanceOrchestrator {
 
     const documentDispatchService = new DocumentDispatchService({
       eventBus: this.eventBus,
-      logger: console as never,
+      logger: deps.logger,
       dataDir: this.config.DATA_DIR ?? process.cwd(),
       getTenantDb: (tid) => this.tenantPrismaRegistry.getClient(tid) as never,
       sendMessage: async (tid, iid, payload) => { await this.sendMessage(tid, iid, payload as never); },
@@ -347,14 +348,14 @@ export class InstanceOrchestrator {
     });
 
     const adminActionLogService = new AdminActionLogService({
-      logger: console as never,
+      logger: deps.logger,
       tenantPrismaRegistry: {
         getClient: (tid) => this.tenantPrismaRegistry.getClient(tid) as never,
       },
     });
 
     const statusQueryService = new StatusQueryService({
-      logger: console as never,
+      logger: deps.logger,
       getInstanceStatus: (tenantId, instanceId) => {
         const key = buildWorkerKey(tenantId, instanceId);
         const worker = this.workers.get(key);

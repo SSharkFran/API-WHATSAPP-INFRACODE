@@ -171,6 +171,7 @@ export const buildApp = async () => {
   });
   instanceOrchestrator = new InstanceOrchestrator({
     config,
+    logger,
     metricsService,
     platformPrisma,
     tenantPrismaRegistry,

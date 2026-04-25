@@ -24,7 +24,7 @@ export interface AprendizadoContinuoConfig {
   isEnabled: boolean;
   verificationStatus: "UNVERIFIED" | "PENDING" | "VERIFIED";
   configuredAdminPhone?: string | null;
-  verifiedPhone: string | null;
+  verifiedPhone?: string | null;
   verifiedPhones: string[];
   verifiedRemoteJids: string[];
   verifiedSenderJids: string[];

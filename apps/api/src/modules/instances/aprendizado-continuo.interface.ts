@@ -23,7 +23,7 @@ export interface IAprendizadoContinuoModule {
 export interface AprendizadoContinuoConfig {
   isEnabled: boolean;
   verificationStatus: "UNVERIFIED" | "PENDING" | "VERIFIED";
-  configuredAdminPhone: string | null;
+  configuredAdminPhone?: string | null;
   verifiedPhone: string | null;
   verifiedPhones: string[];
   verifiedRemoteJids: string[];

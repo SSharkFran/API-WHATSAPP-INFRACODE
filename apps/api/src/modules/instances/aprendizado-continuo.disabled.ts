@@ -5,9 +5,9 @@ export class DisabledAprendizadoContinuoModule implements IAprendizadoContinuoMo
   isVerified(): boolean { return false; }
   getAdminPhones(): string[] { return []; }
   getAdminJids(): string[] { return []; }
-  async processLearningReply(): Promise<null> { return null; }
-  shouldSendDailySummary(): boolean { return false; }
-  async buildDailySummary(): Promise<string> { return ''; }
+  async processLearningReply(_tenantId?: string, _instanceId?: string, _answer?: string): Promise<null> { return null; }
+  shouldSendDailySummary(_tenantId?: string, _instanceId?: string): boolean { return false; }
+  async buildDailySummary(_tenantId?: string, _instanceId?: string): Promise<string> { return ''; }
   getConfig(): null { return null; }
 }
 

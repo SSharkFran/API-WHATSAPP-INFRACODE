@@ -1615,27 +1615,27 @@ if (event.status === "CONNECTED") {
     const updatedModules = sanitizeChatbotModules({
       ...sanitizedModules,
       aprendizadoContinuo: {
-        ...aprendizadoContinuoModule,
+        ...aprendizadoContinuoModule!,
         verifiedPhone:
-          aprendizadoContinuoModule.verifiedPhone ??
+          aprendizadoContinuoModule!.verifiedPhone ??
           normalizeWhatsAppPhoneNumber(jid) ??
-          aprendizadoContinuoModule.configuredAdminPhone,
+          aprendizadoContinuoModule!.configuredAdminPhone,
         verifiedPhones: this.appendUniqueStrings(
           [
-            ...aprendizadoContinuoModule.verifiedPhones,
-            aprendizadoContinuoModule.configuredAdminPhone,
-            aprendizadoContinuoModule.verifiedPhone,
+            ...aprendizadoContinuoModule!.verifiedPhones,
+            aprendizadoContinuoModule!.configuredAdminPhone,
+            aprendizadoContinuoModule!.verifiedPhone,
             ...candidatePhones
           ],
           (value) => normalizePhoneNumber(value)
         ),
         verifiedRemoteJids: this.appendUniqueStrings([
-          ...aprendizadoContinuoModule.verifiedRemoteJids,
+          ...aprendizadoContinuoModule!.verifiedRemoteJids,
           jid,
           lid
         ]),
         verifiedSenderJids: this.appendUniqueStrings([
-          ...aprendizadoContinuoModule.verifiedSenderJids,
+          ...aprendizadoContinuoModule!.verifiedSenderJids,
           jid,
           lid
         ])

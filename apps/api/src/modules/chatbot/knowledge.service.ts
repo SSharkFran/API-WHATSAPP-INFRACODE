@@ -64,6 +64,8 @@ export interface LearnedKnowledge {
   rawAnswer: string | null;
   taughtBy: string | null;
   createdAt: string;
+  confirmedAt: string | null;
+  confirmedByJid: string | null;
 }
 
 export class KnowledgeService {
@@ -77,6 +79,7 @@ export class KnowledgeService {
    * Salva conhecimento aprendido do admin.
    * Se ja existir uma pergunta semanticamente equivalente (similaridade >= 0.55),
    * atualiza a resposta em vez de criar um registro duplicado.
+   * confirmedAt e confirmedByJid sao audit fields do gate de confirmacao (APR-05).
    */
   public async save(
     tenantId: string,
@@ -84,7 +87,9 @@ export class KnowledgeService {
     question: string,
     answer: string,
     rawAnswer: string,
-    taughtBy: string
+    taughtBy: string,
+    confirmedAt?: Date | null,
+    confirmedByJid?: string | null
   ): Promise<LearnedKnowledge> {
     const prisma = await this.tenantPrismaRegistry.getClient(tenantId);
 
@@ -114,7 +119,9 @@ export class KnowledgeService {
         data: {
           answer: answer.trim(),
           rawAnswer: rawAnswer.trim(),
-          taughtBy
+          taughtBy,
+          ...(confirmedAt !== undefined ? { confirmedAt: confirmedAt ?? null } : {}),
+          ...(confirmedByJid !== undefined ? { confirmedByJid: confirmedByJid ?? null } : {})
         }
       });
       return this.mapRecord(updated);
@@ -127,7 +134,9 @@ export class KnowledgeService {
         question: question.trim(),
         answer: answer.trim(),
         rawAnswer: rawAnswer.trim(),
-        taughtBy
+        taughtBy,
+        confirmedAt: confirmedAt ?? null,
+        confirmedByJid: confirmedByJid ?? null
       }
     });
 
@@ -264,6 +273,8 @@ export class KnowledgeService {
     taughtBy: string | null;
     createdAt: Date;
     updatedAt?: Date;
+    confirmedAt?: Date | null;
+    confirmedByJid?: string | null;
   }): LearnedKnowledge {
     return {
       id: record.id,
@@ -272,7 +283,9 @@ export class KnowledgeService {
       answer: record.answer,
       rawAnswer: record.rawAnswer,
       taughtBy: record.taughtBy,
-      createdAt: record.createdAt.toISOString()
+      createdAt: record.createdAt.toISOString(),
+      confirmedAt: record.confirmedAt ? record.confirmedAt.toISOString() : null,
+      confirmedByJid: record.confirmedByJid ?? null
     };
   }
 }

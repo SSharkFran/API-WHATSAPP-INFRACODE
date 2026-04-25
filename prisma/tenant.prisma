@@ -227,14 +227,16 @@ model ClientMemory {
 }
 
 model TenantKnowledge {
-  id         String   @id @default(cuid())
-  instanceId String
-  question   String
-  answer     String
-  rawAnswer  String?
-  taughtBy   String?
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  id             String    @id @default(cuid())
+  instanceId     String
+  question       String
+  answer         String
+  rawAnswer      String?
+  taughtBy       String?
+  confirmedAt    DateTime?
+  confirmedByJid String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
 
   instance   Instance @relation(fields: [instanceId], references: [id], onDelete: Cascade)
 

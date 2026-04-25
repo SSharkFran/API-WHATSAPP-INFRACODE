@@ -272,6 +272,41 @@ export const MIGRATIONS: Migration[] = [
     description: "Make phoneNumber nullable on Contact table to support @lid-only contacts",
     sql: (schema) =>
       `ALTER TABLE ${quoteSchema(schema)}."Contact" ALTER COLUMN "phoneNumber" DROP NOT NULL;`
+  },
+  {
+    version: "2026-04-20-042-admin-action-log",
+    description: "Create AdminActionLog table for Phase 7 audit trail",
+    sql: (schema) => `
+      CREATE TABLE IF NOT EXISTS ${quoteSchema(schema)}."AdminActionLog" (
+        "id" TEXT PRIMARY KEY,
+        "triggeredByJid" TEXT NOT NULL,
+        "actionType" TEXT NOT NULL,
+        "targetContactJid" TEXT,
+        "documentName" TEXT,
+        "messageText" TEXT,
+        "deliveryStatus" TEXT NOT NULL DEFAULT 'pending',
+        "createdAt" TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+    `
+  },
+  {
+    version: "2026-04-20-043-admin-action-log-index",
+    description: "Index AdminActionLog by createdAt DESC for panel queries",
+    sql: (schema) =>
+      `CREATE INDEX IF NOT EXISTS "idx_${schema}_admin_action_log_created"
+       ON ${quoteSchema(schema)}."AdminActionLog" ("createdAt" DESC);`
+  },
+  {
+    version: "2026-04-24-044-knowledge-confirmed-at",
+    description: "Add confirmedAt column to TenantKnowledge for APR-05 audit trail",
+    sql: (schema) =>
+      `ALTER TABLE ${quoteSchema(schema)}."TenantKnowledge" ADD COLUMN IF NOT EXISTS "confirmedAt" TIMESTAMPTZ;`
+  },
+  {
+    version: "2026-04-24-045-knowledge-confirmed-by-jid",
+    description: "Add confirmedByJid column to TenantKnowledge for APR-05 audit trail",
+    sql: (schema) =>
+      `ALTER TABLE ${quoteSchema(schema)}."TenantKnowledge" ADD COLUMN IF NOT EXISTS "confirmedByJid" TEXT;`
   }
 ];
 

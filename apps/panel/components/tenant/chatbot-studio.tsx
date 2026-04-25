@@ -287,7 +287,7 @@ export const ChatbotStudio = ({ initialInstances }: ChatbotStudioProps) => {
   const [activeTab, setActiveTab] = useState<StudioTab>("geral");
   const [selectedModuleConfigKey, setSelectedModuleConfigKey] = useState<ChatbotModuleKey | null>(null);
   // Conhecimento aprendido
-  const [knowledgeList, setKnowledgeList] = useState<Array<{ id: string; question: string; answer: string; taughtBy: string | null; createdAt: string }>>([]);
+  const [knowledgeList, setKnowledgeList] = useState<Array<{ id: string; question: string; answer: string; taughtBy: string | null; createdAt: string; confirmedAt: string | null; confirmedByJid: string | null }>>([]);
   const [knowledgeLoading, setKnowledgeLoading] = useState(false);
   const [editingKnowledgeId, setEditingKnowledgeId] = useState<string | null>(null);
   const [editingAnswer, setEditingAnswer] = useState("");
@@ -1553,9 +1553,19 @@ export const ChatbotStudio = ({ initialInstances }: ChatbotStudioProps) => {
                           {k.answer}
                         </p>
                       )}
-                      <div className="flex gap-3 text-[10px] text-[var(--text-tertiary)] font-mono">
+                      <div className="flex flex-wrap gap-3 text-[10px] text-[var(--text-tertiary)] font-mono">
                         <span>por: {k.taughtBy ?? "sistema"}</span>
                         <span>{new Date(k.createdAt).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
+                        {k.confirmedByJid && (
+                          <span className="text-[var(--text-tertiary)]">
+                            confirmado por: {k.confirmedByJid.replace(/@s\.whatsapp\.net$/, '')}
+                          </span>
+                        )}
+                        {k.confirmedAt && (
+                          <span className="text-[var(--text-tertiary)]">
+                            em: {new Date(k.confirmedAt).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" })}
+                          </span>
+                        )}
                       </div>
                     </div>
                   ))}

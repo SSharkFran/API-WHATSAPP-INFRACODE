@@ -366,6 +366,8 @@ export class EscalationService {
                 entry.question,
                 entry.synthesizedAnswer,
                 entry.rawAnswer,
+                entry.adminJid,
+                new Date(),
                 entry.adminJid
               );
               void this.webhookService?.enqueueEvent({
@@ -1174,21 +1176,6 @@ export class EscalationService {
     }
   }
 
-  private scheduleEscalationRetry(ctx: EscalationContext, retryDelayMs = 10 * 60 * 1000): void {
-    const existing = this.escalationRetryMap.get(ctx.conversationId);
-    if (existing) {
-      clearTimeout(existing.timer);
-    }
-
-    const timer = setTimeout(() => {
-      this.escalationRetryMap.delete(ctx.conversationId);
-      void this.sendEscalationReminder(ctx);
-    }, retryDelayMs);
-
-    timer.unref?.();
-    this.escalationRetryMap.set(ctx.conversationId, { timer, ctx });
-  }
-
   /**
    * Recupera escalacoes cujo TTL Redis de 4 horas expirou (Pitfall 3 — restart do servidor).
    * Marca as conversas como nao respondidas se a chave escalation:window nao existir mais.
@@ -1229,6 +1216,21 @@ export class EscalationService {
     }
 
     return expiredCount;
+  }
+
+  private scheduleEscalationRetry(ctx: EscalationContext, retryDelayMs = 10 * 60 * 1000): void {
+    const existing = this.escalationRetryMap.get(ctx.conversationId);
+    if (existing) {
+      clearTimeout(existing.timer);
+    }
+
+    const timer = setTimeout(() => {
+      this.escalationRetryMap.delete(ctx.conversationId);
+      void this.sendEscalationReminder(ctx);
+    }, retryDelayMs);
+
+    timer.unref?.();
+    this.escalationRetryMap.set(ctx.conversationId, { timer, ctx });
   }
 
   private async sendEscalationReminder(ctx: EscalationContext): Promise<void> {

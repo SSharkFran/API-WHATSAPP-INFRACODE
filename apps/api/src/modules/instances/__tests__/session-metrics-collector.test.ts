@@ -134,7 +134,8 @@ describe("SessionMetricsCollector", () => {
     expect(prismaMock.$executeRawUnsafe).toHaveBeenCalledOnce();
     const [sql, ...params] = prismaMock.$executeRawUnsafe.mock.calls[0] as [string, ...unknown[]];
     expect(sql).toContain('"documentCount"');
-    expect(sql).toContain('"documentCount" + 1');
+    // SQL uses COALESCE to handle NULL gracefully: COALESCE("documentCount", 0) + 1
+    expect(sql).toMatch(/COALESCE\("documentCount",\s*0\)\s*\+\s*1|"documentCount"\s*\+\s*1/);
     expect(sql).toContain('"id"');
     expect(params).toContain(SESSION_ID);
   });
@@ -189,5 +190,34 @@ describe("SessionMetricsCollector", () => {
 });
 
 describe("SessionMetricsCollector — urgency_detected (URG-01)", () => {
-  it.todo("session.urgency_detected event writes urgencyScore to ConversationSession DB row via $executeRawUnsafe");
+  it("session.urgency_detected event writes urgencyScore to ConversationSession DB row via $executeRawUnsafe", async () => {
+    const prismaMock = makePrismaMock();
+    const tenantPrismaRegistry = makeTenantPrismaRegistryMock(prismaMock);
+    const logger = makeLoggerMock();
+    const eventBus = makeEventBusMock();
+
+    // Instantiate collector — subscribes to all events in constructor
+    new SessionMetricsCollector({
+      eventBus: eventBus as any,
+      tenantPrismaRegistry: tenantPrismaRegistry as any,
+      logger: logger as any,
+    });
+
+    eventBus.emit("session.urgency_detected", {
+      type: "session.urgency_detected",
+      tenantId: TENANT_ID,
+      instanceId: INSTANCE_ID,
+      remoteJid: REMOTE_JID,
+      sessionId: SESSION_ID,
+      urgencyScore: 95,
+    });
+
+    await flushSetImmediate();
+
+    expect(prismaMock.$executeRawUnsafe).toHaveBeenCalledOnce();
+    const [sql, ...params] = prismaMock.$executeRawUnsafe.mock.calls[0] as [string, ...unknown[]];
+    expect(sql).toContain('"urgencyScore"');
+    expect(params).toContain(95);
+    expect(params).toContain(SESSION_ID);
+  });
 });

@@ -244,6 +244,29 @@ const resolveChatbotResponseDelayMs = (value?: number | null): number =>
   Math.min(60_000, Math.max(0, value ?? defaultChatbotResponseDelayMs));
 
 /**
+ * Computes an urgency score (0–100) for URGENCIA_ALTA intent classification.
+ * Base score: 80 for URGENCIA_ALTA.
+ * Keyword bonus: +15 if message contains urgency keywords (capped, applied once).
+ * Unanswered count bonus: +5 per unanswered message, capped at +20.
+ * Total capped at 100.
+ */
+function computeUrgencyScore(params: {
+  intentLabel: string;
+  messageText: string;
+  unansweredCount: number;
+}): number {
+  const base = params.intentLabel === 'URGENCIA_ALTA' ? 80 : 0;
+  const urgencyKeywords = ['urgente', 'urgência', 'urgencia', 'imediato', 'agora', 'preciso agora', 'hj', 'hoje'];
+  const normalized = params.messageText
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+  const keywordBonus = urgencyKeywords.some(k => normalized.includes(k)) ? 15 : 0;
+  const unansweredBonus = Math.min(params.unansweredCount * 5, 20);
+  return Math.min(base + keywordBonus + unansweredBonus, 100);
+}
+
+/**
  * Orquestra o ciclo de vida das instancias WhatsApp em workers isolados.
  */
 export class InstanceOrchestrator {
@@ -2347,20 +2370,25 @@ if (event.status === "CONNECTED") {
 
             // IA-02: URGENCIA_ALTA → emit session.urgency_detected + write urgencyScore to Redis
             if (classification.label === 'URGENCIA_ALTA') {
+              const urgencyScore = computeUrgencyScore({
+                intentLabel: 'URGENCIA_ALTA',
+                messageText: rawTextInput ?? '',
+                unansweredCount: 0, // unansweredCount not yet tracked in session hash; defaults to 0
+              });
               this.eventBus.emit('session.urgency_detected', {
                 type: 'session.urgency_detected',
                 tenantId,
                 instanceId: instance.id,
                 remoteJid: event.remoteJid,
                 sessionId: '',
-                urgencyScore: 80,
+                urgencyScore,
               });
               // Persist urgencyScore in Redis hash (T-5-08: validate JID before using as key component)
               const jidPattern = /^[^:@]+@(s\.whatsapp\.net|g\.us)$/;
               if (jidPattern.test(event.remoteJid)) {
                 this.redis.hset(
                   `session:${tenantId}:${instance.id}:${event.remoteJid}`,
-                  { urgencyScore: '80' }
+                  { urgencyScore: String(urgencyScore) }
                 ).catch((err: unknown) => console.warn('[intent] failed to set urgencyScore in Redis', err));
               }
             }

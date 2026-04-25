@@ -4,4 +4,5 @@ export const QUEUE_NAMES = {
   SESSION_TIMEOUT: "session-timeout",
   KNOWLEDGE_SYNTHESIS: "knowledge-synthesis",
   LID_RECONCILIATION: "lid-reconciliation",
+  FOLLOW_UP: "follow-up",
 } as const;

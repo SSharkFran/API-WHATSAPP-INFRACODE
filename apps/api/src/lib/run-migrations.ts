@@ -307,6 +307,29 @@ export const MIGRATIONS: Migration[] = [
     description: "Add confirmedByJid column to TenantKnowledge for APR-05 audit trail",
     sql: (schema) =>
       `ALTER TABLE ${quoteSchema(schema)}."TenantKnowledge" ADD COLUMN IF NOT EXISTS "confirmedByJid" TEXT;`
+  },
+  {
+    version: "2026-04-24-046-scheduled-follow-up",
+    description: "Create ScheduledFollowUp table for follow-up automation (FOL-01, FOL-02)",
+    sql: (schema) => `
+      CREATE TABLE IF NOT EXISTS ${quoteSchema(schema)}."ScheduledFollowUp" (
+        "id" TEXT PRIMARY KEY,
+        "instanceId" TEXT NOT NULL REFERENCES ${quoteSchema(schema)}."Instance"("id") ON DELETE CASCADE,
+        "contactJid" TEXT NOT NULL,
+        "message" TEXT NOT NULL,
+        "scheduledAt" TIMESTAMPTZ NOT NULL,
+        "status" TEXT NOT NULL DEFAULT 'pending',
+        "blockedReason" TEXT,
+        "bullmqJobId" TEXT,
+        "createdAt" TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+    `
+  },
+  {
+    version: "2026-04-24-047-scheduled-follow-up-index",
+    description: "Index ScheduledFollowUp by instanceId + status for queue queries",
+    sql: (schema) =>
+      `CREATE INDEX IF NOT EXISTS "idx_${schema.replace(/[^a-z0-9]/gi, '_')}_follow_up_instance_status" ON ${quoteSchema(schema)}."ScheduledFollowUp" ("instanceId", "status");`
   }
 ];
 

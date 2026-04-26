@@ -2989,6 +2989,14 @@ if (event.status === "CONNECTED") {
       return;
     }
 
+    // Mensagem manual fromMe (atendente no linked device ou bot respondendo) que passou
+    // pelo echo filter — limpar sessão e sair para evitar que inputs pendentes do cliente
+    // sejam processados enquanto o atendente está respondendo manualmente.
+    if (event.messageKey?.fromMe) {
+      this.sessionManager.clear(sessionKey);
+      return;
+    }
+
     const sessaoInatividadeModule = getSessaoInatividadeModuleConfig(sanitizedChatbotModules);
     const inactivityMs = sessaoInatividadeModule?.isEnabled === true
       ? sessaoInatividadeModule.horasInatividade * 60 * 60 * 1000

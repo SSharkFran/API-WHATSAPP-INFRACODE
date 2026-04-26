@@ -2989,10 +2989,20 @@ if (event.status === "CONNECTED") {
       return;
     }
 
-    // Mensagem manual fromMe (atendente no linked device ou bot respondendo) que passou
-    // pelo echo filter — limpar sessão e sair para evitar que inputs pendentes do cliente
-    // sejam processados enquanto o atendente está respondendo manualmente.
-    if (event.messageKey?.fromMe) {
+    // Mensagem manual fromMe (atendente no linked device) — ativa human takeover
+    // e limpa sessão. O DB update garante que isConversationAiBlocked() dentro de
+    // qualquer processConversationTurn já em andamento retorne true antes de enviar.
+    if (event.messageKey?.fromMe && !isControlCommand) {
+      console.log("[fromMe-takeover] mensagem manual do atendente detectada", {
+        remoteJid: event.remoteJid,
+        humanTakeover: activeConversation.humanTakeover
+      });
+      if (!activeConversation.humanTakeover && !activeConversation.aiDisabledPermanent) {
+        await prisma.conversation.update({
+          where: { id: activeConversation.id },
+          data: { humanTakeover: true, humanTakeoverAt: new Date() } as Prisma.ConversationUncheckedUpdateInput
+        }).catch(() => null);
+      }
       this.sessionManager.clear(sessionKey);
       return;
     }

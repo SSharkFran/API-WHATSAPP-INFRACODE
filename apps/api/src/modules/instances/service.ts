@@ -2484,16 +2484,6 @@ if (event.status === "CONNECTED") {
       }
     }
 
-    // fromMe=true = mensagem enviada do linked device do atendente — não processar como admin command
-    if (isAdminOrInstanceSender && !event.messageKey?.fromMe) {
-      this.eventBus.emit('admin.command', {
-        type: 'admin.command',
-        tenantId,
-        instanceId: instance.id,
-        command: rawTextInput,
-        fromJid: event.remoteJid,
-      });
-    }
 
     const conversation = await prisma.conversation.findFirst({
       where: {
@@ -2701,6 +2691,18 @@ if (event.status === "CONNECTED") {
     const hasPendingEscalationsForAdminBypass = canProcessAprendizadoContinuoReply
       ? await this.escalationService.hasPendingEscalations(tenantId, instance.id)
       : false;
+
+    // Emite admin.command aqui (após verificar escalações pendentes) para evitar que
+    // respostas de aprendizado contínuo disparem o handler de comandos em paralelo.
+    if (isAdminOrInstanceSender && !event.messageKey?.fromMe && !hasPendingEscalationsForAdminBypass) {
+      this.eventBus.emit('admin.command', {
+        type: 'admin.command',
+        tenantId,
+        instanceId: instance.id,
+        command: rawTextInput,
+        fromJid: event.remoteJid,
+      });
+    }
 
     if (isAdminOrInstanceSender && isPermanentDisableCommand) {
       this.sessionManager.clear(sessionKey);

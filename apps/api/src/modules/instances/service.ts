@@ -2484,7 +2484,8 @@ if (event.status === "CONNECTED") {
       }
     }
 
-    if (isAdminOrInstanceSender) {
+    // fromMe=true = mensagem enviada do linked device do atendente — não processar como admin command
+    if (isAdminOrInstanceSender && !event.messageKey?.fromMe) {
       this.eventBus.emit('admin.command', {
         type: 'admin.command',
         tenantId,

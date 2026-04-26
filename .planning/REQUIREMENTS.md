@@ -73,7 +73,7 @@
 
 - [ ] **DOC-01**: Chatbot pode enviar documentos (PDF, contrato, proposta) durante fluxo automatizado
 - [ ] **DOC-02**: Envio via Baileys com `mimetype: 'application/pdf'` explícito e `fileName` definido
-- [ ] **DOC-03**: Arquivo referenciado por URL — não buffer em memória para arquivos grandes
+- [ ] **DOC-03**: Arquivo enviado via base64 com gate de 5 MB antes de readFile() — Baileys não suporta file:// URLs locais
 - [ ] **DOC-04**: Tamanho máximo respeitado: alerta se arquivo > 5 MB antes de enviar
 
 ### Aprendizado Contínuo — Polimento

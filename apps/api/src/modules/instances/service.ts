@@ -3475,61 +3475,24 @@ if (event.status === "CONNECTED") {
         }
       }
 
-      // Comando livre do admin verificado — não é reply de aprendizado nem correção
-      if (finalInputText && isVerifiedAprendizadoContinuoAdminSender) {
-        const handled = await this.adminCommandService.handleCommand({
-          tenantId,
-          instanceId: instance.id,
-          text: finalInputText,
-          adminPhone: remoteNumber,
-          sendResponse: async (text) => {
-            await this.sendAutomatedTextMessage(
-              tenantId,
-              instance.id,
-              remoteNumber,
-              event.remoteJid,
-              text,
-              { action: "admin_command_response", kind: "chatbot" }
-            );
-          },
-          sendMessageToClient: async (jid, normalizedPhone, text) => {
-            try {
-              await this.sendAutomatedTextMessage(
-                tenantId,
-                instance.id,
-                normalizedPhone,
-                jid,
-                text,
-                { action: "admin_command_send_client", kind: "chatbot" }
-              );
-              return true;
-            } catch {
-              return false;
-            }
-          }
-        });
-        if (handled) return;
-
-        // PENDING_REVIEW: verifica se admin esta corrigindo conhecimento recem-aprendido
-        if (finalInputText && resolvedContactNumber) {
-          const correctionConsumed = await this.escalationService.consumePendingKnowledgeCorrection(
+      // Verifica janela de correção de conhecimento pendente (admin free-text, sem comando reconhecido)
+      if (finalInputText && isVerifiedAprendizadoContinuoAdminSender && resolvedContactNumber) {
+        const correctionConsumed = await this.escalationService.consumePendingKnowledgeCorrection(
+          instance.id,
+          resolvedContactNumber,
+          finalInputText
+        );
+        if (correctionConsumed) {
+          await this.sendAutomatedTextMessage(
+            tenantId,
             instance.id,
-            resolvedContactNumber,
-            finalInputText
+            remoteNumber,
+            event.remoteJid,
+            "Conhecimento atualizado!",
+            { action: "admin_knowledge_correction_ack", kind: "chatbot" }
           );
-          if (correctionConsumed) {
-            await this.sendAutomatedTextMessage(
-              tenantId,
-              instance.id,
-              remoteNumber,
-              event.remoteJid,
-              "Conhecimento atualizado!",
-              { action: "admin_knowledge_correction_ack", kind: "chatbot" }
-            );
-            return;
-          }
+          return;
         }
-
       }
 
       if (finalInputText && activeConversation.awaitingAdminResponse && !canProcessAprendizadoContinuoReply) {
@@ -3638,25 +3601,27 @@ if (event.status === "CONNECTED") {
         }
       }
 
-      this.queueConversationTurn(session, finalInputText, {
-        tenantId,
-        instance,
-        targetJid: event.remoteJid,
-        remoteNumber,
-        resolvedContactNumber,
-        contactPhoneNumber: contact.phoneNumber ?? remoteNumber,
-        contactDisplayName: contact.displayName ?? null,
-        contactFields,
-        chatbotConfig: chatbotConfig
-          ? {
-              ...chatbotConfig,
-              modules: sanitizedChatbotModules
-            }
-          : null,
-        conversationId: activeConversation.id,
-        conversationPhoneNumber: activeConversation.phoneNumber,
-        isFirstContact
-      });
+      if (!isAdminOrInstanceSender) {
+        this.queueConversationTurn(session, finalInputText, {
+          tenantId,
+          instance,
+          targetJid: event.remoteJid,
+          remoteNumber,
+          resolvedContactNumber,
+          contactPhoneNumber: contact.phoneNumber ?? remoteNumber,
+          contactDisplayName: contact.displayName ?? null,
+          contactFields,
+          chatbotConfig: chatbotConfig
+            ? {
+                ...chatbotConfig,
+                modules: sanitizedChatbotModules
+              }
+            : null,
+          conversationId: activeConversation.id,
+          conversationPhoneNumber: activeConversation.phoneNumber,
+          isFirstContact
+        });
+      }
       return;
 
       /*

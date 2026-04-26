@@ -1,0 +1,83 @@
+{
+  "version": "1.0",
+  "timestamp": "2026-04-26T01:00:58.739Z",
+  "phase": null,
+  "phase_name": "Post-Audit Bug Fix Session",
+  "phase_dir": null,
+  "plan": null,
+  "task": null,
+  "total_tasks": 4,
+  "status": "paused",
+  "completed_tasks": [
+    {
+      "id": 1,
+      "name": "Milestone audit v1.0 concluída",
+      "status": "done",
+      "commit": "uncommitted",
+      "notes": "Arquivo .planning/v1.0-MILESTONE-AUDIT.md criado. Status: gaps_found. 18/47 reqs formalmente satisfeitos, 1 bloqueio hard (legacy block service.ts:3479), 5 fases sem VERIFICATION.md."
+    },
+    {
+      "id": 2,
+      "name": "Diagnóstico do bug humanTakeover",
+      "status": "done",
+      "commit": "uncommitted",
+      "notes": "Root cause identificado: queueConversationTurn em service.ts:3641 é chamado sem guard isAdminOrInstanceSender. Mensagens fromMe do atendente passam pelo pipeline do chatbot."
+    }
+  ],
+  "remaining_tasks": [
+    {
+      "id": 3,
+      "name": "Remover bloco legado service.ts:~3479 (adminCommandService.handleCommand)",
+      "status": "not_started",
+      "notes": "if (finalInputText && isVerifiedAprendizadoContinuoAdminSender) { const handled = await this.adminCommandService.handleCommand(...) } — delete até o } de fechamento. Fazer trace da execução antes para confirmar que nenhum fluxo de admin depende desse bloco."
+    },
+    {
+      "id": 4,
+      "name": "Atualizar REQUIREMENTS.md — IA-02 e DOC-03",
+      "status": "not_started",
+      "notes": "IA-02: trocar DUVIDA_GENERICA por PERGUNTA, CONTINUACAO, OUTRO. DOC-03: atualizar texto para refletir abordagem base64 com gate de 5 MB (limitação do Baileys, sem alternativa de URL para arquivos locais)."
+    },
+    {
+      "id": 5,
+      "name": "Corrigir bug humanTakeover — AI respondendo msgs do atendente",
+      "status": "not_started",
+      "notes": "Root cause: service.ts:3641 — queueConversationTurn chamado sem guard isAdminOrInstanceSender. Fix: adicionar 'if (!isAdminOrInstanceSender)' antes de queueConversationTurn na linha 3641. Verificar também se queueConversationTurn (linha 4257) tem guard interno."
+    },
+    {
+      "id": 6,
+      "name": "Commitar v1.0-MILESTONE-AUDIT.md e executar /gsd-complete-milestone v1.0",
+      "status": "not_started",
+      "notes": "Após os 3 fixes acima, commitar o audit file e rodar /gsd-complete-milestone v1.0. Aceitar as lacunas de VERIFICATION.md (fases 2,3,4,6,8) como dívida técnica."
+    }
+  ],
+  "blockers": [],
+  "human_actions_pending": [
+    {
+      "action": "Revisar o trace de execução antes de deletar bloco legado service.ts:3479",
+      "context": "Phase 7 VERIFICATION.md recomenda que um desenvolvedor trace o path completo para confirmar que nenhum fluxo de admin (learning corrections, scheduling) depende do bloco antes de deletar.",
+      "blocking": false
+    }
+  ],
+  "decisions": [
+    {
+      "decision": "Aceitar lacunas de VERIFICATION.md das fases 2,3,4,6,8 como dívida técnica",
+      "rationale": "As fases têm SUMMARY.md confirmando implementação e testes passando. Criar VERIFICATION.md retroativo para todas seria muito trabalho e atrasaria o milestone.",
+      "phase": "audit"
+    },
+    {
+      "decision": "DOC-03: aceitar base64 buffer como implementação final",
+      "rationale": "Baileys não suporta file:// URLs em resolveMediaBuffer. Base64 é a única opção viável para arquivos locais. Gate de 5 MB mitiga o risco de memória.",
+      "phase": "audit"
+    },
+    {
+      "decision": "IA-02: atualizar REQUIREMENTS.md para PERGUNTA/CONTINUACAO/OUTRO",
+      "rationale": "O ROADMAP já usa os mesmos labels da implementação. É um problema de nomenclatura, não de funcionalidade.",
+      "phase": "audit"
+    }
+  ],
+  "uncommitted_files": [
+    ".planning/v1.0-MILESTONE-AUDIT.md"
+  ],
+  "next_action": "1) Ler service.ts entorno de linha 3479 para confirmar remoção segura do bloco legado. 2) Deletar o bloco. 3) Atualizar REQUIREMENTS.md. 4) Corrigir bug humanTakeover em service.ts:3641.",
+  "context_notes": "Sessão focada em: (a) rodar milestone audit v1.0 e (b) investigar bug humanTakeover relatado pelo usuário. O audit criou .planning/v1.0-MILESTONE-AUDIT.md com status gaps_found. A investigação do bug chegou à causa raiz mas não fez o fix (contexto esgotado). O usuário fala português e prefere respostas em pt-BR."
+}

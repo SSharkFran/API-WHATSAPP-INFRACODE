@@ -3601,7 +3601,7 @@ if (event.status === "CONNECTED") {
         }
       }
 
-      if (!isAdminOrInstanceSender) {
+      if (!isAdminOrInstanceSender && !event.messageKey?.fromMe) {
         this.queueConversationTurn(session, finalInputText, {
           tenantId,
           instance,

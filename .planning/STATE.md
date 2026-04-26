@@ -1,82 +1,75 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.0
-milestone_name: milestone
-status: verifying
-stopped_at: Phase 03 fully complete — all 4 plans done. 3 human verifications needed before declaring phase done in staging.
-last_updated: "2026-04-16T20:44:55.264Z"
-last_activity: 2026-04-16
+milestone: v1.1
+milestone_name: (não definido — rodar /gsd-new-milestone)
+status: planning
+stopped_at: v1.0 shipped 2026-04-25 — aguardando definição do v1.1
+last_updated: "2026-04-25T00:00:00.000Z"
+last_activity: 2026-04-25
 progress:
-  total_phases: 8
-  completed_phases: 4
-  total_plans: 21
-  completed_plans: 17
-  percent: 81
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-04-10)
+See: .planning/PROJECT.md (updated 2026-04-25 after v1.0 milestone)
 
 **Core value:** O atendimento via WhatsApp deve funcionar de ponta a ponta de forma confiável — do contato inicial à sessão encerrada — com dados reais, métricas precisas e módulos que degradam graciosamente quando desativados.
-**Current focus:** Phase 04 — next phase
+**Current focus:** Planning next milestone (v1.1)
 
 ## Current Position
 
-Phase: 8
-Plan: 04 (Tasks 1+2 complete — stopped at Task 3 checkpoint:human-verify)
-Status: Executing — Tasks 1 and 2 of Plan 04 committed; awaiting human verification at Task 3
+Phase: —
+Plan: —
+Status: v1.0 shipped. Aguardando definição do próximo milestone via `/gsd-new-milestone`.
 Last activity: 2026-04-25
 
-Progress: [█████████░] 86%
+Progress: [░░░░░░░░░░] 0% (v1.1 not yet scoped)
 
-## Performance Metrics
+## v1.0 Summary
 
-**Velocity:**
+**Shipped:** 2026-04-25
+**Phases:** 8 | **Plans:** 34
+**Archive:** .planning/milestones/v1.0-ROADMAP.md
 
-- Total plans completed: 4
-- Average duration: —
-- Total execution time: 0 hours
+**Key deliverables:**
+- 4 security fixes (CORS, auth bypass, criptografia, session files)
+- CRM com LID/JID, custom fields, tags, histórico
+- AdminIdentityService — admin nunca tratado como cliente
+- Ciclo de vida de sessão com Redis+PG+BullMQ
+- Groq LLM intent classifier
+- Admin commander via WhatsApp (docs, status, métricas)
+- Módulo de aprendizado contínuo com Null Object + confirmation gate
 
-**By Phase:**
-
-| Phase | Plans | Total | Avg/Plan |
-|-------|-------|-------|----------|
-| 05 | 4 | - | - |
-
-**Recent Trend:**
-
-- Last 5 plans: —
-- Trend: —
-
-*Updated after each plan completion*
+**Tech debt for v1.1:**
+- Ativar SESSION_LIFECYCLE_V2 e INTENT_CLASSIFIER_V2 em staging → produção
+- Phase 8 Plan 04 Task 3 (URG-02 dashboard wiring)
 
 ## Accumulated Context
 
 ### Decisions
 
-Decisions are logged in PROJECT.md Key Decisions table.
-Recent decisions affecting current work:
-
-- Roadmap: aprendizadoContinuo must degrade gracefully through ALL phases — Null Object pattern formalized in Phase 8 but interface-based calls start in Phase 3.
-- Roadmap: InstanceOrchestrator extracted incrementally via typed InstanceEventBus domain events — no big-bang rewrite.
-- Roadmap: BullMQ deduplication `extend:true` chosen for session timeouts — O(1) reset on activity, survives restarts.
-- Roadmap: Session state persisted in Redis (live) + PostgreSQL (durable) — never in-process Map only.
+Ver PROJECT.md Key Decisions table para decisões completas do v1.0.
 
 ### Pending Todos
 
-None yet.
+- Ativar `SESSION_LIFECYCLE_V2=true` em staging e validar com timeout de 2 minutos
+- Ativar `INTENT_CLASSIFIER_V2=true` em staging e validar com 50+ expressões de encerramento em pt-BR
+- Completar Phase 8 Plan 04 Task 3 (urgency score dashboard wiring)
 
 ### Blockers/Concerns
 
-- Phase 2: LID resolution timing window after `connection.update: open` is unknown — instrument in staging before declaring CRM-01 done.
-- Phase 4: BullMQ deduplication TTL/delay interaction must be validated in staging with 2-minute timeouts before deploying 10-minute values.
-- Phase 5: pt-BR ENCERRAMENTO classifier accuracy requires 50+ real closure expressions validated in staging.
+Nenhum bloqueio hard para o próximo milestone.
+Feature flags de v1.0 precisam de validação em staging antes de produção.
 
 ## Session Continuity
 
-Last session: 2026-04-25T11:38:00.000Z
-Stopped at: Phase 08 Plan 04 — Tasks 1+2 committed (46ffcb9, 03da9cc). Stopped at Task 3 checkpoint:human-verify (urgency score dashboard verification).
-Resume file: .planning/phases/08-continuous-learning-polish-advanced-features/08-04-SUMMARY.md
+Last session: 2026-04-25
+Stopped at: v1.0 milestone completion
+Resume file: .planning/MILESTONES.md

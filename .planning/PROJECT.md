@@ -1,8 +1,8 @@
-# Infracode WhatsApp Platform — v1 Production
+# Infracode WhatsApp Platform — v1.0 Production
 
 ## What This Is
 
-Plataforma SaaS multi-tenant para automação de atendimento via WhatsApp. Cada tenant gerencia suas próprias instâncias WhatsApp com chatbot com IA, CRM de contatos, módulos configuráveis (aprendizado contínuo, resumo diário, escalação) e um painel de administração. O projeto existe e funciona como protótipo — este milestone é sobre finalizá-lo com qualidade de produção: sem bugs visuais, dados corretos, módulos confiáveis, e pronto para receber clientes reais.
+Plataforma SaaS multi-tenant para automação de atendimento via WhatsApp. Cada tenant gerencia suas próprias instâncias WhatsApp com chatbot com IA (classificador de intenção Groq LLM), CRM de contatos com LID/JID normalizado, ciclo de vida de sessão formalizado, módulos configuráveis (aprendizado contínuo, resumo diário, escalação, follow-up), admin management via WhatsApp, e painel de administração Next.js. Versão 1.0 entregou a plataforma em estado de produção — segura, com dados reais, e com módulos que degradam graciosamente.
 
 ## Core Value
 
@@ -10,76 +10,38 @@ O atendimento via WhatsApp deve funcionar de ponta a ponta de forma confiável �
 
 ## Requirements
 
-### Validated
+### Validated (v1.0)
 
-- ✓ Multi-tenant com isolamento via schemas PostgreSQL — existente
-- ✓ Instâncias WhatsApp via Baileys em Worker Threads — existente
-- ✓ Chatbot com IA + pipeline de processamento de mensagens — existente
-- ✓ CRM básico: lista de contatos, mensagens, tags, notas — existente (parcial)
-- ✓ Módulo de aprendizado contínuo (aprendizadoContinuo) com verificação de admin — existente (parcial)
-- ✓ BullMQ para envio assíncrono e dispatch de webhooks — existente
-- ✓ Painel Next.js com rotas para super-admin, tenant e instâncias — existente
+- ✓ Multi-tenant com isolamento via schemas PostgreSQL — existente — v1.0
+- ✓ Instâncias WhatsApp via Baileys em Worker Threads — existente — v1.0
+- ✓ Chatbot com IA + pipeline de processamento de mensagens — existente — v1.0
+- ✓ BullMQ para envio assíncrono e dispatch de webhooks — existente — v1.0
+- ✓ Painel Next.js com rotas para super-admin, tenant e instâncias — existente — v1.0
+- ✓ CORS com allowlist explícita, auth bypass restrito a development, aiFallbackApiKey criptografado, session files fora do repo — v1.0 Phase 1
+- ✓ CRM com LID/JID normalizado, formatPhone() centralizado, custom fields, tags, histórico cross-session — v1.0 Phase 2
+- ✓ AdminIdentityService como único gate de identificação de admin — v1.0 Phase 3
+- ✓ Ciclo de vida de sessão: estados Redis+PostgreSQL, BullMQ deduplication, humanTakeover persistido — v1.0 Phase 4
+- ✓ Classificador de intenção Groq LLM (ENCERRAMENTO, URGENCIA_ALTA, TRANSFERENCIA_HUMANO, PERGUNTA, CONTINUACAO, OUTRO) — v1.0 Phase 5
+- ✓ Resposta honesta "não sei" + escalação estruturada ao admin — v1.0 Phase 5
+- ✓ ConversationMetric table, SessionMetricsCollector, dashboard metrics, DailySummaryService — v1.0 Phase 6
+- ✓ AdminCommandHandler (Tier 1 prefix + Tier 2 LLM), DocumentDispatchService, AdminActionLog — v1.0 Phase 7
+- ✓ IAprendizadoContinuoModule Null Object, confirmation gate, FollowUpService com 24h window — v1.0 Phase 8
 
-### Active
+### Active (v1.1 candidates)
 
-**CRM — Correções e Polimento**
-- [ ] Resolver bug LID/JID: exibir sempre número real formatado, nunca o código interno `@lid`
-- [ ] Captura de dados personalizados: módulo de campos customizados funcional e salvando corretamente
-- [ ] Histórico completo de conversas: contexto preservado entre sessões, não perde dados
-- [ ] Interface visual polida: sem estados quebrados, sem dados faltando, sem textos brutos
-- [ ] Tags e categorização de contatos funcionando de ponta a ponta
+**Feature Flags → Panel**
+- [ ] `SESSION_LIFECYCLE_V2` promovido para config por instância no painel (atualmente env var)
+- [ ] `INTENT_CLASSIFIER_V2` promovido para módulo no painel (atualmente env var)
 
-**Super Admin (Plataforma)**
-- [ ] Reconhecimento correto do super admin da plataforma (platform owner) em todas as rotas e contextos
-- [ ] Painel super-admin com visibilidade real dos tenants, instâncias e uso
+**Pendências v1.0**
+- [ ] Phase 8 Plan 04 Task 3: urgency score wiring no dashboard (URG-02 — partially shipped)
+- [ ] VERIFICATION.md retroativos para fases 2, 3, 4, 6, 8 (evidência existe em SUMMARY.md)
 
-**Admin do Tenant via WhatsApp**
-- [ ] Identificação confiável do admin do tenant na conversa WhatsApp (nunca tratado como cliente)
-- [ ] Conversa do admin como interface de comando: perguntar sobre funcionamento, status do sistema, métricas
-- [ ] Comandos administrativos via WhatsApp: "envie o contrato para o cliente X", "mande a proposta para fulano"
-- [ ] Geração automática de mensagem personalizada ao enviar documento (com nome do cliente)
-- [ ] Sistema responde a perguntas sobre seu próprio funcionamento quando admin pergunta
-
-**Ciclo de Vida da Sessão**
-- [ ] Detecção automática de encerramento: cliente disse "obrigado", "era só isso", "pode encerrar", etc.
-- [ ] Estados de sessão: `ativa`, `aguardando_cliente`, `confirmacao_enviada`, `encerrada`, `inativa`
-- [ ] Timeout de 10 minutos: enviar mensagem de continuidade "Ainda deseja continuar o atendimento?"
-- [ ] Se cliente não responder após mensagem de confirmação: marcar sessão como `inativa` ou `encerrada`
-- [ ] Registro de horário de início, fim e duração de cada sessão
-- [ ] Encerramento nunca agressivo: sempre confirmar antes de fechar por inatividade
-
-**Métricas e Resumo Diário**
-- [ ] Atendimentos iniciados / encerrados / inativos por dia
-- [ ] Tempo médio de atendimento
-- [ ] Tempo médio até primeira resposta
-- [ ] Atendimentos transferidos para humano
-- [ ] Taxa de continuação após mensagem de inatividade
-- [ ] Documentos enviados
-- [ ] Resumo diário enviado ao admin via WhatsApp (quando módulo ativo)
-
-**Envio de Documentos**
-- [ ] Chatbot pode enviar documentos (PDF, contrato, proposta) durante fluxo
-- [ ] Admin pode solicitar envio via comando no WhatsApp
-- [ ] Registro no histórico: quem solicitou, quando, cliente, documento, status
-
-**Aprendizado Contínuo — Polimento**
-- [ ] Módulo desativado não quebra nenhuma outra funcionalidade (degradação graciosa garantida)
-- [ ] Quando ativo: pergunta ao admin sobre respostas que o sistema não soube dar
-- [ ] Sistema aprende com a resposta do admin e incorpora ao conhecimento
-- [ ] Interface de configuração do módulo clara e funcional no painel
-- [ ] Logs de aprendizado auditáveis
-
-**IA Conversacional — Menos Linear** *(Phase 5 complete — automated checks passed, 3 items pending E2E human testing)*
-- [x] Chatbot entende intenção do cliente — Groq LLM classifier (INTENT_CLASSIFIER_V2) — Validated in Phase 5: intent-detection-conversational-ai
-- [x] Quando não sabe a resposta: informa claramente ao cliente E (se módulo ativo) escala ao admin — Validated in Phase 5
-- [x] Conversa não linear: contorna situações inesperadas em vez de travar — Validated in Phase 5
-- [x] Transferência para humano: marcar conversa como `humanTakeover`, notificar admin — Validated in Phase 5
-
-**Funcionalidades Avançadas (v1 completo)**
-- [ ] Score de urgência por conversa (classifica prioridade)
-- [ ] Dashboard de fila de atendimento
-- [ ] Follow-up automático: lembrete de retorno para cliente
-- [ ] Histórico de ações administrativas (tudo que admin dispara fica registrado)
+**Próximo milestone (a definir)**
+- [ ] Horizontal scaling: autenticação Baileys migrada para banco de dados (ESC-01)
+- [ ] WhatsApp Business API oficial como alternativa ao Baileys (INT-01)
+- [ ] Templates de mensagem certificados para fora da janela 24h (INT-02)
+- [ ] Tags automáticas por tipo de conversa (PAN-01)
 
 ### Out of Scope
 
@@ -87,50 +49,53 @@ O atendimento via WhatsApp deve funcionar de ponta a ponta de forma confiável �
 - SDK público / API pública para terceiros — foco é o painel próprio
 - Integração com CRMs externos (HubSpot, Salesforce) — fora do escopo agora
 - App mobile — painel web é suficiente
+- XState ou biblioteca de state machine — BullMQ + enum PG resolve
+- Time-series database para métricas — PostgreSQL com índice em `(instanceId, startedAt)` é suficiente
 
 ## Context
 
-**Codebase atual:**
+**Codebase atual (v1.0):**
 - Monorepo pnpm com `apps/api` (Fastify), `apps/panel` (Next.js 14), `apps/worker` (BullMQ)
-- `InstanceOrchestrator` em `apps/api/src/modules/instances/service.ts` (5.150 linhas) — deus-objeto que precisa de extração gradual
-- Módulo `aprendizadoContinuo` já existe com verificação por código, múltiplos phones de admin, e envio de resumo diário
-- CRM screen existe em `apps/panel/components/tenant/crm-screen.tsx` com normalização de LID/JID já parcialmente implementada
-- Estados de sessão e ciclo de vida ainda não existem como entidade formal — lógica está espalhada no orchestrator
-- Admin do tenant é identificado via `aprendizadoContinuo.verifiedPhone` — mas o reconhecimento é frágil e às vezes falha
+- `InstanceOrchestrator` em `apps/api/src/modules/instances/service.ts` (~5.200 linhas) — extração incremental via InstanceEventBus em andamento
+- `AdminIdentityService` extraído como serviço único; `ConversationSessionManager`, `SessionLifecycleService`, `DailySummaryService`, `AdminCommandHandler`, `DocumentDispatchService`, `StatusQueryService`, `FollowUpService` todos extraídos
+- `IAprendizadoContinuoModule` interface com Null Object pattern — 0 guards `isEnabled` no código
+- Feature flags: `SESSION_LIFECYCLE_V2=false`, `INTENT_CLASSIFIER_V2=false` (padrão) — funcionalidade implementada, ativação manual para produção
+- Redis para sessões, rate limit, heartbeats, e JID cache de admin
+- BullMQ queues: session-timeout, follow-up, knowledge-synthesis, chatbot processing
+- PostgreSQL: platform schema (Prisma) + tenant schemas (buildTenantSchemaSql + runMigrations)
+- Prisma com dois schemas (platform + tenant), criptografia de API keys, env validação com Zod
 
-**Bugs críticos conhecidos:**
-- LID/JID sendo exibido no lugar do número real em várias partes do CRM
-- Admin do tenant sendo tratado como cliente em alguns fluxos
-- Campos de captura de dados personalizados não salvando corretamente
-- `aiFallbackApiKey` armazenado sem criptografia (segurança)
-- CORS configurado com `origin: true` (segurança)
+**Estado pós-v1.0:**
+- 8 fases, 34 planos completos
+- 487 commits, 41 dias de desenvolvimento
+- Plataforma pronta para receber clientes reais (com ativação de feature flags em staging primeiro)
 
-**Decisões de arquitetura já tomadas:**
-- TypeScript strict em todo o projeto
-- Fastify com injeção de dependência via decorators
-- Prisma com dois schemas (platform + tenant)
-- Redis para filas, rate limit e heartbeats de instâncias
-- BullMQ para operações assíncronas
+**Débito técnico registrado:**
+- `SESSION_LIFECYCLE_V2` e `INTENT_CLASSIFIER_V2` como env vars — ativar em staging, depois produção
+- 5 fases sem VERIFICATION.md retroativo
+- Phase 8 Plan 04 Task 3 (URG-02 dashboard wiring) pendente
 
 ## Constraints
 
-- **Compatibilidade**: Módulo de aprendizado contínuo deve ser 100% opcional — sistema funciona sem ele
-- **Estabilidade**: Refatorações no `InstanceOrchestrator` devem ser graduais — não quebrar o que funciona
-- **Segurança**: Corrigir CORS e criptografia do fallback API key antes de ir para produção
-- **Dados**: Resolver LID/JID em todos os pontos de exibição, não apenas no CRM
+- **Compatibilidade**: Módulo de aprendizado contínuo deve ser 100% opcional — ✓ garantido via Null Object
+- **Estabilidade**: Refatorações no `InstanceOrchestrator` devem ser graduais — continua no v1.1
+- **Segurança**: CORS, criptografia e auth bypass — ✓ corrigidos em Phase 1
+- **Dados**: LID/JID resolvido em todos os pontos de exibição — ✓ fase 2
 
 ## Key Decisions
 
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
-| Aprendizado contínuo como módulo opcional | Sistema deve funcionar sem ele; não criar dependências rígidas | — Pending |
-| Extrair ciclo de vida da sessão do InstanceOrchestrator | God-class com 5k linhas; sessão merece domínio próprio | — Pending |
-| Admin identificado pelo número verificado no módulo aprendizadoContinuo | Já existe infraestrutura de verificação | — Pending |
-| Refatoração gradual (não big-bang) | Evitar quebrar funcionalidades existentes durante a finalização | — Pending |
+| Null Object pattern para `aprendizadoContinuo` | Sistema deve funcionar sem ele; elimina 14+ guards isEnabled | ✓ Good — v1.0 Phase 8 |
+| InstanceEventBus (typed EventEmitter) como seam de desacoplamento | Extração incremental do InstanceOrchestrator sem big-bang rewrite | ✓ Good — v1.0 Phase 4 |
+| BullMQ deduplication `extend:true` para session timeouts | O(1) reset em atividade, survives restarts | ✓ Good — v1.0 Phase 4 |
+| Redis (live) + PostgreSQL (durable) para estado de sessão | Nunca apenas Map in-process; sobrevive a restarts | ✓ Good — v1.0 Phase 4 |
+| Base64 com gate 5 MB para document dispatch | Baileys não suporta file:// URLs locais; gate mitiga risco de memória | ✓ Good — v1.0 Phase 7 |
+| AdminCommandHandler Tier 1 + Tier 2 (prefix + LLM) | Comandos explícitos + linguagem natural sem regex por extensão | ✓ Good — v1.0 Phase 7 |
+| Feature flags SESSION_LIFECYCLE_V2 e INTENT_CLASSIFIER_V2 | Staging validation antes de produção para features de alto risco | ⚠️ Revisit — flags ainda em env var, não no painel |
+| Refatoração gradual do InstanceOrchestrator (não big-bang) | Evitar quebrar funcionalidades existentes durante a finalização | ✓ Good — continua v1.1 |
 
 ## Evolution
-
-Este documento evolui a cada transição de fase e milestone.
 
 **Após cada transição de fase** (via `/gsd-transition`):
 1. Requirements invalidados? → Mover para Out of Scope com motivo
@@ -146,4 +111,4 @@ Este documento evolui a cada transição de fase e milestone.
 4. Atualizar Context com estado atual
 
 ---
-*Last updated: 2026-04-16 — Phase 5 (Intent Detection & Conversational AI) complete*
+*Last updated: 2026-04-25 after v1.0 milestone*

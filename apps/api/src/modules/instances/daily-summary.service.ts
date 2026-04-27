@@ -55,9 +55,12 @@ export class DailySummaryService {
       const summaryKey = `${tenantId}:${instanceId}`;
       const redisDedupeKey = `daily-summary:sent:${summaryKey}:${today}`;
 
-      // Dedup guard BEFORE any DB query — T-06-03-01 mitigation
-      const alreadySentRedis = await this.deps.redis.get(redisDedupeKey).catch(() => null);
-      if (alreadySentRedis || this.dailySummarySentDates.get(summaryKey) === today) continue;
+      // In-memory fast path (same process)
+      if (this.dailySummarySentDates.get(summaryKey) === today) continue;
+
+      // Atomic acquire: SET NX evita race entre múltiplos containers no rolling deploy
+      const acquired = await this.deps.redis.set(redisDedupeKey, '1', 'EX', 86400, 'NX').catch(() => null);
+      if (!acquired) continue; // outro container já adquiriu ou já foi enviado hoje
 
       try {
         const prisma = await this.deps.tenantPrismaRegistry.getClient(tenantId);
@@ -113,7 +116,6 @@ export class DailySummaryService {
         );
 
         this.dailySummarySentDates.set(summaryKey, today);
-        await this.deps.redis.set(redisDedupeKey, '1', 'EX', 86400).catch(() => null);
       } catch (err) {
         this.logger.warn({ err, workerKey }, '[daily-summary] erro ao enviar resumo diario');
       }
